@@ -1,57 +1,60 @@
-GameBaiters Soundboard 1.0.113
+GameBaiters Soundboard 1.0.114
 ==============================
 
-Critical fixes
---------------
-* macOS plugin failed to load on every Mac that didn't have Homebrew
-  FFmpeg installed at the exact /usr/local/Cellar/ffmpeg/... path.
-  The CI build baked Homebrew's absolute install_name into the
-  plugin dylib's dependency list, so dyld couldn't find the FFmpeg
-  libraries on user machines and TeamSpeak 3 marked the plugin as
-  broken. Fixed: CI now rewrites every dep path to @loader_path so
-  the bundled FFmpeg dylibs sitting next to the plugin resolve
-  correctly. Inter-FFmpeg refs (libavformat -> libavcodec etc.)
-  also rewritten. Every binary re-signed ad-hoc after the rewrite.
-  A sanity check rejects the build if any /usr/local or /opt/homebrew
-  path is left in any shipped binary.
-* macOS uninstall script could not find the TS3 base directory.
-  The candidate list missed the canonical macOS path
-  ~/Library/Application Support/TeamSpeak 3 (with the space).
-  Added it as the first candidate; TS3Client and ~/.ts3client kept
-  as fallbacks for legacy installs.
+Critical macOS fix
+------------------
+* Plugin failed to open on every Mac after install. Root cause: the
+  install script and the auto-updater helper script only stripped
+  com.apple.quarantine from a hardcoded list of dylib name patterns
+  (libav*, libsw*, librp_soundboard_fx*). The 1.0.113 bundle ships
+  another ~10 transitive dependencies (libssl, libcrypto, libvpx,
+  libdav1d, libmp3lame, libopus, libSvtAv1Enc, libx264, libx265,
+  libvmaf) which retained the quarantine xattr inherited from the
+  download. macOS Gatekeeper then refused to dlopen them and
+  TeamSpeak 3 reported "failed to open plugin".
 
-Carried over from 1.0.112
+  Fix: install_embedded_macos.sh and the auto-updater __APPLE__
+  helper now run xattr -cr on the entire plugin folder after copy
+  (clears quarantine + provenance + every other xattr). Each
+  Mach-O is also re-signed ad-hoc on the user's machine so
+  Gatekeeper has a fresh, locally-attached signature on every
+  binary the plugin will dlopen.
+
+Reminder for users on Apple Silicon
+-----------------------------------
+* TeamSpeak 3 on macOS is x86_64-only regardless of Mac hardware -
+  it runs through Rosetta 2 on Apple Silicon. The plugin therefore
+  ships as x86_64; that matches what TS3 expects when loading
+  plugins under Rosetta.
+
+Carried over from 1.0.113
 -------------------------
-* Windows plugin ships as a single self-contained DLL with FFmpeg
-  statically linked in. No runtime FFmpeg DLL files alongside the
-  plugin.
-* macOS install bundle Install_Soundboard_macOS.zip is built and
-  attached to every release.
-* Checkbox indicators no longer render the playback arrow icon when
-  toggled.
-* Per-slot FX slider labels and value readouts at 9-10 pt regular
-  weight; "Reset" button widened so the text never gets clipped.
+* Recursive dependency bundler with @loader_path rewrites. Plugin
+  dylib + every Homebrew transitive dep ship together; nothing
+  references /usr/local or /opt/homebrew at runtime.
+* Qt framework refs rewritten to @rpath/<framework>.framework/...
+  so TS3.app's Qt frameworks resolve at load time.
+* Strip ad-hoc signature before install_name_tool changes; final
+  3-pass sweep catches any silent rewrite failures.
 
 Existing fork features
 ----------------------
 * Pitch / Speed / Pitch+Speed / Reverb sliders
-* Earrape protection (local hard-limiter)
+* Earrape protection
 * Remember pitch / speed / reverb per slot
 * Skip +/- 5s and +/- 10s transport
 * Real-time waveform with click-to-seek
-* Multi-soundboard mode (up to 5 slots playing concurrently)
+* Multi-soundboard mode (up to 5 slots)
 * Update channel served from this gamebaiters branch on GitHub
-* Auto-updater that closes TeamSpeak, removes the previous binary,
-  preserves your rp_soundboard.ini config, then runs the installer
 
 Installation
 ------------
 
 * Windows: download rp_soundboard_fx_<version>.ts3_plugin and
   double-click. TeamSpeak's bundled installer takes over.
-* macOS: download Install_Soundboard_macOS.zip, unzip, double-click
-  Install Soundboard.app. Right-click -> Open the first time if macOS
-  Gatekeeper blocks it.
+* macOS: download Install_Soundboard_macOS.zip, unzip, RIGHT-CLICK
+  Install Soundboard.app -> Open the first time so macOS Gatekeeper
+  accepts the ad-hoc signature.
 * Linux: from your TeamSpeak install directory run
     LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH ./package_inst <path-to-.ts3_plugin>
 

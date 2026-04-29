@@ -272,9 +272,11 @@ bool UpdaterWindow::executeFile()
 	out << "/usr/bin/ditto -x -k \"$PACKAGE\" \"$TMP\"\n";
 	out << "if [ -d \"$TMP/plugins\" ]; then\n";
 	out << "    cp -R \"$TMP/plugins/.\" \"$PLUGIN_DIR/\"\n";
-	out << "    find \"$PLUGIN_DIR\" -maxdepth 1 -name 'librp_soundboard_fx*.dylib' -exec xattr -dr com.apple.quarantine {} + 2>/dev/null || true\n";
-	out << "    find \"$PLUGIN_DIR\" -maxdepth 1 -name 'libav*.dylib'  -exec xattr -dr com.apple.quarantine {} + 2>/dev/null || true\n";
-	out << "    find \"$PLUGIN_DIR\" -maxdepth 1 -name 'libsw*.dylib'  -exec xattr -dr com.apple.quarantine {} + 2>/dev/null || true\n";
+	// Clear every xattr recursively (quarantine + provenance). Whitelisting
+	// by filename misses bundled transitive deps like libssl/libcrypto/...
+	out << "    xattr -cr \"$PLUGIN_DIR\" 2>/dev/null || true\n";
+	// Re-sign ad-hoc each Mach-O so Gatekeeper accepts the fresh deps
+	out << "    find \"$PLUGIN_DIR\" -maxdepth 1 -name '*.dylib' -print0 2>/dev/null | xargs -0 -I {} codesign --force -s - {} 2>/dev/null || true\n";
 	out << "fi\n";
 #else
 	out << "pkill -9 -x ts3client_linux_amd64 2>/dev/null || true\n";

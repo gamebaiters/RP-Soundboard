@@ -246,6 +246,11 @@ jobs:
   package-and-release:
     needs: [build-windows, build-linux, build-macos]
     runs-on: ubuntu-22.04
+    permissions:
+      # softprops/action-gh-release uses GITHUB_TOKEN; default-token has
+      # no write access on forks. Granting contents:write lets the job
+      # create / update the release + upload assets via the API.
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -312,7 +317,7 @@ jobs:
           body_path: ${{ steps.notes.outputs.NOTES_PATH }}
           files: |
             rp_soundboard_fx_*.ts3_plugin
-            uninstall_soundboard.bat
-            uninstall_soundboard.sh
-            uninstall_soundboard_macos.sh
+            dist/uninstall_soundboard.bat
+            dist/uninstall_soundboard.sh
+            dist/uninstall_soundboard_macos.sh
           fail_on_unmatched_files: false

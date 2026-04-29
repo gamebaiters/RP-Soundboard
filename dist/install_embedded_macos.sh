@@ -46,6 +46,10 @@ rm -f "$PLUGIN_DIR/librp_soundboard_fx_mac.dylib" \
       "$PLUGIN_DIR/rp_soundboard_fx_mac.dylib" \
       "$PLUGIN_DIR/rp_soundboard_fx_mac.so"
 
+# Wipe every bundled dep .dylib from the prior install so we don't end
+# up with stale FFmpeg/transitive libs alongside fresh ones.
+rm -f "$PLUGIN_DIR"/lib*.dylib 2>/dev/null || true
+
 cp -R "$TMP_DIR/plugins/." "$PLUGIN_DIR/"
 
 find "$PLUGIN_DIR" -maxdepth 1 -name 'librp_soundboard_fx*.dylib' -exec xattr -dr com.apple.quarantine {} + >/dev/null 2>&1 || true

@@ -254,95 +254,93 @@ jobs:
       - name: Build
         run: cmake --build build -j$(sysctl -n hw.ncpu)
 
-      - name: install_name_tool Qt rpath fixups
-        run: |
-          DYLIB="$(find build -name 'librp_soundboard_fx*_mac.dylib' | head -1)"
-          if [ -z "$DYLIB" ]; then
-              echo "dylib not found"; ls -la build; exit 1
-          fi
-          for q in Core Widgets Gui Network; do
-              install_name_tool -change "libQt5${q}.dylib" "@rpath/libQt5${q}.dylib" "$DYLIB" || true
-              install_name_tool -change "@rpath/QtCore.framework/Versions/5/QtCore" "@rpath/libQt5Core.dylib" "$DYLIB" || true
-          done
-
-      - name: Stage macOS artifact layout (with bundled FFmpeg dylibs)
+      - name: Stage macOS artifact layout (recursive bundle + rpath rewrites)
         run: |
           set -e
           mkdir -p stage/plugins/rp_soundboard
-          DYLIB="$(find build -name 'librp_soundboard_fx*_mac.dylib' | head -1)"
-          cp "$DYLIB" stage/plugins/librp_soundboard_fx_mac.dylib
+          DYLIB_SRC="$(find build -name 'librp_soundboard_fx*_mac.dylib' | head -1)"
+          if [ -z "$DYLIB_SRC" ]; then
+              echo "dylib not found"; ls -la build; exit 1
+          fi
+          cp "$DYLIB_SRC" stage/plugins/librp_soundboard_fx_mac.dylib
           PLUGIN="stage/plugins/librp_soundboard_fx_mac.dylib"
 
-          # Copy each FFmpeg dylib (resolve symlinks so we get the real
-          # versioned file) and set its own LC_ID_DYLIB to @loader_path.
-          # We rewrite the dependency paths in a second pass below.
-          for lib in libavcodec libavformat libavfilter libavutil libswresample libswscale; do
-              for f in /usr/local/opt/ffmpeg/lib/${lib}.*.dylib; do
-                  [ -e "$f" ] || continue
-                  # Skip the bare-named symlinks (we want libavcodec.62.dylib not libavcodec.dylib)
-                  [ -L "$f" ] && continue
-                  base="$(basename "$f")"
-                  cp "$f" "stage/plugins/${base}"
-                  chmod 644 "stage/plugins/${base}"
-                  install_name_tool -id "@loader_path/${base}" "stage/plugins/${base}"
-              done
-          done
-
-          # CRITICAL: rewrite every dep reference inside the plugin dylib
-          # AND inside each FFmpeg dylib (FFmpeg libs ref each other) from
-          # the absolute /usr/local/Cellar/.../<libname> path Homebrew
-          # baked in to @loader_path/<libname>. Without this the user's
-          # Mac (which doesn't have /usr/local/Cellar/ffmpeg/...) hits
-          # 'image not found' on plugin load and TS3 marks it broken.
-          rewrite_deps() {
+          # Recursive bundler. Walks otool -L on a target, copies every
+          # /usr/local or /opt/homebrew dep next to the plugin, rewrites
+          # its install_name to @loader_path, and recurses on the copy
+          # so transitive deps (libavcodec -> libvpx -> ...) come along.
+          # Skips Qt frameworks (resolved via TS3.app rpath at runtime),
+          # already-relative paths, and system frameworks.
+          bundle_deps() {
               local target="$1"
-              # Collect every dep that references a Cellar/ffmpeg or
-              # /usr/local/opt/ffmpeg path
-              otool -L "$target" | awk 'NR>1 {print $1}' | while read -r dep; do
+              local deps base real
+              deps="$(otool -L "$target" | awk 'NR>1 {print $1}')"
+              while IFS= read -r dep; do
+                  [ -z "$dep" ] && continue
                   case "$dep" in
-                      */ffmpeg/*/lib/lib*.dylib|*/opt/ffmpeg/lib/lib*.dylib|*libav*.dylib|*libsw*.dylib|*libpostproc*.dylib)
+                      *Qt*.framework*)                                 continue ;;
+                      @loader_path/*|@rpath/*|@executable_path/*)      continue ;;
+                      /usr/lib/*|/System/*)                            continue ;;
+                  esac
+                  case "$dep" in
+                      /usr/local/*|/opt/homebrew/*)
                           base="$(basename "$dep")"
-                          # only rewrite if a matching file is in stage/plugins/
-                          if [ -e "stage/plugins/${base}" ]; then
-                              install_name_tool -change "$dep" "@loader_path/${base}" "$target" || true
+                          if [ ! -e "stage/plugins/${base}" ]; then
+                              real="$(/usr/bin/perl -MCwd -e 'print Cwd::abs_path(shift)' "$dep" 2>/dev/null || echo "$dep")"
+                              if [ -e "$real" ] && [ -f "$real" ]; then
+                                  cp "$real" "stage/plugins/${base}"
+                                  chmod 644 "stage/plugins/${base}" || true
+                                  install_name_tool -id "@loader_path/${base}" "stage/plugins/${base}" || true
+                                  bundle_deps "stage/plugins/${base}"
+                              fi
                           fi
+                          install_name_tool -change "$dep" "@loader_path/${base}" "$target" || true
                           ;;
                   esac
-              done
+              done <<< "$deps"
           }
 
-          rewrite_deps "$PLUGIN"
-          for f in stage/plugins/lib{av,sw}*.dylib; do
-              [ -e "$f" ] || continue
-              rewrite_deps "$f"
+          bundle_deps "$PLUGIN"
+
+          # Rewrite Qt framework paths in plugin to @rpath form. TS3.app
+          # on macOS ships QtCore.framework / QtGui.framework / etc. in
+          # its Frameworks dir and adds that dir to LC_RPATH on the host
+          # binary, so plugins loaded by TS3 inherit the rpath and find
+          # @rpath/QtCore.framework/Versions/5/QtCore at runtime.
+          for qtdep in $(otool -L "$PLUGIN" | awk 'NR>1 {print $1}' | grep -E 'Qt[A-Za-z]+\.framework' || true); do
+              rel="$(echo "$qtdep" | grep -oE 'Qt[A-Za-z]+\.framework/.+')"
+              [ -n "$rel" ] && install_name_tool -change "$qtdep" "@rpath/${rel}" "$PLUGIN" || true
           done
 
-          # Re-sign every binary we touched (install_name_tool invalidates
-          # the existing ad-hoc signature). On Apple Silicon hosts targeting
-          # x86_64 the runner needs codesign with --identifier to avoid a
-          # warning, but ad-hoc -s - works fine.
-          codesign --force -s - "$PLUGIN"
-          for f in stage/plugins/lib{av,sw}*.dylib; do
+          # Re-sign every modified binary - install_name_tool invalidates
+          # existing ad-hoc signatures.
+          for f in "$PLUGIN" stage/plugins/*.dylib; do
               [ -e "$f" ] || continue
-              codesign --force -s - "$f"
+              codesign --force -s - "$f" 2>/dev/null || true
           done
 
-          # Sanity check: no /usr/local or Cellar paths should remain in
-          # any dylib we ship. Fail fast if any do.
-          echo "--- Final dependency list (should only show @loader_path/@rpath/system libs) ---"
-          for f in "$PLUGIN" stage/plugins/lib{av,sw}*.dylib; do
+          # Sanity check: no /usr/local or /opt/homebrew refs left except
+          # inside Qt framework paths (those are correct - rewritten to
+          # @rpath/QtCore.framework/...).
+          echo "--- Final dependency list ---"
+          for f in "$PLUGIN" stage/plugins/*.dylib; do
               [ -e "$f" ] || continue
               echo "=== $f ==="
               otool -L "$f"
           done
-          if otool -L "$PLUGIN" stage/plugins/lib{av,sw}*.dylib 2>/dev/null | grep -E '/usr/local/(Cellar|opt)|/opt/homebrew'; then
-              echo "ERROR: bundled binaries still reference Homebrew absolute paths. Aborting."
+          BAD="$(otool -L "$PLUGIN" stage/plugins/*.dylib 2>/dev/null | grep -E '(/usr/local/|/opt/homebrew/)' | grep -v 'Qt[A-Za-z]+\.framework' || true)"
+          if [ -n "$BAD" ]; then
+              echo "ERROR: bundled binaries still reference Homebrew absolute paths:" >&2
+              echo "$BAD" >&2
               exit 1
           fi
 
           if [ -d deploy/plugins/rp_soundboard ]; then
               cp -r deploy/plugins/rp_soundboard/* stage/plugins/rp_soundboard/
           fi
+
+          echo "--- Bundled binaries ---"
+          ls -la stage/plugins/
 
       - uses: actions/upload-artifact@v4
         with:

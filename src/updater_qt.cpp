@@ -254,13 +254,16 @@ bool UpdaterWindow::executeFile()
 	out << "[ -z \"$TARGET_BASE\" ] && TARGET_BASE=\"$HOME/Library/Application Support/TeamSpeak 3\"\n";
 	out << "PLUGIN_DIR=\"$TARGET_BASE/plugins\"\n";
 	out << "mkdir -p \"$PLUGIN_DIR\"\n";
-	// Remove every prior macOS variant (preserve rp_soundboard.ini).
+	// Remove every prior macOS variant + every bundled dep dylib so
+	// stale FFmpeg / transitive libs from the previous install don't
+	// linger next to the fresh ones (preserve rp_soundboard.ini).
 	out << "for lib in librp_soundboard_fx_mac.dylib librp_soundboard_fx_mac.so \\\n";
 	out << "           rp_soundboard_fx_mac.dylib    rp_soundboard_fx_mac.so   \\\n";
 	out << "           librp_soundboard_fx.dylib     rp_soundboard_fx.dylib    \\\n";
 	out << "           librp_soundboard.dylib        libsoundboard.dylib; do\n";
 	out << "    rm -f \"$PLUGIN_DIR/$lib\" 2>/dev/null\n";
 	out << "done\n";
+	out << "rm -f \"$PLUGIN_DIR\"/lib*.dylib 2>/dev/null || true\n";
 	// Direct extraction: TS3.app on macOS does not ship a separate
 	// package_inst binary, and `open` depends on a fragile file association.
 	// `ditto -x -k` extracts a renamed-zip .ts3_plugin reliably.

@@ -1,40 +1,55 @@
-GameBaiters Soundboard 1.0.21 - auto-update verification build
-============================================================
+GameBaiters Soundboard
+======================
 
-This release exists primarily to verify that the auto-updater pipeline
-introduced in 1.0.20 actually triggers an update for clients running an
-earlier build.
+What this fork adds compared to the original RP Soundboard
+----------------------------------------------------------
 
-What changed since 1.0.20
--------------------------
-* Build number bumped 1837 -> 1838 so version.xml advertises an update
-* No functional code changes vs 1.0.20
+Audio effects (per playback)
+* Pitch slider                shift pitch independently of speed (0.5x to 2.0x)
+* Speed slider                change playback rate without altering pitch (0.5x to 2.0x)
+* Pitch + Speed slider        linked control for the classic chipmunk / slow-mo
+                              effect, with Sync/Reset toggle
+* Reverb slider               real-time reverb intensity (1.0x to 20.0x)
+* Earrape protection          local hard-limiter to prevent ear-blasting peaks;
+                              only affects what YOU hear, remote listeners get
+                              the unaltered stream
+* Remember pitch / speed /    per-button toggle: the slot keeps its last FX
+  reverb                      values across plugin restarts and config switches
 
-How to verify the auto-updater works
-------------------------------------
-* Install rp_soundboard_fx_1.0.20.ts3_plugin on TeamSpeak 3 first
-* Restart TS3, enable the plugin, open the Soundboard window once so
-  the UpdateChecker fires
-* Within ~10 seconds the plugin contacts:
-    raw.githubusercontent.com/gamebaiters/RP-Soundboard/gamebaiters/version.xml
-* It reads <latestVersion>1838</latestVersion>, compares to the embedded
-  TS3SB_VERSION_BUILD=1837 of the running 1.0.20 build, sees an update
-* A dialog appears: "A new version of GameBaiters - Soundboard is
-  available (1.0.21). Would you like to download and install it?"
-  (Show details opens this release-notes.txt)
-* Click Yes -> the new .ts3_plugin downloads -> the auto-updater writes
-  %TEMP%\rpsb_update_helper.bat -> helper closes TS3, deletes the prior
-  DLL variant, hands the new .ts3_plugin to package_inst.exe
-* package_inst installs 1.0.21 -> user re-opens TS3 manually
+Transport controls
+* Skip +/- 5s and +/- 10s     jump forward or backward inside the playing sample
+* Real-time waveform view     live waveform with click-to-seek; drag to scrub
+                              the playhead anywhere in the file
 
-Same fixes carry over from 1.0.20
----------------------------------
-* TS3 Settings -> Plugins -> Uninstall now actually deletes the DLL
-* SampleVisualizerThread is hard-stopped during shutdown
-* Qt event queue drained before DLL unload
-* rpsb_debug.log file handle closed cleanly
-* Legacy upstream DLLs swept on plugin init
-* Auto-updater helper preserves rp_soundboard.ini config
-* Skip buttons (+5s/-5s/+10s/-10s) widened, dark theme restored
-* Uninstall scripts ship 3-way backup prompt (Full/Config/None)
-  and use cmd /k so the window stays open after completion
+Multi-soundboard mode
+* Up to 5 soundboards play simultaneously (slots 0 to 4)
+* Each slot has independent buttons, hotkeys, volume, pitch, speed,
+  reverb, earrape protection toggle and remember-FX toggle
+* Per-sound settings dialog redesigned around the slot model
+
+Quality of life
+* Forced dark theme across all plugin dialogs
+* Skip buttons (+5s, -5s, +10s, -10s) widened and rendered in a larger font
+  so labels are fully readable
+* Plugin shutdown reliably releases the DLL so TeamSpeak's
+  Settings -> Plugins -> Uninstall actually deletes the file
+* Auto-updater closes TeamSpeak, removes the previous version's DLL,
+  hands off to the TS3 installer, and preserves your rp_soundboard.ini config
+* Update channel served from this GitHub release page
+  (no more dependency on third-party servers)
+
+Installation
+* Windows: double-click rp_soundboard_fx_<version>.ts3_plugin and follow
+  the TeamSpeak installer prompts
+* Linux: from your TeamSpeak install dir run
+    LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH ./package_inst <path-to-.ts3_plugin>
+* macOS: open the .ts3_plugin and TeamSpeak will install it via package_inst
+
+Uninstall scripts (optional, for a fully clean removal)
+* uninstall_soundboard.bat        Windows
+* uninstall_soundboard.sh         Linux
+* uninstall_soundboard_macos.sh   macOS
+
+Default behaviour: keeps your rp_soundboard.ini config so a fresh install
+reuses your existing soundboard layout. Choose [Y] at the prompt for a
+full wipe.

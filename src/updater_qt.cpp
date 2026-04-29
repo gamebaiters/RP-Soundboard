@@ -188,14 +188,6 @@ void UpdaterWindow::onFinished()
 bool UpdaterWindow::executeFile()
 {
 #ifdef _WIN32
-	// Write a helper batch to %TEMP%. The helper:
-	//   1. Waits for TS3 to release the plugin DLL
-	//   2. Force-kills any lingering ts3client_*.exe
-	//   3. Deletes every prior plugin DLL variant (legacy + current name)
-	//      The user config rp_soundboard.ini at the TS3 root is intentionally
-	//      left untouched so settings survive the update.
-	//   4. Launches package_inst.exe via file association on the new .ts3_plugin
-	// The helper runs detached so it survives this DLL being unloaded.
 	QString helperPath = QDir::temp().absoluteFilePath("rpsb_update_helper.bat");
 	QFile helper(helperPath);
 	if (!helper.open(QIODevice::WriteOnly | QIODevice::Truncate))
@@ -212,18 +204,81 @@ bool UpdaterWindow::executeFile()
 	out << "taskkill /F /IM ts3client_win64.exe >nul 2>&1\r\n";
 	out << "taskkill /F /IM ts3client_win32.exe >nul 2>&1\r\n";
 	out << "timeout /t 1 /nobreak >nul\r\n";
-	out << "REM Remove prior DLL variants (rp_soundboard.ini config is preserved)\r\n";
 	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard_fx_win64.dll\" 2>nul\r\n";
 	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard_fx_win32.dll\" 2>nul\r\n";
 	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard_win64.dll\" 2>nul\r\n";
 	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard_win32.dll\" 2>nul\r\n";
 	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard.dll\" 2>nul\r\n";
-	out << "REM Hand off to TeamSpeak's package_inst via file association\r\n";
 	out << "start \"\" \"" << tplugin << "\"\r\n";
 	helper.close();
 
 	bool status = QProcess::startDetached("cmd.exe",
 		QStringList() << "/c" << helperPath);
+	if (!status)
+	{
+		logError("Could not start update helper at %s", helperPath.toUtf8().data());
+		return false;
+	}
+	return true;
+#elif defined(__linux__) || defined(__APPLE__)
+	// Unix auto-update helper. The script:
+	//   1. Waits for TS3 to release the plugin library
+	//   2. Force-kills any lingering ts3client process (Linux + macOS)
+	//   3. Deletes every prior plugin .so / .dylib variant
+	//      Config rp_soundboard.ini at the TS3 root is preserved.
+	//   4. Hands off to TS3's package_inst (Linux) or `open` (macOS)
+	QString helperPath = QDir::temp().absoluteFilePath("rpsb_update_helper.sh");
+	QFile helper(helperPath);
+	if (!helper.open(QIODevice::WriteOnly | QIODevice::Truncate))
+	{
+		logError("Could not write update helper to %s", helperPath.toUtf8().data());
+		return false;
+	}
+	QString tplugin = m_fileinfo.absoluteFilePath();
+	QTextStream out(&helper);
+	out << "#!/usr/bin/env bash\n";
+	out << "# GameBaiters Soundboard auto-update helper (generated at runtime)\n";
+	out << "set -u\n";
+	out << "sleep 2\n";
+#ifdef __APPLE__
+	out << "osascript -e 'tell application \"TeamSpeak 3\" to quit' 2>/dev/null || true\n";
+	out << "sleep 1\n";
+	out << "pkill -9 -x ts3client 2>/dev/null || true\n";
+	out << "pkill -9 -if 'TeamSpeak 3' 2>/dev/null || true\n";
+#else
+	out << "pkill -9 -x ts3client_linux_amd64 2>/dev/null || true\n";
+	out << "pkill -9 -x ts3client_linux_x86 2>/dev/null || true\n";
+#endif
+	out << "sleep 1\n";
+	out << "for base in \"$HOME/.ts3client\" \"$HOME/Library/Application Support/TS3Client\"; do\n";
+	out << "    [ -d \"$base/plugins\" ] || continue\n";
+	out << "    for lib in \\\n";
+	out << "        librp_soundboard_fx.so   librp_soundboard.so   libsoundboard.so   \\\n";
+	out << "        rp_soundboard_fx.so      rp_soundboard.so      soundboard.so      \\\n";
+	out << "        librp_soundboard_fx.dylib librp_soundboard.dylib libsoundboard.dylib \\\n";
+	out << "        rp_soundboard_fx.dylib   rp_soundboard.dylib   soundboard.dylib   \\\n";
+	out << "        librp_soundboard_fx_linux_amd64.so librp_soundboard_linux_amd64.so; do\n";
+	out << "        rm -f \"$base/plugins/$lib\" 2>/dev/null\n";
+	out << "    done\n";
+	out << "done\n";
+#ifdef __APPLE__
+	out << "open \"" << tplugin << "\" 2>/dev/null || true\n";
+#else
+	out << "if command -v package_inst >/dev/null 2>&1; then\n";
+	out << "    package_inst \"" << tplugin << "\"\n";
+	out << "elif command -v xdg-open >/dev/null 2>&1; then\n";
+	out << "    xdg-open \"" << tplugin << "\"\n";
+	out << "else\n";
+	out << "    echo \"package_inst not found in PATH; install manually: " << tplugin << "\" >&2\n";
+	out << "fi\n";
+#endif
+	helper.close();
+
+	helper.setPermissions(helper.permissions()
+		| QFile::ExeUser | QFile::ExeGroup | QFile::ExeOther);
+
+	bool status = QProcess::startDetached("/bin/bash",
+		QStringList() << helperPath);
 	if (!status)
 	{
 		logError("Could not start update helper at %s", helperPath.toUtf8().data());

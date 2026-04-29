@@ -1,21 +1,32 @@
-GameBaiters Soundboard 1.0.110
+GameBaiters Soundboard 1.0.111
 ==============================
 
-UI fixes
---------
-* Checkbox indicators no longer render the playback arrow icon when
-  toggled - they now show a clean filled square with the accent
-  color, matching the rest of the dark theme.
-* Text labels around per-slot FX sliders (Pitch / Speed / Combined /
-  Reverb) bumped from 7-8 pt bold to 9-10 pt regular weight and given
-  a wider fixed width. Labels are now legible on every screen scale
-  and no longer look cramped or smudged.
-* Per-slot Reset button label expanded from "Rst" to "Reset" with
-  matching width so the text never gets clipped.
-* Per-slot Sync checkbox font size matched to the rest of the FX row.
+Critical fix
+------------
+* Windows plugin failed to load on 1.0.110. The CI built against
+  FFmpeg 8.x master and did not bundle the FFmpeg shared DLLs into
+  the .ts3_plugin, so on the user side TeamSpeak found the plugin
+  binary but could not resolve any av_* symbol and silently dropped
+  the plugin. Fixed by:
+  - Pinning the CI Windows build to FFmpeg n6.1.1 (avcodec-60,
+    avformat-60, avutil-58, swresample-4, avfilter-9) so the SO
+    names match the DllMain delay-load pragmas in plugin.cpp.
+  - Bundling avcodec-60.dll / avformat-60.dll / avutil-58.dll /
+    swresample-4.dll / avfilter-9.dll / swscale-7.dll inside
+    plugins/rp_soundboard/ so DllMain's LoadLibraryExW preload
+    succeeds.
 
-Existing fork features carried over
------------------------------------
+UI fixes (carried over from 1.0.110)
+------------------------------------
+* Checkbox indicators no longer render the playback arrow icon when
+  toggled - now show a clean filled square in the accent color.
+* Per-slot FX slider labels and value readouts bumped from 7-8 pt
+  bold to 9-10 pt regular so they are legible at every screen scale.
+* Per-slot Reset button label expanded from "Rst" to "Reset"; width
+  widened so the text never gets clipped.
+
+Existing fork features
+----------------------
 * Pitch / Speed / Pitch+Speed / Reverb sliders
 * Earrape protection (local hard-limiter)
 * Remember pitch / speed / reverb per slot

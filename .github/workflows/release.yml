@@ -44,24 +44,31 @@ jobs:
         with:
           arch: x64
 
-      - name: Download prebuilt FFmpeg (BtbN GitHub Releases, LGPL shared)
+      - name: Download prebuilt FFmpeg (BtbN GitHub Releases, n6.1.1 LGPL shared)
         shell: pwsh
         run: |
-          # BtbN/FFmpeg-Builds publishes a "latest" tag with stable filenames.
-          # Using LGPL-shared so we link dynamically and stay license-clean.
-          $url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl-shared.zip'
+          # MUST pin to FFmpeg 6.x because plugin.cpp DllMain delay-loads
+          # avutil-58.dll / swresample-4.dll / avcodec-60.dll / avformat-60.dll
+          # / avfilter-9.dll - those are FFmpeg 6.x SO names. BtbN master
+          # ships FFmpeg 8.x (avcodec-62 etc.) which would not match the
+          # DELAYLOAD pragmas and result in a broken plugin that does not
+          # load on the user side. Use the n6.1.1 build under the 'latest'
+          # tag - that filename is contractually stable.
+          $url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n6.1.1-latest-win64-lgpl-shared.zip'
           Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip -UseBasicParsing
           Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-extract -Force
           $root = Get-ChildItem ffmpeg-extract -Directory | Select-Object -First 1
           New-Item -ItemType Directory -Path "ffmpeg/lib_win_x64" -Force | Out-Null
           New-Item -ItemType Directory -Path "ffmpeg/include"     -Force | Out-Null
+          New-Item -ItemType Directory -Path "ffmpeg/bin"         -Force | Out-Null
           Copy-Item "$($root.FullName)/lib/*"     -Destination "ffmpeg/lib_win_x64/" -Recurse -Force
           Copy-Item "$($root.FullName)/include/*" -Destination "ffmpeg/include/"     -Recurse -Force
+          Copy-Item "$($root.FullName)/bin/*.dll" -Destination "ffmpeg/bin/"         -Force
           # also place DLLs next to the lib so cmake's find_library is happy
           Copy-Item "$($root.FullName)/bin/*.dll" -Destination "ffmpeg/lib_win_x64/" -Force
           "FFmpeg layout:"
           Get-ChildItem ffmpeg/lib_win_x64 | Format-Table Name,Length
-          Get-ChildItem ffmpeg/include | Format-Table Name
+          Get-ChildItem ffmpeg/bin         | Format-Table Name,Length
 
       - name: Configure CMake
         run: cmake -G "NMake Makefiles" -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_INSTALL_PREFIX=install
@@ -77,6 +84,12 @@ jobs:
           if (Test-Path deploy/plugins/rp_soundboard) {
               Copy-Item -Recurse deploy/plugins/rp_soundboard/* stage/plugins/rp_soundboard/
           }
+          # Bundle FFmpeg shared DLLs alongside the asset folder so the
+          # DllMain LoadLibraryExW preload finds them. Without this the
+          # plugin DLL loads on Windows but av_* symbols are unresolved
+          # and TS3 silently fails to instantiate the plugin.
+          Copy-Item ffmpeg/bin/*.dll stage/plugins/rp_soundboard/ -Force
+          Get-ChildItem stage/plugins -Recurse | Format-Table FullName,Length
 
       - uses: actions/upload-artifact@v4
         with:

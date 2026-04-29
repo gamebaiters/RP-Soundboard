@@ -77,11 +77,16 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 # Turn fPIC on
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Resolve a working python interpreter. On macOS / many Linux distros only
+# `python3` exists in PATH; on Windows the launcher is `python`. find_package
+# handles both - it sets Python_EXECUTABLE to whichever it finds first.
+find_package(Python COMPONENTS Interpreter REQUIRED)
+
 # version advance script (generates version.h file)
 add_custom_target(autogenFiles ALL
 	BYPRODUCTS "src/version/version.h" "deploy/package.ini"
 	COMMENT "running autogen file script"
-	COMMAND python version.py
+	COMMAND ${Python_EXECUTABLE} version.py
 	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 

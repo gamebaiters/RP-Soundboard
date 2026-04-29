@@ -44,39 +44,76 @@ jobs:
         with:
           arch: x64
 
-      - name: Download prebuilt FFmpeg (BtbN GitHub Releases, n6.1.1 LGPL shared)
+      # MSYS2 supplies the make/nasm/perl tools FFmpeg's configure needs
+      # while still letting the MSVC env (cl.exe + lib.exe) come through
+      # via path-type:inherit. The combination produces real .lib STATIC
+      # archives that link cleanly into the MSVC plugin DLL - no runtime
+      # FFmpeg DLL dependencies, single self-contained binary.
+      - name: Setup MSYS2 (host toolchain for FFmpeg configure)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          install: make nasm perl pkg-config diffutils
+          path-type: inherit
+          update: false
+
+      - name: Cache static FFmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: ffmpeg-static
+          key: ffmpeg-static-msvc-x64-n6.1.1-v2
+
+      - name: Build static FFmpeg with MSVC toolchain
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: |
+          set -e
+          git clone --depth 1 --branch n6.1.1 https://git.ffmpeg.org/ffmpeg.git ffmpeg-src
+          cd ffmpeg-src
+          # --toolchain=msvc tells configure to use cl.exe + lib.exe so the
+          # produced archives are MSVC-compatible static .lib files.
+          ./configure \
+              --toolchain=msvc \
+              --prefix=$(pwd)/../ffmpeg-static \
+              --enable-static --disable-shared \
+              --disable-programs --disable-doc --disable-debug \
+              --disable-everything \
+              --enable-decoder=mp3,mp3float,aac,vorbis,opus,flac,pcm_s16le,pcm_f32le,pcm_s24le,pcm_s32le,wmav2,wmapro,ac3,eac3 \
+              --enable-demuxer=mp3,wav,ogg,flac,mov,matroska,avi,aac,asf,flv \
+              --enable-protocol=file \
+              --enable-parser=mpegaudio,vorbis,opus,flac,aac,ac3 \
+              --enable-filter=aresample,aformat,aeval,anull,silenceremove
+          make -j$(nproc) V=0
+          make install
+          ls -la ../ffmpeg-static/lib
+
+      - name: Set up include + lib hints
         shell: pwsh
         run: |
-          # MUST pin to FFmpeg 6.x because plugin.cpp DllMain delay-loads
-          # avutil-58.dll / swresample-4.dll / avcodec-60.dll / avformat-60.dll
-          # / avfilter-9.dll - those are FFmpeg 6.x SO names. BtbN master
-          # ships FFmpeg 8.x (avcodec-62 etc.) which would not match the
-          # DELAYLOAD pragmas and result in a broken plugin that does not
-          # load on the user side. Use the n6.1.1 build under the 'latest'
-          # tag - that filename is contractually stable.
-          $url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n6.1.1-latest-win64-lgpl-shared.zip'
-          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip -UseBasicParsing
-          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-extract -Force
-          $root = Get-ChildItem ffmpeg-extract -Directory | Select-Object -First 1
           New-Item -ItemType Directory -Path "ffmpeg/lib_win_x64" -Force | Out-Null
           New-Item -ItemType Directory -Path "ffmpeg/include"     -Force | Out-Null
-          New-Item -ItemType Directory -Path "ffmpeg/bin"         -Force | Out-Null
-          Copy-Item "$($root.FullName)/lib/*"     -Destination "ffmpeg/lib_win_x64/" -Recurse -Force
-          Copy-Item "$($root.FullName)/include/*" -Destination "ffmpeg/include/"     -Recurse -Force
-          Copy-Item "$($root.FullName)/bin/*.dll" -Destination "ffmpeg/bin/"         -Force
-          # also place DLLs next to the lib so cmake's find_library is happy
-          Copy-Item "$($root.FullName)/bin/*.dll" -Destination "ffmpeg/lib_win_x64/" -Force
-          "FFmpeg layout:"
+          Copy-Item ffmpeg-static/lib/*.lib    -Destination "ffmpeg/lib_win_x64/" -Force
+          Copy-Item ffmpeg-static/lib/*.a      -Destination "ffmpeg/lib_win_x64/" -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse ffmpeg-static/include/* -Destination "ffmpeg/include/" -Force
+          "FFmpeg static archives:"
           Get-ChildItem ffmpeg/lib_win_x64 | Format-Table Name,Length
-          Get-ChildItem ffmpeg/bin         | Format-Table Name,Length
 
-      - name: Configure CMake
-        run: cmake -G "NMake Makefiles" -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_INSTALL_PREFIX=install
+      - name: Configure CMake (FFMPEG_STATIC=ON)
+        shell: pwsh
+        run: |
+          cmake -G "NMake Makefiles" -B build `
+              -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} `
+              -DCMAKE_INSTALL_PREFIX=install `
+              -DFFMPEG_STATIC=ON `
+              -DffmpegLibHint="$(Resolve-Path ffmpeg/lib_win_x64)" `
+              -DffmpegIncludeDir="$(Resolve-Path ffmpeg/include)"
 
       - name: Build
+        shell: pwsh
         run: cmake --build build --config ${{ env.BUILD_TYPE }}
 
-      - name: Stage Windows artifact layout
+      - name: Stage Windows artifact layout (single self-contained DLL)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path stage/plugins/rp_soundboard -Force | Out-Null
@@ -84,11 +121,8 @@ jobs:
           if (Test-Path deploy/plugins/rp_soundboard) {
               Copy-Item -Recurse deploy/plugins/rp_soundboard/* stage/plugins/rp_soundboard/
           }
-          # Bundle FFmpeg shared DLLs alongside the asset folder so the
-          # DllMain LoadLibraryExW preload finds them. Without this the
-          # plugin DLL loads on Windows but av_* symbols are unresolved
-          # and TS3 silently fails to instantiate the plugin.
-          Copy-Item ffmpeg/bin/*.dll stage/plugins/rp_soundboard/ -Force
+          "DLL size (must be > 1 MB - confirms FFmpeg statically linked):"
+          (Get-Item stage/plugins/rp_soundboard_fx_win64.dll).Length
           Get-ChildItem stage/plugins -Recurse | Format-Table FullName,Length
 
       - uses: actions/upload-artifact@v4
@@ -254,6 +288,78 @@ jobs:
           path: stage/plugins/
           if-no-files-found: error
 
+      # Build Install_Soundboard_macOS.zip - the AppleScript .app bundle
+      # users double-click to install on macOS (TS3 .app on macOS doesn't
+      # have a working .ts3_plugin file association, so we ship our own
+      # installer wrapped in an .app).
+      - name: Build macOS-only .ts3_plugin (input for the .app installer)
+        run: |
+          PKG_ROOT="$(mktemp -d)"
+          mkdir -p "$PKG_ROOT/plugins/rp_soundboard"
+          # render package.ini with version from tag (or snapshot from sha)
+          TAG="${GITHUB_REF##refs/tags/}"
+          VERSION="${TAG#v}"
+          if [ "$TAG" = "$GITHUB_REF" ]; then
+              VERSION="0.0.0-$(date +%Y%m%d%H%M)-$(echo $GITHUB_SHA | cut -c1-7)"
+          fi
+          sed "s/@version@/$VERSION/" src/package.ini.in > "$PKG_ROOT/package.ini"
+          cp -R stage/plugins/. "$PKG_ROOT/plugins/"
+          MAC_PKG="$(pwd)/rp_soundboard_fx_${VERSION}_macos_x86_64.ts3_plugin"
+          rm -f "$MAC_PKG"
+          (cd "$PKG_ROOT" && zip -r "$MAC_PKG" . -x "**/.DS_Store")
+          ls -la "$MAC_PKG"
+          echo "MAC_PKG=$MAC_PKG" >> "$GITHUB_ENV"
+
+      - name: Build Install Soundboard.app via osacompile
+        run: |
+          APP_NAME="Install Soundboard"
+          APP_BUILD_DIR="$(pwd)/macinstaller"
+          rm -rf "$APP_BUILD_DIR"
+          mkdir -p "$APP_BUILD_DIR"
+          cd "$APP_BUILD_DIR"
+
+          # AppleScript - shows a dialog and runs the embedded shell
+          # script with the embedded .ts3_plugin path.
+          cat > installer.applescript <<'AS'
+          on run
+              try
+                  set appPath to POSIX path of (path to me)
+                  set scriptPath to appPath & "Contents/Resources/install_embedded_macos.sh"
+                  set pluginPath to appPath & "Contents/Resources/rp_soundboard_fx.ts3_plugin"
+                  display dialog "Install GameBaiters Soundboard for TeamSpeak 3?" buttons {"Cancel", "Install"} default button "Install" with icon note with title "GameBaiters Soundboard Installer"
+                  if button returned of result is not "Install" then return
+                  set installedTo to do shell script "/bin/bash " & quoted form of scriptPath & " " & quoted form of pluginPath
+                  display dialog "Installation complete." & return & return & "Plugin folder: " & installedTo & return & return & "Reopen TeamSpeak 3 and enable the plugin from Settings if it is not already active." buttons {"OK"} default button "OK" with icon note with title "GameBaiters Soundboard Installer"
+              on error errMsg number errNum
+                  if errNum is -128 then return
+                  display dialog "Installation failed:" & return & return & errMsg buttons {"OK"} default button "OK" with icon stop with title "GameBaiters Soundboard Installer"
+              end try
+          end run
+          AS
+
+          # Compile to .app bundle
+          osacompile -o "${APP_NAME}.app" installer.applescript
+
+          # Inject the .ts3_plugin + install script into Resources/
+          cp "$MAC_PKG"                              "${APP_NAME}.app/Contents/Resources/rp_soundboard_fx.ts3_plugin"
+          cp ../dist/install_embedded_macos.sh       "${APP_NAME}.app/Contents/Resources/"
+          chmod +x                                    "${APP_NAME}.app/Contents/Resources/install_embedded_macos.sh"
+
+          # Ad-hoc sign so Gatekeeper recognizes the bundle as valid even
+          # without a paid Apple Developer cert.
+          codesign --force --deep -s - "${APP_NAME}.app"
+          codesign --verify --deep --verbose=2 "${APP_NAME}.app" || true
+
+          # Zip
+          zip -r ../Install_Soundboard_macOS.zip "${APP_NAME}.app"
+          ls -la ../Install_Soundboard_macOS.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer
+          path: Install_Soundboard_macOS.zip
+          if-no-files-found: error
+
 
   # ---------------- COMBINE + RELEASE ----------------
   package-and-release:
@@ -281,6 +387,11 @@ jobs:
         with:
           name: macos-x64
           path: combined/plugins/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-installer
+          path: ./
 
       - name: Resolve version + write package.ini
         id: ver
@@ -330,6 +441,7 @@ jobs:
           body_path: ${{ steps.notes.outputs.NOTES_PATH }}
           files: |
             rp_soundboard_fx_*.ts3_plugin
+            Install_Soundboard_macOS.zip
             dist/uninstall_soundboard.bat
             dist/uninstall_soundboard.sh
             dist/uninstall_soundboard_macos.sh

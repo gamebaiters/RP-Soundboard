@@ -1,29 +1,27 @@
-GameBaiters Soundboard 1.0.111
+GameBaiters Soundboard 1.0.112
 ==============================
 
-Critical fix
-------------
-* Windows plugin failed to load on 1.0.110. The CI built against
-  FFmpeg 8.x master and did not bundle the FFmpeg shared DLLs into
-  the .ts3_plugin, so on the user side TeamSpeak found the plugin
-  binary but could not resolve any av_* symbol and silently dropped
-  the plugin. Fixed by:
-  - Pinning the CI Windows build to FFmpeg n6.1.1 (avcodec-60,
-    avformat-60, avutil-58, swresample-4, avfilter-9) so the SO
-    names match the DllMain delay-load pragmas in plugin.cpp.
-  - Bundling avcodec-60.dll / avformat-60.dll / avutil-58.dll /
-    swresample-4.dll / avfilter-9.dll / swscale-7.dll inside
-    plugins/rp_soundboard/ so DllMain's LoadLibraryExW preload
-    succeeds.
+Critical fixes
+--------------
+* Windows plugin now ships as a single self-contained DLL with FFmpeg
+  statically linked in. The 1.0.111 attempt bundled six FFmpeg .dll
+  files alongside the plugin, cluttering the user's plugins folder
+  and leaving a fragile setup. CI now builds FFmpeg n6.1.1 from
+  source with the MSVC toolchain (--toolchain=msvc, --enable-static
+  --disable-shared) and links it directly into rp_soundboard_fx_win64.dll.
+  Result: one binary, no runtime DLL dependencies.
+* macOS install bundle Install_Soundboard_macOS.zip is now produced
+  by CI and attached to every release. Earlier releases were missing
+  it - macOS users had no double-click install path. The .app inside
+  is ad-hoc-signed and contains the embedded .ts3_plugin plus the
+  install script.
 
-UI fixes (carried over from 1.0.110)
-------------------------------------
+UI fixes (carried over from 1.0.110/111)
+----------------------------------------
 * Checkbox indicators no longer render the playback arrow icon when
-  toggled - now show a clean filled square in the accent color.
-* Per-slot FX slider labels and value readouts bumped from 7-8 pt
-  bold to 9-10 pt regular so they are legible at every screen scale.
-* Per-slot Reset button label expanded from "Rst" to "Reset"; width
-  widened so the text never gets clipped.
+  toggled - clean filled square in the accent color.
+* Per-slot FX slider labels and value readouts at 9-10 pt regular
+  weight; "Reset" button widened so the text never gets clipped.
 
 Existing fork features
 ----------------------
@@ -41,8 +39,8 @@ Installation
 ------------
 
 * Windows: download rp_soundboard_fx_<version>.ts3_plugin and
-  double-click to install via TeamSpeak's bundled installer.
-* macOS: download Install_Soundboard_macOS.zip, unzip and double-click
+  double-click. TeamSpeak's bundled installer takes over.
+* macOS: download Install_Soundboard_macOS.zip, unzip, double-click
   Install Soundboard.app. Right-click -> Open the first time if macOS
   Gatekeeper blocks it.
 * Linux: from your TeamSpeak install directory run

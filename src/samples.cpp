@@ -28,6 +28,10 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <cstdlib>
+#include <cstring>
+#include <limits.h>
 #endif
 #include <cstdio>
 #include <cstdarg>
@@ -37,12 +41,26 @@ static void sdbgOpen()
 {
 	if (!g_dbgSamples)
 	{
+#ifdef _WIN32
 		char path[MAX_PATH];
 		if (GetEnvironmentVariableA("APPDATA", path, MAX_PATH))
 		{
 			strcat(path, "\\TS3Client\\rpsb_debug.log");
 			g_dbgSamples = fopen(path, "a");
 		}
+#else
+		const char *home = getenv("HOME");
+		if (home)
+		{
+			char path[PATH_MAX];
+#ifdef __APPLE__
+			snprintf(path, sizeof(path), "%s/Library/Application Support/TeamSpeak 3/rpsb_debug.log", home);
+#else
+			snprintf(path, sizeof(path), "%s/.ts3client/rpsb_debug.log", home);
+#endif
+			g_dbgSamples = fopen(path, "a");
+		}
+#endif
 	}
 }
 static void sdbgLog(const char *fmt, ...)

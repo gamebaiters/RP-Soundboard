@@ -221,12 +221,6 @@ bool UpdaterWindow::executeFile()
 	}
 	return true;
 #elif defined(__linux__) || defined(__APPLE__)
-	// Unix auto-update helper. The script:
-	//   1. Waits for TS3 to release the plugin library
-	//   2. Force-kills any lingering ts3client process (Linux + macOS)
-	//   3. Deletes every prior plugin .so / .dylib variant
-	//      Config rp_soundboard.ini at the TS3 root is preserved.
-	//   4. Hands off to TS3's package_inst (Linux) or `open` (macOS)
 	QString helperPath = QDir::temp().absoluteFilePath("rpsb_update_helper.sh");
 	QFile helper(helperPath);
 	if (!helper.open(QIODevice::WriteOnly | QIODevice::Truncate))
@@ -239,37 +233,65 @@ bool UpdaterWindow::executeFile()
 	out << "#!/usr/bin/env bash\n";
 	out << "# GameBaiters Soundboard auto-update helper (generated at runtime)\n";
 	out << "set -u\n";
+	out << "PACKAGE='" << tplugin << "'\n";
 	out << "sleep 2\n";
 #ifdef __APPLE__
 	out << "osascript -e 'tell application \"TeamSpeak 3\" to quit' 2>/dev/null || true\n";
 	out << "sleep 1\n";
 	out << "pkill -9 -x ts3client 2>/dev/null || true\n";
 	out << "pkill -9 -if 'TeamSpeak 3' 2>/dev/null || true\n";
+	out << "sleep 1\n";
+	// Resolve the actual TS3 plugin folder. macOS users typically have
+	// "~/Library/Application Support/TeamSpeak 3" (note the space). Fallback
+	// chain matches the install_embedded_macos.sh shipped with Install
+	// Soundboard.app so manual + auto installs converge to the same path.
+	out << "TARGET_BASE=''\n";
+	out << "for cand in \"$HOME/Library/Application Support/TeamSpeak 3\" \\\n";
+	out << "            \"$HOME/Library/Application Support/TS3Client\" \\\n";
+	out << "            \"$HOME/.ts3client\"; do\n";
+	out << "    if [ -d \"$cand\" ]; then TARGET_BASE=\"$cand\"; break; fi\n";
+	out << "done\n";
+	out << "[ -z \"$TARGET_BASE\" ] && TARGET_BASE=\"$HOME/Library/Application Support/TeamSpeak 3\"\n";
+	out << "PLUGIN_DIR=\"$TARGET_BASE/plugins\"\n";
+	out << "mkdir -p \"$PLUGIN_DIR\"\n";
+	// Remove every prior macOS variant (preserve rp_soundboard.ini).
+	out << "for lib in librp_soundboard_fx_mac.dylib librp_soundboard_fx_mac.so \\\n";
+	out << "           rp_soundboard_fx_mac.dylib    rp_soundboard_fx_mac.so   \\\n";
+	out << "           librp_soundboard_fx.dylib     rp_soundboard_fx.dylib    \\\n";
+	out << "           librp_soundboard.dylib        libsoundboard.dylib; do\n";
+	out << "    rm -f \"$PLUGIN_DIR/$lib\" 2>/dev/null\n";
+	out << "done\n";
+	// Direct extraction: TS3.app on macOS does not ship a separate
+	// package_inst binary, and `open` depends on a fragile file association.
+	// `ditto -x -k` extracts a renamed-zip .ts3_plugin reliably.
+	out << "TMP=\"$(mktemp -d)\"\n";
+	out << "trap 'rm -rf \"$TMP\"' EXIT\n";
+	out << "/usr/bin/ditto -x -k \"$PACKAGE\" \"$TMP\"\n";
+	out << "if [ -d \"$TMP/plugins\" ]; then\n";
+	out << "    cp -R \"$TMP/plugins/.\" \"$PLUGIN_DIR/\"\n";
+	out << "    find \"$PLUGIN_DIR\" -maxdepth 1 -name 'librp_soundboard_fx*.dylib' -exec xattr -dr com.apple.quarantine {} + 2>/dev/null || true\n";
+	out << "    find \"$PLUGIN_DIR\" -maxdepth 1 -name 'libav*.dylib'  -exec xattr -dr com.apple.quarantine {} + 2>/dev/null || true\n";
+	out << "    find \"$PLUGIN_DIR\" -maxdepth 1 -name 'libsw*.dylib'  -exec xattr -dr com.apple.quarantine {} + 2>/dev/null || true\n";
+	out << "fi\n";
 #else
 	out << "pkill -9 -x ts3client_linux_amd64 2>/dev/null || true\n";
 	out << "pkill -9 -x ts3client_linux_x86 2>/dev/null || true\n";
-#endif
 	out << "sleep 1\n";
 	out << "for base in \"$HOME/.ts3client\" \"$HOME/Library/Application Support/TS3Client\"; do\n";
 	out << "    [ -d \"$base/plugins\" ] || continue\n";
 	out << "    for lib in \\\n";
 	out << "        librp_soundboard_fx.so   librp_soundboard.so   libsoundboard.so   \\\n";
 	out << "        rp_soundboard_fx.so      rp_soundboard.so      soundboard.so      \\\n";
-	out << "        librp_soundboard_fx.dylib librp_soundboard.dylib libsoundboard.dylib \\\n";
-	out << "        rp_soundboard_fx.dylib   rp_soundboard.dylib   soundboard.dylib   \\\n";
 	out << "        librp_soundboard_fx_linux_amd64.so librp_soundboard_linux_amd64.so; do\n";
 	out << "        rm -f \"$base/plugins/$lib\" 2>/dev/null\n";
 	out << "    done\n";
 	out << "done\n";
-#ifdef __APPLE__
-	out << "open \"" << tplugin << "\" 2>/dev/null || true\n";
-#else
 	out << "if command -v package_inst >/dev/null 2>&1; then\n";
-	out << "    package_inst \"" << tplugin << "\"\n";
+	out << "    package_inst \"$PACKAGE\"\n";
 	out << "elif command -v xdg-open >/dev/null 2>&1; then\n";
-	out << "    xdg-open \"" << tplugin << "\"\n";
+	out << "    xdg-open \"$PACKAGE\"\n";
 	out << "else\n";
-	out << "    echo \"package_inst not found in PATH; install manually: " << tplugin << "\" >&2\n";
+	out << "    echo \"package_inst not found in PATH; install manually: $PACKAGE\" >&2\n";
 	out << "fi\n";
 #endif
 	helper.close();

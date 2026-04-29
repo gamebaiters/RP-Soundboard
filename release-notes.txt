@@ -31,19 +31,30 @@ Quality of life
 * Forced dark theme across all plugin dialogs
 * Skip buttons (+5s, -5s, +10s, -10s) widened and rendered in a larger font
   so labels are fully readable
-* Plugin shutdown reliably releases the DLL so TeamSpeak's
+* Plugin shutdown reliably releases the DLL/dylib so TeamSpeak's
   Settings -> Plugins -> Uninstall actually deletes the file
-* Auto-updater closes TeamSpeak, removes the previous version's DLL,
-  hands off to the TS3 installer, and preserves your rp_soundboard.ini config
+* Auto-updater closes TeamSpeak, removes the previous version's binary,
+  installs the new one, and preserves your rp_soundboard.ini config
 * Update channel served from this GitHub release page
-  (no more dependency on third-party servers)
 
 Installation
-* Windows: double-click rp_soundboard_fx_<version>.ts3_plugin and follow
-  the TeamSpeak installer prompts
-* Linux: from your TeamSpeak install dir run
-    LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH ./package_inst <path-to-.ts3_plugin>
-* macOS: open the .ts3_plugin and TeamSpeak will install it via package_inst
+------------
+
+* Windows
+    Download rp_soundboard_fx_<version>.ts3_plugin
+    Double-click and follow the TeamSpeak installer prompts.
+
+* macOS
+    Download Install_Soundboard_macOS.zip
+    Unzip it, then double-click "Install Soundboard.app"
+    Confirm the installer; it copies the plugin into
+    ~/Library/Application Support/TeamSpeak 3/plugins
+    If macOS blocks the unsigned app, right-click -> Open the first time.
+
+* Linux
+    Download rp_soundboard_fx_<version>.ts3_plugin
+    From your TeamSpeak install directory:
+        LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH ./package_inst <path-to-.ts3_plugin>
 
 Uninstall scripts (optional, for a fully clean removal)
 * uninstall_soundboard.bat        Windows
@@ -51,5 +62,5 @@ Uninstall scripts (optional, for a fully clean removal)
 * uninstall_soundboard_macos.sh   macOS
 
 Default behaviour: keeps your rp_soundboard.ini config so a fresh install
-reuses your existing soundboard layout. Choose [Y] at the prompt for a
-full wipe.
+reuses your existing soundboard layout. Choose [Y] at the first prompt for
+a full wipe.

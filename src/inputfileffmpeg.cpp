@@ -52,25 +52,43 @@ extern "C"
 #include <cstdio>
 #include <cstdarg>
 #include <ctime>
+#ifndef _WIN32
+#include <cstdlib>
+#include <limits.h>
+#endif
 static FILE *g_debugFile = nullptr;
 static void dbgOpen()
 {
 	if (!g_debugFile)
 	{
+#ifdef _WIN32
 		char path[MAX_PATH];
 		if (GetEnvironmentVariableA("APPDATA", path, MAX_PATH))
 		{
 			strcat(path, "\\TS3Client\\rpsb_debug.log");
 			g_debugFile = fopen(path, "a");
-			if (g_debugFile)
-			{
-				time_t t = time(NULL);
-				struct tm *tm = localtime(&t);
-				char ts[64];
-				strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", tm);
-				fprintf(g_debugFile, "\n=== RPSB Debug Session %s ===\n", ts);
-				fflush(g_debugFile);
-			}
+		}
+#else
+		const char *home = getenv("HOME");
+		if (home)
+		{
+			char path[PATH_MAX];
+#ifdef __APPLE__
+			snprintf(path, sizeof(path), "%s/Library/Application Support/TeamSpeak 3/rpsb_debug.log", home);
+#else
+			snprintf(path, sizeof(path), "%s/.ts3client/rpsb_debug.log", home);
+#endif
+			g_debugFile = fopen(path, "a");
+		}
+#endif
+		if (g_debugFile)
+		{
+			time_t t = time(NULL);
+			struct tm *tm = localtime(&t);
+			char ts[64];
+			strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", tm);
+			fprintf(g_debugFile, "\n=== RPSB Debug Session %s ===\n", ts);
+			fflush(g_debugFile);
 		}
 	}
 }

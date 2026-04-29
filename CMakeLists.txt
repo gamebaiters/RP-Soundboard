@@ -18,11 +18,13 @@ if (WIN32)
 	endif()
 	set(defPluginDir "%appdata%/TS3Client/plugins")
 elseif(APPLE)
-	# macOS: use homebrew ffmpeg
+	# macOS: use homebrew ffmpeg headers + tools
 	set(defFFmpegLibHint "/opt/homebrew/opt/ffmpeg/lib")
 	set(ffmpegIncHint "/opt/homebrew/opt/ffmpeg/include")
-	set(defLibSuffix "_mac.so")
-	set(defPluginDir "~/.ts3client/plugins")
+	# TS3 on macOS loads .dylib plugins (not .so)
+	set(defLibSuffix "_mac.dylib")
+	# Real TS3 plugins folder on macOS (the legacy ~/.ts3client path is empty)
+	set(defPluginDir "~/Library/Application Support/TeamSpeak 3/plugins")
 else()
 	if(CMAKE_SIZEOF_VOID_P EQUAL 8)
 		set(defFFmpegLibHint "ffmpeg/lib_lin_x64")
@@ -88,6 +90,28 @@ set_property(SOURCE "src/version/version.h" PROPERTY SKIP_AUTOGEN ON)
 
 # actual library definition
 add_library(rp_soundboard_fx SHARED ${sources} "src/version/version.h")
+
+# macOS: allow linking against the Qt dylibs that ship inside TS3.app (so the
+# plugin matches the host's Qt arch / ABI). Set TS3_MAC_QT_LIB_DIR to the
+# Frameworks directory inside TeamSpeak 3 Client.app and the Qt5 imported
+# targets get redirected to those .dylib files (Homebrew Qt5 still provides
+# headers/moc/uic/rcc).
+if(APPLE)
+	set(TS3_MAC_QT_LIB_DIR "" CACHE PATH "Path to Qt dylibs inside TeamSpeak 3 Client.app/Contents/Frameworks (overrides Homebrew Qt at link time)")
+	if(TS3_MAC_QT_LIB_DIR)
+		foreach(qtmod Core Widgets Gui Network)
+			if(TARGET Qt5::${qtmod})
+				if(EXISTS "${TS3_MAC_QT_LIB_DIR}/libQt5${qtmod}.dylib")
+					set_target_properties(Qt5::${qtmod} PROPERTIES
+						IMPORTED_LOCATION "${TS3_MAC_QT_LIB_DIR}/libQt5${qtmod}.dylib"
+						IMPORTED_LOCATION_RELEASE "${TS3_MAC_QT_LIB_DIR}/libQt5${qtmod}.dylib"
+					)
+				endif()
+			endif()
+		endforeach()
+	endif()
+endif()
+
 target_link_libraries(rp_soundboard_fx Qt5::Core Qt5::Widgets Qt5::Gui Qt5::Network)
 if (FFMPEG_STATIC)
 	# Static FFmpeg linking: minimal custom build, no external deps

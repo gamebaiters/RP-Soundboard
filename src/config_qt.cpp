@@ -165,7 +165,6 @@ ConfigQt::ConfigQt( ConfigModel *model, QWidget *parent /*= 0*/ ) :
 
 	/* Force configuration 0 */
 	setConfiguration(0);
-// setStyleSheet removed for Dark Mode
 }
 
 void ConfigQt::setConfiguration(int cfg)

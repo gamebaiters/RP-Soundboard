@@ -66,7 +66,7 @@ SoundSettingsQt::SoundSettingsQt(const SoundInfo &soundInfo, size_t buttonId, QW
 		col->setAlignment(Qt::AlignHCenter);
 		QLabel *t = new QLabel(title);
 		t->setAlignment(Qt::AlignHCenter);
-		QFont f = t->font(); f.setBold(true); f.setPointSize(8); t->setFont(f);
+		QFont f = t->font(); f.setPointSize(10); t->setFont(f);
 		col->addWidget(t, 0, Qt::AlignHCenter);
 		slider = new QSlider(Qt::Vertical);
 		slider->setRange(minVal, maxVal);
@@ -79,7 +79,7 @@ SoundSettingsQt::SoundSettingsQt(const SoundInfo &soundInfo, size_t buttonId, QW
 		col->addWidget(slider, 0, Qt::AlignHCenter);
 		label = new QLabel("");
 		label->setAlignment(Qt::AlignHCenter);
-		QFont vf = label->font(); vf.setPointSize(7); label->setFont(vf);
+		QFont vf = label->font(); vf.setPointSize(9); label->setFont(vf);
 		label->setMinimumWidth(35);
 		col->addWidget(label, 0, Qt::AlignHCenter);
 		return col;

@@ -1,66 +1,41 @@
-GameBaiters Soundboard
-======================
+GameBaiters Soundboard 1.0.110
+==============================
 
-What this fork adds compared to the original RP Soundboard
-----------------------------------------------------------
+UI fixes
+--------
+* Checkbox indicators no longer render the playback arrow icon when
+  toggled - they now show a clean filled square with the accent
+  color, matching the rest of the dark theme.
+* Text labels around per-slot FX sliders (Pitch / Speed / Combined /
+  Reverb) bumped from 7-8 pt bold to 9-10 pt regular weight and given
+  a wider fixed width. Labels are now legible on every screen scale
+  and no longer look cramped or smudged.
+* Per-slot Reset button label expanded from "Rst" to "Reset" with
+  matching width so the text never gets clipped.
+* Per-slot Sync checkbox font size matched to the rest of the FX row.
 
-Audio effects (per playback)
-* Pitch slider                shift pitch independently of speed (0.5x to 2.0x)
-* Speed slider                change playback rate without altering pitch (0.5x to 2.0x)
-* Pitch + Speed slider        linked control for the classic chipmunk / slow-mo
-                              effect, with Sync/Reset toggle
-* Reverb slider               real-time reverb intensity (1.0x to 20.0x)
-* Earrape protection          local hard-limiter to prevent ear-blasting peaks;
-                              only affects what YOU hear, remote listeners get
-                              the unaltered stream
-* Remember pitch / speed /    per-button toggle: the slot keeps its last FX
-  reverb                      values across plugin restarts and config switches
-
-Transport controls
-* Skip +/- 5s and +/- 10s     jump forward or backward inside the playing sample
-* Real-time waveform view     live waveform with click-to-seek; drag to scrub
-                              the playhead anywhere in the file
-
-Multi-soundboard mode
-* Up to 5 soundboards play simultaneously (slots 0 to 4)
-* Each slot has independent buttons, hotkeys, volume, pitch, speed,
-  reverb, earrape protection toggle and remember-FX toggle
-* Per-sound settings dialog redesigned around the slot model
-
-Quality of life
-* Forced dark theme across all plugin dialogs
-* Skip buttons (+5s, -5s, +10s, -10s) widened and rendered in a larger font
-  so labels are fully readable
-* Plugin shutdown reliably releases the DLL/dylib so TeamSpeak's
-  Settings -> Plugins -> Uninstall actually deletes the file
-* Auto-updater closes TeamSpeak, removes the previous version's binary,
-  installs the new one, and preserves your rp_soundboard.ini config
-* Update channel served from this GitHub release page
+Existing fork features carried over
+-----------------------------------
+* Pitch / Speed / Pitch+Speed / Reverb sliders
+* Earrape protection (local hard-limiter)
+* Remember pitch / speed / reverb per slot
+* Skip +/- 5s and +/- 10s transport
+* Real-time waveform with click-to-seek
+* Multi-soundboard mode (up to 5 slots playing concurrently)
+* Update channel served from this gamebaiters branch on GitHub
+* Auto-updater that closes TeamSpeak, removes the previous binary,
+  preserves your rp_soundboard.ini config, then runs the installer
 
 Installation
 ------------
 
-* Windows
-    Download rp_soundboard_fx_<version>.ts3_plugin
-    Double-click and follow the TeamSpeak installer prompts.
+* Windows: download rp_soundboard_fx_<version>.ts3_plugin and
+  double-click to install via TeamSpeak's bundled installer.
+* macOS: download Install_Soundboard_macOS.zip, unzip and double-click
+  Install Soundboard.app. Right-click -> Open the first time if macOS
+  Gatekeeper blocks it.
+* Linux: from your TeamSpeak install directory run
+    LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH ./package_inst <path-to-.ts3_plugin>
 
-* macOS
-    Download Install_Soundboard_macOS.zip
-    Unzip it, then double-click "Install Soundboard.app"
-    Confirm the installer; it copies the plugin into
-    ~/Library/Application Support/TeamSpeak 3/plugins
-    If macOS blocks the unsigned app, right-click -> Open the first time.
-
-* Linux
-    Download rp_soundboard_fx_<version>.ts3_plugin
-    From your TeamSpeak install directory:
-        LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH ./package_inst <path-to-.ts3_plugin>
-
-Uninstall scripts (optional, for a fully clean removal)
-* uninstall_soundboard.bat        Windows
-* uninstall_soundboard.sh         Linux
-* uninstall_soundboard_macos.sh   macOS
-
-Default behaviour: keeps your rp_soundboard.ini config so a fresh install
-reuses your existing soundboard layout. Choose [Y] at the first prompt for
-a full wipe.
+Uninstall scripts (in the release assets) keep your rp_soundboard.ini
+config by default - press Y at the first prompt for a full wipe.

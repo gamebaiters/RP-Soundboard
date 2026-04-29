@@ -1,32 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Update channel feed for the auto-updater.
-
-  IMPORTANT: latestVersion is HELD at 1900 on purpose until the macOS
-  dylib is rebuilt with BUILD=1902+ AND the new ditto-based updater
-  helper from src/updater_qt.cpp __APPLE__ branch.
-
-  Why: the v1.0.102 macOS dylib bundled in the current release embeds
-  the older "open <file>.ts3_plugin" update path. On macOS that call
-  silently does nothing (TS3 has no working file association for
-  .ts3_plugin), so any time latestVersion advertises a number > 1900
-  the macOS client enters an offer-download-do-nothing loop.
-
-  Holding the feed at 1900 stops the loop on every platform:
-    - macOS dylib reports BUILD=1900 -> 1900 > 1900 false -> no update
-    - Windows DLL  reports BUILD=1902 -> 1900 > 1902 false -> no update
-
-  When the macOS rebuild lands (file Install_Soundboard_macOS.zip and
-  the multi-platform .ts3_plugin both with the new dylib at BUILD=1902),
-  bump latestVersion to 1903 (or whatever the next build number is) so
-  every existing client gets the auto-update.
--->
 <versionDescription>
   <product descVersion="1" name="rp_soundboard">
-    <latestVersion>1900</latestVersion>
-    <latestVersionString>1.0.102</latestVersionString>
+    <latestVersion>1910</latestVersion>
+    <latestVersionString>1.0.110</latestVersionString>
     <latestDownload>
-      <url>https://github.com/gamebaiters/RP-Soundboard/releases/download/v1.0.102/rp_soundboard_fx_1.0.102.ts3_plugin</url>
+      <url>https://github.com/gamebaiters/RP-Soundboard/releases/download/v1.0.110/rp_soundboard_fx_1.0.110.ts3_plugin</url>
     </latestDownload>
     <featureUrl>https://raw.githubusercontent.com/gamebaiters/RP-Soundboard/gamebaiters/release-notes.txt</featureUrl>
   </product>

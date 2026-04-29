@@ -1161,8 +1161,8 @@ PlaybackBar *ConfigQt::createPlaybackBar(int slot, const QString &filename)
 	auto addFxSlider = [&](const QString &label, int minV, int maxV, int defV,
 						   QSlider *&slider, QLabel *&valLabel) {
 		QLabel *lbl = new QLabel(label, bar->frame);
-		QFont f = lbl->font(); f.setPointSize(7); f.setBold(true); lbl->setFont(f);
-		lbl->setFixedWidth(28);
+		QFont f = lbl->font(); f.setPointSize(9); lbl->setFont(f);
+		lbl->setFixedWidth(36);
 		fxRow->addWidget(lbl);
 		slider = new QSlider(Qt::Horizontal, bar->frame);
 		slider->setRange(minV, maxV);
@@ -1170,8 +1170,8 @@ PlaybackBar *ConfigQt::createPlaybackBar(int slot, const QString &filename)
 		slider->setFixedWidth(55);
 		fxRow->addWidget(slider);
 		valLabel = new QLabel("", bar->frame);
-		QFont vf = valLabel->font(); vf.setPointSize(7); valLabel->setFont(vf);
-		valLabel->setFixedWidth(30);
+		QFont vf = valLabel->font(); vf.setPointSize(9); valLabel->setFont(vf);
+		valLabel->setFixedWidth(40);
 		fxRow->addWidget(valLabel);
 	};
 
@@ -1183,12 +1183,12 @@ PlaybackBar *ConfigQt::createPlaybackBar(int slot, const QString &filename)
 	// Sync checkbox + Reset
 	bar->syncCheckbox = new QCheckBox("Sync", bar->frame);
 	bar->syncCheckbox->setChecked(false);
-	QFont sf = bar->syncCheckbox->font(); sf.setPointSize(7); bar->syncCheckbox->setFont(sf);
+	QFont sf = bar->syncCheckbox->font(); sf.setPointSize(9); bar->syncCheckbox->setFont(sf);
 	fxRow->addWidget(bar->syncCheckbox);
 
-	bar->resetFxButton = new QPushButton("Rst", bar->frame);
-	bar->resetFxButton->setFixedWidth(28);
-	QFont rf = bar->resetFxButton->font(); rf.setPointSize(7); bar->resetFxButton->setFont(rf);
+	bar->resetFxButton = new QPushButton("Reset", bar->frame);
+	bar->resetFxButton->setMinimumWidth(44);
+	QFont rf = bar->resetFxButton->font(); rf.setPointSize(9); bar->resetFxButton->setFont(rf);
 	fxRow->addWidget(bar->resetFxButton);
 
 	// Initial sync state
@@ -1581,8 +1581,7 @@ void ConfigQt::buildPitchSpeedUI()
 		QLabel *titleLabel = new QLabel(title);
 		titleLabel->setAlignment(Qt::AlignHCenter);
 		QFont f = titleLabel->font();
-		f.setBold(true);
-		f.setPointSize(8);
+		f.setPointSize(10);
 		titleLabel->setFont(f);
 		col->addWidget(titleLabel, 0, Qt::AlignHCenter);
 
@@ -1599,7 +1598,7 @@ void ConfigQt::buildPitchSpeedUI()
 		valueLabel = new QLabel("1.00x");
 		valueLabel->setAlignment(Qt::AlignHCenter);
 		QFont vf = valueLabel->font();
-		vf.setPointSize(7);
+		vf.setPointSize(9);
 		valueLabel->setFont(vf);
 		valueLabel->setMinimumWidth(35);
 		col->addWidget(valueLabel, 0, Qt::AlignHCenter);
@@ -1629,8 +1628,7 @@ void ConfigQt::buildPitchSpeedUI()
 		QLabel *titleLabel = new QLabel("Reverb");
 		titleLabel->setAlignment(Qt::AlignHCenter);
 		QFont f = titleLabel->font();
-		f.setBold(true);
-		f.setPointSize(8);
+		f.setPointSize(10);
 		titleLabel->setFont(f);
 		reverbCol->addWidget(titleLabel, 0, Qt::AlignHCenter);
 
@@ -1647,7 +1645,7 @@ void ConfigQt::buildPitchSpeedUI()
 		m_reverbValueLabel = new QLabel("0%");
 		m_reverbValueLabel->setAlignment(Qt::AlignHCenter);
 		QFont vf = m_reverbValueLabel->font();
-		vf.setPointSize(7);
+		vf.setPointSize(9);
 		m_reverbValueLabel->setFont(vf);
 		m_reverbValueLabel->setMinimumWidth(35);
 		reverbCol->addWidget(m_reverbValueLabel, 0, Qt::AlignHCenter);

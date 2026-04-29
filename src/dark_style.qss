@@ -71,7 +71,7 @@ QCheckBox, QRadioButton {
     spacing: 6px;
 }
 
-QCheckBox::indicator, QRadioButton::indicator {
+QCheckBox::indicator {
     width: 14px;
     height: 14px;
     background-color: #1e1e1e;
@@ -79,23 +79,35 @@ QCheckBox::indicator, QRadioButton::indicator {
     border-radius: 2px;
 }
 
-QRadioButton::indicator {
-    border-radius: 7px;
-}
-
 QCheckBox::indicator:checked {
     background-color: #4a90e2;
-    border-color: #4a90e2;
-    image: url(:/icon/img/playarrow_32.png);
+    border: 1px solid #4a90e2;
+}
+
+QCheckBox::indicator:checked:disabled {
+    background-color: #3a5a7a;
+    border-color: #3a5a7a;
+}
+
+QCheckBox::indicator:unchecked:hover, QCheckBox::indicator:checked:hover {
+    border: 1px solid #6ab0ff;
+}
+
+QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    background-color: #1e1e1e;
+    border: 1px solid #777777;
+    border-radius: 7px;
 }
 
 QRadioButton::indicator:checked {
     background-color: #4a90e2;
-    border-color: #4a90e2;
+    border: 1px solid #4a90e2;
 }
 
-QCheckBox::indicator:hover, QRadioButton::indicator:hover {
-    border-color: #4a90e2;
+QRadioButton::indicator:hover {
+    border: 1px solid #6ab0ff;
 }
 
 QSlider::groove:horizontal {

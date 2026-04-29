@@ -1,0 +1,262 @@
+name: Release (Win + Linux + macOS)
+
+# Triggered when a vX.Y.Z tag is pushed. Builds the plugin on a Windows,
+# Linux and macOS runner in parallel, fuses the three platform binaries
+# into a single multi-platform .ts3_plugin, and creates the GitHub release.
+#
+# To cut a release from any machine (Windows included):
+#   git tag v1.0.103
+#   git push origin v1.0.103
+# That is the only manual step. The workflow does everything else.
+#
+# manual_dispatch lets you trigger the same flow without a tag for testing
+# (it builds everything but does not create the release).
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  BUILD_TYPE: Release
+  QT_VERSION: '5.15.2'
+
+jobs:
+
+  # ---------------- WINDOWS x64 ----------------
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2019_64
+          cache: true
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Download prebuilt FFmpeg (Gyan.dev shared)
+        shell: pwsh
+        run: |
+          $url = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-shared.7z'
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.7z
+          7z x ffmpeg.7z -offmpeg-extract -y | Out-Null
+          $root = Get-ChildItem ffmpeg-extract -Directory | Select-Object -First 1
+          New-Item -ItemType Directory -Path "ffmpeg/lib_win_x64" -Force | Out-Null
+          Copy-Item "$($root.FullName)/lib/*"     -Destination "ffmpeg/lib_win_x64/" -Recurse -Force
+          Copy-Item "$($root.FullName)/include/*" -Destination "ffmpeg/" -Recurse -Force
+          New-Item -ItemType Directory -Path "ffmpeg/include" -Force | Out-Null
+          Copy-Item "$($root.FullName)/include/*" -Destination "ffmpeg/include/" -Recurse -Force
+
+      - name: Configure CMake
+        run: cmake -G "NMake Makefiles" -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_INSTALL_PREFIX=install
+
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }}
+
+      - name: Stage Windows artifact layout
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path stage/plugins/rp_soundboard -Force | Out-Null
+          Copy-Item build/release/rp_soundboard_fx_win64.dll stage/plugins/
+          if (Test-Path deploy/plugins/rp_soundboard) {
+              Copy-Item -Recurse deploy/plugins/rp_soundboard/* stage/plugins/rp_soundboard/
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: stage/plugins/
+          if-no-files-found: error
+
+
+  # ---------------- LINUX x86_64 ----------------
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+              build-essential cmake pkg-config python3 zip \
+              qtbase5-dev qttools5-dev qttools5-dev-tools \
+              libqt5network5 libqt5gui5 libqt5widgets5 libqt5core5a \
+              libavcodec-dev libavformat-dev libavfilter-dev \
+              libavutil-dev libswresample-dev
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+              -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+              -DCMAKE_INSTALL_PREFIX=install \
+              -DffmpegLibHint=/usr/lib/x86_64-linux-gnu \
+              -DffmpegIncludeDir=/usr/include
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Stage Linux artifact layout
+        run: |
+          mkdir -p stage/plugins/rp_soundboard
+          # the build target output name has the _linux_amd64.so suffix per CMakeLists
+          cp build/librp_soundboard_fx_linux_amd64.so stage/plugins/ \
+            || cp build/rp_soundboard_fx_linux_amd64.so stage/plugins/ \
+            || cp build/release/librp_soundboard_fx_linux_amd64.so stage/plugins/ \
+            || cp build/release/rp_soundboard_fx_linux_amd64.so stage/plugins/
+          if [ -d deploy/plugins/rp_soundboard ]; then
+              cp -r deploy/plugins/rp_soundboard/* stage/plugins/rp_soundboard/
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: stage/plugins/
+          if-no-files-found: error
+
+
+  # ---------------- macOS x86_64 ----------------
+  build-macos:
+    # Intel runner (TS3 macOS is x86_64-only). For arm64 TS3 in the future,
+    # add a second job with macos-14 + arch=arm64.
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt + FFmpeg via Homebrew
+        run: |
+          brew install qt@5 ffmpeg
+          echo "$(brew --prefix qt@5)/bin" >> "$GITHUB_PATH"
+
+      - name: Configure CMake (x86_64)
+        run: |
+          cmake -B build \
+              -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+              -DCMAKE_INSTALL_PREFIX=install \
+              -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+              -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
+              -DffmpegLibHint="$(brew --prefix ffmpeg)/lib" \
+              -DffmpegIncludeDir="$(brew --prefix ffmpeg)/include"
+
+      - name: Build
+        run: cmake --build build -j$(sysctl -n hw.ncpu)
+
+      - name: install_name_tool Qt rpath fixups
+        run: |
+          DYLIB="$(find build -name 'librp_soundboard_fx*_mac.dylib' | head -1)"
+          if [ -z "$DYLIB" ]; then
+              echo "dylib not found"; ls -la build; exit 1
+          fi
+          for q in Core Widgets Gui Network; do
+              install_name_tool -change "libQt5${q}.dylib" "@rpath/libQt5${q}.dylib" "$DYLIB" || true
+              install_name_tool -change "@rpath/QtCore.framework/Versions/5/QtCore" "@rpath/libQt5Core.dylib" "$DYLIB" || true
+          done
+
+      - name: Stage macOS artifact layout (with bundled FFmpeg dylibs)
+        run: |
+          mkdir -p stage/plugins/rp_soundboard
+          DYLIB="$(find build -name 'librp_soundboard_fx*_mac.dylib' | head -1)"
+          cp "$DYLIB" stage/plugins/librp_soundboard_fx_mac.dylib
+          for lib in libavcodec libavformat libavfilter libavutil libswresample libswscale; do
+              for f in "$(brew --prefix ffmpeg)/lib/${lib}".*.dylib; do
+                  [ -e "$f" ] || continue
+                  cp "$f" stage/plugins/
+                  base="$(basename "$f")"
+                  install_name_tool -id "@loader_path/${base}" "stage/plugins/${base}" || true
+              done
+          done
+          if [ -d deploy/plugins/rp_soundboard ]; then
+              cp -r deploy/plugins/rp_soundboard/* stage/plugins/rp_soundboard/
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-x64
+          path: stage/plugins/
+          if-no-files-found: error
+
+
+  # ---------------- COMBINE + RELEASE ----------------
+  package-and-release:
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64
+          path: combined/plugins/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x64
+          path: combined/plugins/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-x64
+          path: combined/plugins/
+
+      - name: Resolve version + write package.ini
+        id: ver
+        run: |
+          TAG="${GITHUB_REF##refs/tags/}"
+          VERSION="${TAG#v}"
+          if [ "$TAG" = "$GITHUB_REF" ]; then
+              # workflow_dispatch path - synthesize a snapshot version
+              VERSION="0.0.0-$(date +%Y%m%d%H%M)-$(echo $GITHUB_SHA | cut -c1-7)"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          # render package.ini.in with the resolved version
+          sed "s/@version@/$VERSION/" src/package.ini.in > combined/package.ini
+          echo "--- package.ini ---"
+          cat combined/package.ini
+
+      - name: Build multi-platform .ts3_plugin
+        run: |
+          cd combined
+          PKG="../rp_soundboard_fx_${{ steps.ver.outputs.VERSION }}.ts3_plugin"
+          rm -f "$PKG"
+          zip -r "$PKG" . -x "**/.DS_Store"
+          ls -la "$PKG"
+          echo "--- contents ---"
+          unzip -l "$PKG"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ts3plugin
+          path: rp_soundboard_fx_*.ts3_plugin
+
+      - name: Read release notes file
+        id: notes
+        run: |
+          if [ -f release-notes.txt ]; then
+              cp release-notes.txt /tmp/notes.txt
+          else
+              echo "Release ${{ steps.ver.outputs.VERSION }}" > /tmp/notes.txt
+          fi
+          echo "NOTES_PATH=/tmp/notes.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Create / update GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "GameBaiters Soundboard ${{ github.ref_name }}"
+          body_path: ${{ steps.notes.outputs.NOTES_PATH }}
+          files: |
+            rp_soundboard_fx_*.ts3_plugin
+            uninstall_soundboard.bat
+            uninstall_soundboard.sh
+            uninstall_soundboard_macos.sh
+          fail_on_unmatched_files: false

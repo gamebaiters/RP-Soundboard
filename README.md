@@ -104,30 +104,227 @@ Scripts: `uninstall_soundboard.bat` (Windows), `uninstall_soundboard.sh` (Linux)
 
 ## Build from source
 
-### Requirements
-- Qt 5.15 (msvc2019_64 on Windows, system Qt5 elsewhere)
-- Visual Studio 2017+ (Windows) or GCC/Clang
-- CMake 3.12+
-- FFmpeg headers + libs (system or static under `ffmpeg/lib_*/`)
-- 7-Zip (Windows packaging only)
+The recommended workflow is **GitHub Actions** — push a `vX.Y.Z` tag and
+the CI builds Windows + Linux + macOS in parallel, fuses the binaries
+into a single multi-platform `.ts3_plugin`, and publishes the GitHub
+release. No local Mac or Linux box required.
 
-### Quick build (Windows, MSVC + static FFmpeg)
+### Option A — Push a tag, let CI build everything (recommended)
+
+```bash
+# from any machine (Windows works fine):
+git switch gamebaiters
+git pull
+# ... commit changes, bump version.py + version.xml + release-notes.txt ...
+git tag v1.0.103
+git push origin gamebaiters
+git push origin v1.0.103
+```
+
+Workflow: `.github/workflows/release.yml`. It runs three matrix jobs
+(`windows-latest`, `ubuntu-22.04`, `macos-13`), uploads each platform's
+binaries as artifacts, then a final job zips them into one
+`rp_soundboard_fx_<version>.ts3_plugin` containing:
+
+```
+package.ini  (Platforms = win32, win64, linux_amd64, mac)
+plugins/
+    rp_soundboard_fx_win64.dll          (Windows)
+    librp_soundboard_fx_linux_amd64.so  (Linux)
+    librp_soundboard_fx_mac.dylib       (macOS x86_64)
+    libav*.dylib  libsw*.dylib          (FFmpeg, macOS only)
+    rp_soundboard/                      (default sounds)
+```
+
+The release page is created automatically at
+`https://github.com/gamebaiters/RP-Soundboard/releases/tag/<your-tag>`.
+
+To run the workflow manually without a tag (for testing), use the
+"Run workflow" button under the **Actions** tab in GitHub.
+
+### Option B — Build locally (per platform)
+
+#### Windows (native, MSVC + Qt 5.15)
+
+Requirements:
+- Visual Studio 2017+ with C++ workload
+- Qt 5.15.2 (`msvc2019_64`) — install via the Qt online installer
+- CMake 3.12+
+- 7-Zip (for packaging the .ts3_plugin)
+- Prebuilt FFmpeg libs under `ffmpeg-msvc/lib` and `ffmpeg-msvc/include`
+  (download a "shared" build from gyan.dev or compile from source).
+
+Quick build via the bundled batch file:
+
 ```bat
 git clone -b gamebaiters https://github.com/gamebaiters/RP-Soundboard.git
 cd RP-Soundboard
 build.bat
 ```
-Produces `rp_soundboard_fx_<version>.ts3_plugin` next to `build.bat`.
 
-### Manual CMake (any platform)
-```bash
-git clone -b gamebaiters https://github.com/gamebaiters/RP-Soundboard.git
-cd RP-Soundboard
-cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
-                    -DCMAKE_PREFIX_PATH=/path/to/Qt5 \
-                    -DRPSB_MAKE_PLUGIN_FILE=ON
+Produces `rp_soundboard_fx_<version>.ts3_plugin` next to `build.bat`.
+The script auto-detects VS 2017/2019/2022 and Qt under `F:\Qt`/`F:\Qt64`.
+
+Manual CMake invocation:
+
+```bat
+cmake -G "NMake Makefiles" -B build -DCMAKE_BUILD_TYPE=Release ^
+    -DCMAKE_PREFIX_PATH="C:\Qt\5.15.2\msvc2019_64" ^
+    -DffmpegLibHint="C:\path\to\ffmpeg\lib" ^
+    -DffmpegIncludeDir="C:\path\to\ffmpeg\include"
 cmake --build build --config Release
 ```
+
+#### Linux (native or WSL2 from Windows)
+
+If you only have a Windows machine, install **WSL2** with Ubuntu —
+Microsoft Store -> "Ubuntu 22.04". WSL2 gives you a real Linux
+filesystem and toolchain that produces native `.so` binaries usable on
+any Linux distro:
+
+```bash
+# inside WSL2 / native Ubuntu
+sudo apt-get update
+sudo apt-get install -y \
+    build-essential cmake pkg-config python3 zip \
+    qtbase5-dev qttools5-dev qttools5-dev-tools \
+    libqt5network5 libqt5gui5 libqt5widgets5 libqt5core5a \
+    libavcodec-dev libavformat-dev libavfilter-dev \
+    libavutil-dev libswresample-dev
+
+git clone -b gamebaiters https://github.com/gamebaiters/RP-Soundboard.git
+cd RP-Soundboard
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+              -DffmpegLibHint=/usr/lib/x86_64-linux-gnu \
+              -DffmpegIncludeDir=/usr/include
+cmake --build build -j$(nproc)
+```
+
+Output: `build/librp_soundboard_fx_linux_amd64.so` (or similar — name
+follows the `_linux_amd64.so` suffix from `CMakeLists.txt`).
+
+To run a Windows -> WSL2 build round-trip you can stay on the Windows
+filesystem:
+
+```bash
+# in WSL2:
+cd /mnt/c/Users/<you>/Desktop/SOUNDBOARD_4.0/upstream-clone
+cmake -B build_linux ...
+```
+
+#### macOS (native — best path)
+
+The macOS dylib needs Apple's toolchain (clang + Mach-O). The realistic
+options are:
+
+1. **Native Mac** — recommended.
+2. **GitHub Actions macos-13 runner** (Option A above) — also works
+   from Windows because the build runs on Apple-provided hardware.
+3. **`osxcross` from WSL2** — possible but fragile; see "Cross-build"
+   section below.
+
+On a native Mac:
+
+```bash
+brew install qt@5 ffmpeg cmake python git
+export PATH="$(brew --prefix qt@5)/bin:$PATH"
+
+git clone -b gamebaiters https://github.com/gamebaiters/RP-Soundboard.git
+cd RP-Soundboard
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+              -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
+              -DffmpegLibHint="$(brew --prefix ffmpeg)/lib" \
+              -DffmpegIncludeDir="$(brew --prefix ffmpeg)/include"
+cmake --build build -j$(sysctl -n hw.ncpu)
+
+# rpath fixups
+DYLIB="$(find build -name 'librp_soundboard_fx*_mac.dylib' | head -1)"
+for q in Core Widgets Gui Network; do
+    install_name_tool -change "libQt5${q}.dylib" \
+        "@rpath/libQt5${q}.dylib" "$DYLIB"
+done
+```
+
+The output dylib lives next to the build dir; bundle it together with
+the FFmpeg dylibs from `$(brew --prefix ffmpeg)/lib/libav*.dylib` and
+`libsw*.dylib` into the `.ts3_plugin` zip (TS3 on macOS needs them
+adjacent to the plugin). The release CI already does this.
+
+Why x86_64 only: TeamSpeak 3 on macOS is x86_64 itself; loading an
+arm64 dylib into an x86_64 process fails. Apple Silicon users run
+TeamSpeak 3 under Rosetta 2 and the x86_64 plugin matches.
+
+### Option C — Cross-build for Linux/macOS from Windows (advanced)
+
+For users who want a single Windows machine to produce all three
+platform binaries without GitHub Actions:
+
+#### Linux .so via WSL2
+
+Install WSL2 with Ubuntu 22.04 (one-time):
+
+```powershell
+# in PowerShell as admin:
+wsl --install -d Ubuntu-22.04
+```
+
+Then follow the Linux build steps above inside the WSL2 shell. The
+resulting `.so` is a real ELF-x86_64 binary, identical to one built on
+native Ubuntu.
+
+#### macOS .dylib via osxcross (WSL2 + clang)
+
+This is non-trivial and depends on an Apple SDK tarball that you must
+extract from a Mac you have legal access to. Quick outline (full guide
+at https://github.com/tpoechtrager/osxcross):
+
+```bash
+# inside WSL2 Ubuntu
+sudo apt-get install -y clang cmake patch python3 libxml2-dev \
+    libssl-dev liblzma-dev libbz2-dev libfuse2 cpio
+git clone https://github.com/tpoechtrager/osxcross.git
+cd osxcross
+# Place MacOSX13.3.sdk.tar.xz (extracted from your Mac's Xcode) in tarballs/
+SDK_VERSION=13.3 OSX_VERSION_MIN=10.15 ./build.sh
+
+export PATH="$(pwd)/target/bin:$PATH"
+export OSXCROSS_TARGET_DIR="$(pwd)/target"
+
+# Build Qt5 + FFmpeg with the osxcross-clang wrappers (lengthy, see
+# the project README). Then point our CMake at them:
+cmake -B build_macos \
+    -DCMAKE_TOOLCHAIN_FILE="$(pwd)/target/toolchain.cmake" \
+    -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+    -DCMAKE_PREFIX_PATH=/path/to/cross-built-qt5 \
+    -DffmpegLibHint=/path/to/cross-built-ffmpeg/lib \
+    -DffmpegIncludeDir=/path/to/cross-built-ffmpeg/include
+cmake --build build_macos
+```
+
+Caveats:
+- Apple SDK redistribution is restricted; use only an SDK extracted
+  from a Mac you own.
+- The cross-built dylib will fail to load if Qt and FFmpeg were not
+  built with the same SDK / target.
+- Code-signing requires `ldid2` (also part of osxcross) for ad-hoc
+  signature, but Gatekeeper still warns end users without an Apple
+  Developer ID.
+
+For most maintainers, **Option A (GitHub Actions) is strictly easier**
+than osxcross — Apple provides macOS runners free for public repos.
+
+### Releasing a new version
+
+1. Bump `TS3SB_VERSION_BUILD` literal in `version.py` (next integer).
+2. Update `version.xml` to advertise the new build + version string.
+3. Refresh `release-notes.txt` (user-facing, no internal QA notes).
+4. Commit + push to `gamebaiters`.
+5. `git tag vX.Y.Z && git push origin vX.Y.Z` -> CI builds & releases.
+
+Three numbers must stay coherent: `TS3SB_VERSION_BUILD` (in the binary),
+`<latestVersion>` (in `version.xml`), and the git tag. If they drift,
+clients enter an offer-update-do-nothing loop.
 
 ---
 

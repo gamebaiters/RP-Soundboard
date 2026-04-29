@@ -241,13 +241,34 @@ jobs:
               exit 1
           fi
 
-      - name: Configure CMake (x86_64)
+      - name: Locate TS3.app Qt dylibs (must be present on runner)
+        id: ts3qt
+        run: |
+          # TS3 on macOS ships bare-named Qt dylibs (libQt5Core.dylib etc.)
+          # in its Frameworks dir, NOT framework bundles. Plugin must link
+          # against THESE so the @rpath ref baked into the plugin matches
+          # what TS3 provides at runtime.
+          for cand in \
+              "/Applications/TeamSpeak 3 Client.app/Contents/Frameworks" \
+              "/Applications/TeamSpeak 3.app/Contents/Frameworks"; do
+              if [ -e "$cand/libQt5Core.dylib" ]; then
+                  echo "TS3_QT=$cand" >> "$GITHUB_OUTPUT"
+                  echo "Found TS3 Qt at: $cand"
+                  ls "$cand"/libQt5*.dylib
+                  exit 0
+              fi
+          done
+          echo "ERROR: TS3.app Qt dylibs not found. Install TeamSpeak 3 on the runner Mac." >&2
+          exit 1
+
+      - name: Configure CMake (x86_64, link against TS3.app Qt)
         run: |
           cmake -B build \
               -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
               -DCMAKE_INSTALL_PREFIX=install \
               -DCMAKE_OSX_ARCHITECTURES=x86_64 \
               -DCMAKE_PREFIX_PATH=/usr/local/opt/qt@5 \
+              -DTS3_MAC_QT_LIB_DIR="${{ steps.ts3qt.outputs.TS3_QT }}" \
               -DffmpegLibHint=/usr/local/opt/ffmpeg/lib \
               -DffmpegIncludeDir=/usr/local/opt/ffmpeg/include
 
@@ -366,17 +387,26 @@ jobs:
 
           final_sweep
 
-          # Rewrite Qt framework paths in plugin to @rpath form. TS3.app
-          # on macOS ships QtCore.framework / QtGui.framework / etc. in
-          # its Frameworks dir and adds that dir to LC_RPATH on the host
-          # binary, so plugins loaded by TS3 inherit the rpath and find
-          # @rpath/QtCore.framework/Versions/5/QtCore at runtime.
+          # Rewrite Qt refs in plugin to @rpath/libQt5XYZ.dylib form (bare).
+          # TS3.app does NOT ship Qt as framework bundles - it ships flat
+          # dylibs (libQt5Core.dylib, libQt5Widgets.dylib, ...) in
+          # Contents/Frameworks/. Plugin's deps therefore need to look
+          # like '@rpath/libQt5Widgets.dylib' so dyld resolves them via
+          # TS3.app's executable rpath at load time.
           codesign --remove-signature "$PLUGIN" 2>/dev/null || true
           while IFS= read -r qtdep; do
               [ -z "$qtdep" ] && continue
-              rel="$(echo "$qtdep" | grep -oE 'Qt[A-Za-z]+\.framework/.+' || true)"
-              [ -n "$rel" ] && install_name_tool -change "$qtdep" "@rpath/${rel}" "$PLUGIN" || true
-          done < <(otool -L "$PLUGIN" | awk 'NR>1 {print $1}' | grep -E 'Qt[A-Za-z]+\.framework' || true)
+              # Two source forms:
+              #   1. .../QtWidgets.framework/Versions/5/QtWidgets        (Homebrew framework)
+              #   2. .../libQt5Widgets.dylib                              (TS3-style bare)
+              # Both should map to @rpath/libQt5Widgets.dylib
+              if echo "$qtdep" | grep -qE 'Qt[A-Za-z]+\.framework'; then
+                  qtmod="$(echo "$qtdep" | sed -nE 's|.*Qt([A-Za-z]+)\.framework.*|\1|p')"
+              else
+                  qtmod="$(echo "$qtdep" | sed -nE 's|.*libQt5([A-Za-z]+)\.dylib|\1|p')"
+              fi
+              [ -n "$qtmod" ] && install_name_tool -change "$qtdep" "@rpath/libQt5${qtmod}.dylib" "$PLUGIN" || true
+          done < <(otool -L "$PLUGIN" | awk 'NR>1 {print $1}' | grep -E '(Qt[A-Za-z]+\.framework|libQt5[A-Za-z]+\.dylib)' || true)
 
           # Re-sign every binary ad-hoc.
           for f in "$PLUGIN" stage/plugins/*.dylib; do

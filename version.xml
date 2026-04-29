@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <versionDescription>
   <product descVersion="1" name="rp_soundboard">
-    <latestVersion>1914</latestVersion>
-    <latestVersionString>1.0.114</latestVersionString>
+    <latestVersion>1915</latestVersion>
+    <latestVersionString>1.0.115</latestVersionString>
     <latestDownload>
-      <url>https://github.com/gamebaiters/RP-Soundboard/releases/download/v1.0.114/rp_soundboard_fx_1.0.114.ts3_plugin</url>
+      <url>https://github.com/gamebaiters/RP-Soundboard/releases/download/v1.0.115/rp_soundboard_fx_1.0.115.ts3_plugin</url>
     </latestDownload>
     <featureUrl>https://raw.githubusercontent.com/gamebaiters/RP-Soundboard/gamebaiters/release-notes.txt</featureUrl>
   </product>

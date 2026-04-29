@@ -1,41 +1,42 @@
-GameBaiters Soundboard 1.0.114
+GameBaiters Soundboard 1.0.115
 ==============================
 
 Critical macOS fix
 ------------------
-* Plugin failed to open on every Mac after install. Root cause: the
-  install script and the auto-updater helper script only stripped
-  com.apple.quarantine from a hardcoded list of dylib name patterns
-  (libav*, libsw*, librp_soundboard_fx*). The 1.0.113 bundle ships
-  another ~10 transitive dependencies (libssl, libcrypto, libvpx,
-  libdav1d, libmp3lame, libopus, libSvtAv1Enc, libx264, libx265,
-  libvmaf) which retained the quarantine xattr inherited from the
-  download. macOS Gatekeeper then refused to dlopen them and
-  TeamSpeak 3 reported "failed to open plugin".
+* Plugin failed to load with the error
+    Library not loaded: @rpath/QtWidgets.framework/Versions/5/QtWidgets
+  even after the quarantine xattr fix in 1.0.114. Root cause: TeamSpeak 3
+  on macOS does NOT ship Qt as framework bundles - it ships flat,
+  bare-named dylibs (libQt5Core.dylib, libQt5Widgets.dylib, ...)
+  inside Contents/Frameworks/. Linking the plugin against Homebrew's
+  framework-form Qt baked '@rpath/QtWidgets.framework/Versions/5/
+  QtWidgets' into the plugin's load commands; dyld then searched for
+  that exact path inside TS3.app and failed.
 
-  Fix: install_embedded_macos.sh and the auto-updater __APPLE__
-  helper now run xattr -cr on the entire plugin folder after copy
-  (clears quarantine + provenance + every other xattr). Each
-  Mach-O is also re-signed ad-hoc on the user's machine so
-  Gatekeeper has a fresh, locally-attached signature on every
-  binary the plugin will dlopen.
+  Fix: CI now passes -DTS3_MAC_QT_LIB_DIR=/Applications/TeamSpeak 3
+  Client.app/Contents/Frameworks to CMake, which redirects Qt5::Core /
+  Widgets / Gui / Network to the bare dylibs TS3 ships. The
+  post-link rewriter also normalises any remaining Qt ref to the
+  '@rpath/libQt5XYZ.dylib' bare form. The runner now has a sanity
+  check that fails the build early if TS3.app Qt dylibs aren't
+  present at the expected path.
+
+Carried over
+------------
+* xattr -cr on the entire plugin folder after install (clears
+  quarantine on every transitive bundled dep) - fixes "failed to
+  open plugin" caused by Gatekeeper blocking quarantined dylibs.
+* Recursive dependency bundler with @loader_path rewrites for
+  every Homebrew transitive dep (libssl, libvpx, libx264, ...).
+* Strip ad-hoc signature before install_name_tool changes; final
+  3-pass sweep catches any silent rewrite failures.
+* Re-codesign each Mach-O on the user's machine after copy.
 
 Reminder for users on Apple Silicon
 -----------------------------------
 * TeamSpeak 3 on macOS is x86_64-only regardless of Mac hardware -
   it runs through Rosetta 2 on Apple Silicon. The plugin therefore
-  ships as x86_64; that matches what TS3 expects when loading
-  plugins under Rosetta.
-
-Carried over from 1.0.113
--------------------------
-* Recursive dependency bundler with @loader_path rewrites. Plugin
-  dylib + every Homebrew transitive dep ship together; nothing
-  references /usr/local or /opt/homebrew at runtime.
-* Qt framework refs rewritten to @rpath/<framework>.framework/...
-  so TS3.app's Qt frameworks resolve at load time.
-* Strip ad-hoc signature before install_name_tool changes; final
-  3-pass sweep catches any silent rewrite failures.
+  ships as x86_64.
 
 Existing fork features
 ----------------------
@@ -45,7 +46,6 @@ Existing fork features
 * Skip +/- 5s and +/- 10s transport
 * Real-time waveform with click-to-seek
 * Multi-soundboard mode (up to 5 slots)
-* Update channel served from this gamebaiters branch on GitHub
 
 Installation
 ------------
@@ -58,5 +58,5 @@ Installation
 * Linux: from your TeamSpeak install directory run
     LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH ./package_inst <path-to-.ts3_plugin>
 
-Uninstall scripts (in the release assets) keep your rp_soundboard.ini
+Uninstall scripts in the release assets keep your rp_soundboard.ini
 config by default - press Y at the first prompt for a full wipe.

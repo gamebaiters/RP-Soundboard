@@ -133,9 +133,11 @@ jobs:
 
   # ---------------- macOS x86_64 ----------------
   build-macos:
-    # Intel runner (TS3 macOS is x86_64-only). For arm64 TS3 in the future,
-    # add a second job with macos-14 + arch=arm64.
-    runs-on: macos-13
+    # Self-hosted runner on a personal Mac (registered by the maintainer).
+    # Mirrors the configuration already validated on the test-automazione
+    # branch. Saves GitHub-hosted minutes and uses the exact toolchain
+    # the project owner has already verified locally.
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 

@@ -10,6 +10,7 @@
 #include "common.h"
 
 #include <cstdio>
+#include <cmath>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -74,6 +75,39 @@ void ModelObserver_Prog::notify(ConfigModel &model, ConfigModel::notifications_e
 		break;
 	case ConfigModel::NOTIFY_SET_MUTE_MYSELF_DURING_PB:
 		sampler->setMuteMyself(model.getMuteMyselfDuringPb());
+		break;
+	case ConfigModel::NOTIFY_SET_EARRAPE_PROTECTION:
+		sampler->setEarrapeProtection(model.getEarrapeProtection());
+		break;
+	case ConfigModel::NOTIFY_SET_PITCH_SPEED:
+	{
+		float factor = (float)pow(3.0, data / 100.0);
+		sampler->setPitchFactor(factor);
+		sampler->setSpeedFactor(factor);
+		break;
+	}
+	case ConfigModel::NOTIFY_SET_PITCH:
+	{
+		float factor = (float)pow(3.0, data / 100.0);
+		sampler->setPitchFactor(factor);
+		break;
+	}
+	case ConfigModel::NOTIFY_SET_SPEED:
+	{
+		float factor = (float)pow(3.0, data / 100.0);
+		sampler->setSpeedFactor(factor);
+		break;
+	}
+	case ConfigModel::NOTIFY_SET_REVERB:
+	{
+		// Slider 0..100 → mix 0.0..1.0
+		float mix = (float)data / 100.0f;
+		sampler->setReverbMix(mix);
+		break;
+	}
+	case ConfigModel::NOTIFY_SET_MULTI_SOUNDBOARD:
+		sampler->setMultiMode(data != 0);
+		break;
 	default:
 		break;
 	}
@@ -128,7 +162,7 @@ void sb_enableInterface(bool enabled)
 			notConnectedBubble->setBubbleStyle(false);
 			notConnectedBubble->setClosable(false);
 			notConnectedBubble->setText("You are not connected to a server.\n"
-				"RP Soundboard is disabled until you are connected properly.");
+				"GameBaiters - Soundboard is disabled until you are connected properly.");
 			notConnectedBubble->attachTo(configDialog);
 			if (configDialog->isVisible())
 				notConnectedBubble->show();
@@ -149,6 +183,8 @@ CAPI void sb_init()
 	QMessageBox::information(NULL, "", "rp soundboard plugin init, attach debugger now");
 #endif
 
+	InitFFmpegLibrary();
+
 	QTimer::singleShot(10, []{
 		configModel = new ConfigModel();
 		configModel->readConfig();
@@ -158,6 +194,7 @@ CAPI void sb_init()
 		sampler->init();
 
 		tsMgr = new TalkStateManager();
+		tsMgr->setSampler(sampler);
 		QObject::connect(sampler, &Sampler::onStartPlaying, tsMgr, &TalkStateManager::onStartPlaying, Qt::QueuedConnection);
 		QObject::connect(sampler, &Sampler::onStopPlaying, tsMgr, &TalkStateManager::onStopPlaying, Qt::QueuedConnection);
 		QObject::connect(sampler, &Sampler::onPausePlaying, tsMgr, &TalkStateManager::onPauseSound, Qt::QueuedConnection);
@@ -187,12 +224,19 @@ CAPI void sb_saveConfig()
 CAPI void sb_kill()
 {
 	configModel->remObserver(modelObserver);
-	delete modelObserver; 
+	delete modelObserver;
 	modelObserver = NULL;
+
+	// Disconnect all signals from sampler before shutdown to prevent
+	// callbacks firing into deleted objects during slot cleanup.
+	QObject::disconnect(sampler, nullptr, nullptr, nullptr);
 
 	sampler->shutdown();
 	delete sampler;
 	sampler = NULL;
+
+	delete tsMgr;
+	tsMgr = NULL;
 
 	configDialog->close();
 	delete configDialog;
@@ -259,9 +303,10 @@ CAPI void sb_unpauseSound()
 
 CAPI void sb_pauseButtonPressed()
 {
-	if (sampler->getState() == Sampler::ePLAYING)
+	// Check if any slot is playing or paused
+	if (sampler->findSlotByState(Sampler::ePLAYING) >= 0)
 		sb_pauseSound();
-	else if (sampler->getState() == Sampler::ePAUSED)
+	else if (sampler->findSlotByState(Sampler::ePAUSED) >= 0)
 		sb_unpauseSound();
 }
 
@@ -294,7 +339,17 @@ CAPI void sb_playButton(int btn)
     {
         const SoundInfo *sound = configModel->getSoundInfo(btn);
         if (sound)
+        {
+            // Apply per-sound Custom FX (same logic as ConfigQt::playSound)
+            if (sound->fxRemember)
+            {
+                configModel->setPitchValue(sound->fxPitch);
+                configModel->setSpeedValue(sound->fxSpeed);
+                configModel->setReverbValue(sound->fxReverb);
+                configModel->setSyncPitchSpeed(sound->fxSyncPitchSpeed);
+            }
             sb_playFile(*sound);
+        }
     }
 }
 

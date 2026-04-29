@@ -20,7 +20,7 @@
    </size>
   </property>
   <property name="windowTitle">
-   <string>RP Soundboard</string>
+   <string>GameBaiters - Soundboard</string>
   </property>
   <property name="windowIcon">
    <iconset resource="qtres.qrc">
@@ -73,6 +73,30 @@
          <number>1</number>
         </property>
         <item>
+         <widget class="QPushButton" name="b_skip_back_10">
+          <property name="text"><string>-10s</string></property>
+          <property name="maximumSize"><size><width>35</width><height>16777215</height></size></property>
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="b_skip_back_5">
+          <property name="text"><string>-5s</string></property>
+          <property name="maximumSize"><size><width>35</width><height>16777215</height></size></property>
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QPushButton" name="b_stop">
           <property name="enabled">
            <bool>true</bool>
@@ -112,6 +136,30 @@
           </property>
           <property name="checkable">
            <bool>false</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="b_skip_fwd_5">
+          <property name="text"><string>+5s</string></property>
+          <property name="maximumSize"><size><width>35</width><height>16777215</height></size></property>
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="b_skip_fwd_10">
+          <property name="text"><string>+10s</string></property>
+          <property name="maximumSize"><size><width>35</width><height>16777215</height></size></property>
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
           </property>
          </widget>
         </item>
@@ -156,6 +204,48 @@
        </widget>
       </item>
       <item>
+
+       <widget class="QLabel" name="lb_playback_time">
+
+        <property name="text">
+
+         <string>0:00 / 0:00</string>
+
+        </property>
+
+        <property name="minimumSize">
+
+         <size>
+
+          <width>80</width>
+
+          <height>0</height>
+
+         </size>
+
+        </property>
+
+       </widget>
+
+      </item>
+
+      <item>
+       <widget class="SoundView" name="waveformView">
+        <property name="minimumSize">
+         <size>
+          <width>100</width>
+          <height>28</height>
+         </size>
+        </property>
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+          <horstretch>1</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QLineEdit" name="filterEdit">
         <property name="maximumSize">
          <size>
@@ -175,6 +265,19 @@
         </property>
        </widget>
       </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QWidget" name="multiBarWidget" native="true">
+     <layout class="QVBoxLayout" name="multiBarLayout">
+      <property name="spacing">
+       <number>2</number>
+      </property>
+      <property name="leftMargin"><number>0</number></property>
+      <property name="topMargin"><number>0</number></property>
+      <property name="rightMargin"><number>0</number></property>
+      <property name="bottomMargin"><number>0</number></property>
      </layout>
     </widget>
    </item>
@@ -213,7 +316,7 @@
         <item>
          <layout class="QHBoxLayout" name="horizontalLayout_6">
           <item>
-           <widget class="QLabel" name="label">
+           <widget class="QLabel" name="label_vol_remote">
             <property name="text">
              <string>Volume Remote:</string>
             </property>
@@ -243,7 +346,7 @@
         <item>
          <layout class="QHBoxLayout" name="horizontalLayout_5">
           <item>
-           <widget class="QLabel" name="label">
+           <widget class="QLabel" name="label_vol_local">
             <property name="text">
              <string>Volume Local:</string>
             </property>
@@ -270,7 +373,58 @@
           </item>
          </layout>
         </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_link_earrape">
+          <item>
+           <widget class="QCheckBox" name="cb_earrape_protection">
+            <property name="text">
+             <string>Earrape Protection</string>
+            </property>
+            <property name="toolTip">
+             <string>Limits local audio output to prevent sudden loud sounds (does not affect remote playback)</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="cb_link_volumes">
+            <property name="text">
+             <string>Link Volumes</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="cb_remember_pitch_speed">
+            <property name="text">
+             <string>Remember Pitch/Speed/Reverb</string>
+            </property>
+            <property name="toolTip">
+             <string>Save and restore Pitch, Speed and Reverb settings across sessions</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="cb_multi_soundboard">
+            <property name="text">
+             <string>Multi Soundboard</string>
+            </property>
+            <property name="toolTip">
+             <string>Play up to 5 sounds simultaneously</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
        </layout>
+      </item>
+      <item>
+       <widget class="QWidget" name="pitchSpeedContainer" native="true">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>100</height>
+         </size>
+        </property>
+       </widget>
       </item>
       <item>
        <spacer name="horizontalSpacer_2">
@@ -456,6 +610,13 @@
    </item>
   </layout>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>SoundView</class>
+   <extends>QWidget</extends>
+   <header>soundview_qt.h</header>
+  </customwidget>
+ </customwidgets>
  <resources>
   <include location="qtres.qrc"/>
  </resources>

@@ -11,7 +11,7 @@
 
 #ifdef _MSC_VER
 
-#include "Windows.h"
+#include "windows.h"
 
 namespace
 {

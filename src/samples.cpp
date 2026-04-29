@@ -20,6 +20,47 @@
 #include <cassert>
 #include <math.h>
 
+// ===== FILE DEBUG LOGGING =====
+#define RPSB_FILE_DEBUG 1
+#if RPSB_FILE_DEBUG
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+#include <cstdio>
+#include <cstdarg>
+#include <ctime>
+static FILE *g_dbgSamples = nullptr;
+static void sdbgOpen()
+{
+	if (!g_dbgSamples)
+	{
+		char path[MAX_PATH];
+		if (GetEnvironmentVariableA("APPDATA", path, MAX_PATH))
+		{
+			strcat(path, "\\TS3Client\\rpsb_debug.log");
+			g_dbgSamples = fopen(path, "a");
+		}
+	}
+}
+static void sdbgLog(const char *fmt, ...)
+{
+	sdbgOpen();
+	if (!g_dbgSamples) return;
+	va_list ap;
+	va_start(ap, fmt);
+	fprintf(g_dbgSamples, "[samples] ");
+	vfprintf(g_dbgSamples, fmt, ap);
+	va_end(ap);
+	fprintf(g_dbgSamples, "\n");
+	fflush(g_dbgSamples);
+}
+#else
+#define sdbgLog(...) ((void)0)
+#endif
+
 //#define USE_SSE2
 //#define MEASURE_PERFORMANCE
 
@@ -41,72 +82,97 @@ static_assert(sizeof(short) == 2, "Short is weird size");
 #error Unknown compiler
 #endif
 
-#define ALIGNED_STACK_ARRAY(name, size, alignment) name[size] ALIGNED_(alignment) 
+#define ALIGNED_STACK_ARRAY(name, size, alignment) name[size] ALIGNED_(alignment)
 
 #define MAX_SAMPLEBUFFER_SIZE (48000 * 5)
 #define AMP_THRESH (SHRT_MAX / 2)
-
+#define AMP_THRESH_EARRAPE (SHRT_MAX / 6)
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// PlaybackSlot constructor
+//---------------------------------------------------------------
+Sampler::PlaybackSlot::PlaybackSlot() :
+	sbCapture(2, MAX_SAMPLEBUFFER_SIZE),
+	sbPlayback(2, MAX_SAMPLEBUFFER_SIZE),
+	producerThread(),
+	inputFile(NULL),
+	state(eSILENT),
+	soundDbSetting(0.0),
+	slotDbLocal(-1.0),
+	slotDbRemote(-1.0)
+{
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
 //---------------------------------------------------------------
 Sampler::Sampler() :
-	m_sbCapture(2, MAX_SAMPLEBUFFER_SIZE),
-	m_sbPlayback(2, MAX_SAMPLEBUFFER_SIZE),
-	m_sampleProducerThread(),
-	m_inputFile(NULL),
 	m_peakMeterCapture(0.01f, 0.00005f, 24000),
 	m_peakMeterPlayback(0.01f, 0.00005f, 24000),
 	m_volumeDivider(1),
+	m_volumeFactor(1.0f),
 	m_globalDbSettingLocal(-1.0),
 	m_globalDbSettingRemote(-1.0),
-    m_soundDbSetting(0.0),
-    m_state(eSILENT),
-    m_localPlayback(true)
+	m_localPlayback(true),
+	m_muteMyself(false),
+	m_earrapeProtection(false),
+	m_pitchFactor(1.0f),
+	m_speedFactor(1.0f),
+	m_intensityFactor(1.0f),
+	m_reverbMix(0.0f),
+	m_multiMode(false)
 {
-    /* Ensure resources are loaded */
-    Q_INIT_RESOURCE(qtres);
-
-    assert(m_state.is_lock_free());
+	/* Ensure resources are loaded */
+	Q_INIT_RESOURCE(qtres);
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 Sampler::~Sampler()
 {
-	
+
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 void Sampler::init()
 {
-	m_sampleProducerThread.addBuffer(&m_sbCapture);
-	m_sampleProducerThread.addBuffer(&m_sbPlayback, m_localPlayback);
-	m_sampleProducerThread.start();
+	sdbgLog("Sampler::init() called");
+	for (int i = 0; i < MAX_SLOTS; i++)
+	{
+		PlaybackSlot &slot = m_slots[i];
+		slot.producerThread.addBuffer(&slot.sbCapture);
+		slot.producerThread.addBuffer(&slot.sbPlayback, m_localPlayback);
+		slot.producerThread.start();
+	}
+	sdbgLog("Sampler::init() done, %d producer threads started", MAX_SLOTS);
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 void Sampler::shutdown()
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
 
-	if(m_inputFile)
+	for (int i = 0; i < MAX_SLOTS; i++)
 	{
-		m_inputFile->close();
-		delete m_inputFile;
-		m_inputFile = NULL;
+		PlaybackSlot &slot = m_slots[i];
+		if (slot.inputFile)
+		{
+			slot.inputFile->close();
+			delete slot.inputFile;
+			slot.inputFile = NULL;
+		}
+		slot.producerThread.stop();
 	}
-
-	m_sampleProducerThread.stop();
 }
 
 #ifdef USE_SSE2
@@ -131,7 +197,7 @@ inline void scaleSSE(__m128i &v, int factor)
 	__m128i v1 = _mm_srai_epi32(_mm_unpackhi_epi16(v, v), 16);
 
 	//TODO: Finish
-	
+
 }
 
 static inline __m128i muly(const __m128i &a, const __m128i &b)
@@ -149,14 +215,11 @@ double g_perfMeasurement = 0.0;
 #endif
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose: Fetch and mix samples from a single buffer
 //---------------------------------------------------------------
-int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int count, int channels, bool eraseConsumed, int ciLeft, int ciRight, bool overLeft, bool overRight )
+int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int count, int channels, bool eraseConsumed, int ciLeft, int ciRight, bool overLeft, bool overRight, float ampThresh )
 {
-	//printf("fetchSamples: samples = %p, count = %i, channels = %i, ciLeft = %i, ciRight = %i\n", samples, count, channels, ciLeft, ciRight);
-
-	if (m_state == ePAUSED)
-		return 0;
+	float thresh = (ampThresh > 0.0f) ? ampThresh : (float)AMP_THRESH;
 
 	SampleBuffer::Lock sbl(sb.getMutex());
 
@@ -176,126 +239,67 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 		for(int i = 0; i < count; i++)
 			samples[i*channels+ciRight] = 0;
 
-	const int write = std::min(count, sb.avail());
-
+	const float volGain = m_volumeFactor;
+	const float intensity = m_intensityFactor;
+	const int avail = sb.avail();
 	const short* const in = sb.getBufferData();
 	short* const out = samples;
+	int write = 0;
+	int consumed = 0;
 
-#ifdef MEASURE_PERFORMANCE
-	std::chrono::time_point<HighResClock> start, end;
-	start = HighResClock::now();
-#endif
-
-#ifndef USE_SSE2
-	if(channels == 1)
+	write = std::min(count, avail);
+	if (channels == 1)
 	{
 		for (int i = 0; i < write; i++)
 		{
-			float sample = out[i] + m_volumeFactor * (float(in[i * 2]) + float(in[i * 2 + 1])) * 0.5f;
-			pm.process(sample);
-			out[i] = pm.limit(sample, AMP_THRESH);
-		}
-	}
-	else
-	{
-		for(int i = 0; i < write; i++)
-		{
-			float sample0 = out[i * channels + ciLeft] + m_volumeFactor * float(in[i * 2]);
-			float sample1 = out[i * channels + ciRight] + m_volumeFactor * float(in[i * 2 + 1]);
-			pm.process(fabs(sample0) > fabs(sample1) ? sample0 : sample1);
-			out[i * channels + ciLeft] = pm.limit(sample0, AMP_THRESH);
-			out[i * channels + ciRight] = pm.limit(sample1, AMP_THRESH);
-		}
-	}
-#else // SSE implementation is currently not feature complete (and not really beneficial performance wise either)
-	if(channels == 1)
-	{
-		__m128i ones = _mm_set1_epi16(1);
-		__m128i volumeDivider = _mm_set1_epi32(m_volumeDivider);
-        int i;
-        for(i = 0; i < (write - 7); i += 8)
-		{
-			__m128i a, b;
-			a = _mm_loadu_si128(reinterpret_cast<const __m128i*>(in + i*2));
-			b = _mm_loadu_si128(reinterpret_cast<const __m128i*>(in + i*2 + 8));
-
-			// merge channels via mad
-			// mad returns the following: (x0 * y0 + x1 * y1, x2 * y2 + x3 * y3, ... )
-			// If we set y to only ones we just add every second member
-			// madd also returns the result as 32 bit integers
-			a = _mm_madd_epi16(a, ones); // = (a0 + a1, a2 + a3, a4 + a5, a6 + a7)
-			b = _mm_madd_epi16(b, ones); // = (b0 + b1, b2 + b3, b4 + b5, b6 + b7)
-
-			// scale, multiply with volume divider and divide by 8192
-			// normally we would divide by 4096 but we haven't divided our samples
-			// by two in the channel merge stage.
-			// The resulting operation is essentially a = (a * volumeDivider) / 4096 / 2
-			a = _mm_srai_epi32(muly(a, volumeDivider), 13);
-			b = _mm_srai_epi32(muly(b, volumeDivider), 13);
-
-			//Now convert 4*32 bits from a and 4*32 bits from b to 8*16 bits output
-			a = _mm_packs_epi32(a, b);
-
-			b = _mm_loadu_si128(reinterpret_cast<__m128i*>(out + i)); //b = out[i]
-			b = _mm_adds_epi16(a, b); // b = sat(a + b)
-			_mm_storeu_si128(reinterpret_cast<__m128i*>(out + i), b);
-		}
-        // Remaining samples (remainder of div by 8)
-        for (; i < write; i++)
-            out[i] += scale(in[i*2] / 2 + in[i*2+1] / 2);
-	}
-	else
-	{
-		__m128i volumeDivider = _mm_set1_epi32(m_volumeDivider);
-		// Align outbuf to 16 bytes
-		char outbufBuf[8*sizeof(short)+16];
-		short *outbuf = (short*)(outbufBuf + (16 - (size_t)outbufBuf % 16));
-		assert(reinterpret_cast<size_t>(outbuf) % 16 == 0);
-        int i;
-        for(i = 0; i < (write - 3); i += 4)
-		{
-			__m128i v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(in + i*2));
-			//widen to 32 bits
-			__m128i a = _mm_srai_epi32(_mm_unpacklo_epi16(v, v), 16);
-			__m128i b = _mm_srai_epi32(_mm_unpackhi_epi16(v, v), 16);
-
-			// scale, multiply with volume divider and divide by 4096
-			a = _mm_srai_epi32(muly(a, volumeDivider), 12);
-			b = _mm_srai_epi32(muly(b, volumeDivider), 12);
-
-			//store into aligned memory
-			_mm_store_si128(reinterpret_cast<__m128i*>(outbuf), _mm_packs_epi32(a, b));
-
-			for(int k = 0; k < 4; ++k)
+			float sbSample = volGain * intensity * (float(in[i * 2]) + float(in[i * 2 + 1])) * 0.5f;
+			float mixed = (float)out[i] + sbSample;
+			if (intensity <= 1.01f)
 			{
-				int id = (i + k) * channels;
-				out[id + ciLeft] += outbuf[k*2];
-				out[id + ciRight] += outbuf[k*2+1];
+				pm.process(mixed);
+				mixed = (float)pm.limit(mixed, thresh);
 			}
+			else
+			{
+				pm.process(mixed);
+			}
+			if (mixed > 32767.0f) mixed = 32767.0f;
+			else if (mixed < -32768.0f) mixed = -32768.0f;
+			out[i] = (short)mixed;
 		}
-        // Remaining samples (remainder of div by 4)
-        for (; i < write; i++)
-        {
-            out[i * channels + ciLeft] += scale(in[i*2]);
-            out[i * channels + ciRight] += scale(in[i*2+1]);
-        }
 	}
-#endif
-
-	sb.consume(NULL, write, true);
-
-#ifdef MEASURE_PERFORMANCE
-	end = HighResClock::now();
-	std::chrono::duration<double> elapsed = end - start;
-	g_perfMeasurement += elapsed.count();
-	if(++g_perfMeasureCount >= 1000)
+	else
 	{
-		logInfo("Avg. time in fetchSamples: %f us, volume: %f, limiter: %f", g_perfMeasurement / (double)g_perfMeasureCount * 1000000.0,
-			m_volumeFactor, std::min(AMP_THRESH / m_peakMeterPlayback.getOutput(), 1.0f));
-		g_perfMeasureCount = 0;
-		g_perfMeasurement = 0.0;
+		for (int i = 0; i < write; i++)
+		{
+			float sbL = volGain * intensity * float(in[i * 2]);
+			float sbR = volGain * intensity * float(in[i * 2 + 1]);
+			float tsL = (float)out[i * channels + ciLeft];
+			float tsR = (float)out[i * channels + ciRight];
+			float mixL = tsL + sbL;
+			float mixR = tsR + sbR;
+			float resL, resR;
+			if (intensity <= 1.01f)
+			{
+				pm.process(fabs(mixL) > fabs(mixR) ? mixL : mixR);
+				resL = (float)pm.limit(mixL, thresh);
+				resR = (float)pm.limit(mixR, thresh);
+			}
+			else
+			{
+				pm.process(fabs(mixL) > fabs(mixR) ? mixL : mixR);
+				resL = mixL;
+				resR = mixR;
+			}
+			if (resL > 32767.0f) resL = 32767.0f; else if (resL < -32768.0f) resL = -32768.0f;
+			if (resR > 32767.0f) resR = 32767.0f; else if (resR < -32768.0f) resR = -32768.0f;
+			out[i * channels + ciLeft] = (short)resL;
+			out[i * channels + ciRight] = (short)resR;
+		}
 	}
-#endif
+	consumed = write;
+
+	sb.consume(NULL, consumed, true);
 	return write;
 }
 
@@ -309,29 +313,72 @@ int Sampler::findChannelId(unsigned int channel, const unsigned int *channelSpea
 }
 
 
+//---------------------------------------------------------------
+// Purpose: Fetch input (capture) samples - mix all active slots
+//---------------------------------------------------------------
 int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *finished)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
 
-	setVolumeDb(m_globalDbSettingRemote + m_soundDbSetting);
-	int written = fetchSamples(m_sbCapture, m_peakMeterCapture, samples, count, channels, true, 0, 1, m_muteMyself, m_muteMyself);
-	
-    if(m_state == ePLAYING && m_inputFile && m_inputFile->done())
+	int totalWritten = 0;
+
+	for (int s = 0; s < MAX_SLOTS; s++)
 	{
-        SampleBuffer::Lock sbl(m_sbCapture.getMutex());
-        if (m_sbCapture.avail() == 0)
-        {
-            m_state = eSILENT;
-            if(finished)
-                *finished = true;
-            emit onStopPlaying();
-        }
+		PlaybackSlot &slot = m_slots[s];
+		state_e st = slot.state.load();
+		if (st != ePLAYING && st != ePAUSED)
+			continue;
+
+		if (st == ePAUSED)
+			continue;
+
+		// Set volume for this slot: per-slot in multi-mode, global otherwise
+		double remoteDb = m_multiMode ? slot.slotDbRemote : m_globalDbSettingRemote;
+		setVolumeDb(remoteDb + slot.soundDbSetting);
+
+		bool muteCapture = m_muteMyself.load(std::memory_order_relaxed);
+		bool isFirstSlot = (totalWritten == 0);
+		int written = fetchSamples(slot.sbCapture, m_peakMeterCapture, samples, count, channels, true,
+			0, 1, muteCapture && isFirstSlot, muteCapture && isFirstSlot);
+		if (written > totalWritten)
+			totalWritten = written;
+
+		// Check if this slot's file is done
+		if (st == ePLAYING && slot.inputFile && slot.inputFile->done())
+		{
+			SampleBuffer::Lock sbl(slot.sbCapture.getMutex());
+			if (slot.sbCapture.avail() == 0)
+			{
+				slot.state = eSILENT;
+				emit onStopPlaying(s);
+			}
+		}
 	}
 
-	return written;
+	if (finished && totalWritten == 0)
+	{
+		// Check if any slot is still playing
+		bool anyPlaying = false;
+		for (int s = 0; s < MAX_SLOTS; s++)
+		{
+			state_e st = m_slots[s].state.load();
+			if (st == ePLAYING || st == ePAUSED)
+			{
+				anyPlaying = true;
+				break;
+			}
+		}
+		if (!anyPlaying)
+			*finished = true;
+	}
+
+	return totalWritten;
 }
 
 
+//---------------------------------------------------------------
+// Purpose: Fetch output (playback) samples - mix all active slots
+//---------------------------------------------------------------
 int Sampler::fetchOutputSamples(short *samples, int count, int channels, const unsigned int *channelSpeakerArray, unsigned int *channelFillMask)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
@@ -340,99 +387,260 @@ int Sampler::fetchOutputSamples(short *samples, int count, int channels, const u
 	const unsigned int bitMaskRight = SPEAKER_FRONT_RIGHT | SPEAKER_HEADPHONES_RIGHT;
 	int ciLeft = findChannelId(bitMaskLeft, channelSpeakerArray, channels);
 	int ciRight = findChannelId(bitMaskRight, channelSpeakerArray, channels);
-	setVolumeDb(m_globalDbSettingLocal + m_soundDbSetting);
-	int written = fetchSamples(m_sbPlayback, m_peakMeterPlayback, samples, count, channels, true, ciLeft, ciRight,
-		(*channelFillMask & bitMaskLeft) == 0,
-		(*channelFillMask & bitMaskRight) == 0);
-	
-	if(written > 0)
-		*channelFillMask |= (bitMaskLeft | bitMaskRight);
+	float localThresh = m_earrapeProtection.load(std::memory_order_relaxed) ? (float)AMP_THRESH_EARRAPE : (float)AMP_THRESH;
 
-    if(m_state == ePLAYING_PREVIEW && m_inputFile && m_inputFile->done())
+	int totalWritten = 0;
+
+	for (int s = 0; s < MAX_SLOTS; s++)
 	{
-        SampleBuffer::Lock sbl(m_sbPlayback.getMutex());
-        if (m_sbPlayback.avail() == 0)
-        {
-            m_state = eSILENT;
-            emit onStopPlaying();
-        }
+		PlaybackSlot &slot = m_slots[s];
+		state_e st = slot.state.load();
+
+		// Both ePLAYING and ePLAYING_PREVIEW output locally via sbPlayback
+		if (st != ePLAYING_PREVIEW && st != ePLAYING && st != ePAUSED)
+			continue;
+
+		if (st == ePAUSED)
+			continue;
+
+		// Set volume for this slot: per-slot in multi-mode, global otherwise
+		double localDb = m_multiMode ? slot.slotDbLocal : m_globalDbSettingLocal;
+		setVolumeDb(localDb + slot.soundDbSetting);
+
+		bool isFirstSlot = (totalWritten == 0);
+		int written = fetchSamples(slot.sbPlayback, m_peakMeterPlayback, samples, count, channels, true,
+			ciLeft, ciRight,
+			isFirstSlot && ((*channelFillMask & bitMaskLeft) == 0),
+			isFirstSlot && ((*channelFillMask & bitMaskRight) == 0),
+			localThresh);
+
+		if (written > totalWritten)
+			totalWritten = written;
+
+		// Check if this preview slot's file is done
+		if (st == ePLAYING_PREVIEW && slot.inputFile && slot.inputFile->done())
+		{
+			SampleBuffer::Lock sbl(slot.sbPlayback.getMutex());
+			if (slot.sbPlayback.avail() == 0)
+			{
+				slot.state = eSILENT;
+				emit onStopPlaying(s);
+			}
+		}
 	}
 
-	return written;
-}
+	if (totalWritten > 0)
+		*channelFillMask |= (bitMaskLeft | bitMaskRight);
 
-
-bool Sampler::playFile(const SoundInfo &sound)
-{
-	return playSoundInternal(sound, false);
+	return totalWritten;
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose: Also mix regular playback slots into local output
+//---------------------------------------------------------------
+bool Sampler::playFile(const SoundInfo &sound)
+{
+	return playSoundInSlot(-1, sound, false);
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
 //---------------------------------------------------------------
 bool Sampler::playPreview(const SoundInfo &sound)
 {
-	return playSoundInternal(sound, true);
+	return playSoundInSlot(-1, sound, true);
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose: Stop playback for specific slot or all slots
 //---------------------------------------------------------------
-void Sampler::stopPlayback()
+void Sampler::stopPlayback(int slot)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
-	stopSoundInternal();
+	if (slot == -1)
+	{
+		for (int s = 0; s < MAX_SLOTS; s++)
+			stopSlotInternal(s);
+	}
+	else if (slot >= 0 && slot < MAX_SLOTS)
+	{
+		stopSlotInternal(slot);
+	}
 }
 
 #define VOLUMESCALER_EXPONENT 1.0
 #define VOLUMESCALER_DB_MIN -28.0
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 void Sampler::setVolumeRemote( int vol )
 {
+	std::lock_guard<std::mutex> Lock(m_mutex);
 	double v = (double)vol / 100.0;
 	double db = pow(1.0 - v, VOLUMESCALER_EXPONENT) * VOLUMESCALER_DB_MIN;
 	m_globalDbSettingRemote = db;
-	setVolumeDb(m_globalDbSettingRemote + m_soundDbSetting);
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 void Sampler::setVolumeLocal( int vol )
 {
+	std::lock_guard<std::mutex> Lock(m_mutex);
 	double v = (double)vol / 100.0;
 	double db = pow(1.0 - v, VOLUMESCALER_EXPONENT) * VOLUMESCALER_DB_MIN;
 	m_globalDbSettingLocal = db;
-	setVolumeDb(m_globalDbSettingLocal + m_soundDbSetting);
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose: Set per-slot local volume (for multi-mode)
+//---------------------------------------------------------------
+void Sampler::setSlotVolumeLocal(int slot, int vol)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	if (slot >= 0 && slot < MAX_SLOTS)
+	{
+		double v = (double)vol / 100.0;
+		double db = pow(1.0 - v, VOLUMESCALER_EXPONENT) * VOLUMESCALER_DB_MIN;
+		m_slots[slot].slotDbLocal = db;
+	}
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Set per-slot remote volume (for multi-mode)
+//---------------------------------------------------------------
+void Sampler::setSlotVolumeRemote(int slot, int vol)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	if (slot >= 0 && slot < MAX_SLOTS)
+	{
+		double v = (double)vol / 100.0;
+		double db = pow(1.0 - v, VOLUMESCALER_EXPONENT) * VOLUMESCALER_DB_MIN;
+		m_slots[slot].slotDbRemote = db;
+	}
+}
+
+
+void Sampler::setSlotPitchFactor(int slot, float factor)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	if (slot >= 0 && slot < MAX_SLOTS && m_slots[slot].inputFile)
+		m_slots[slot].inputFile->setPitchFactor(factor);
+}
+
+
+void Sampler::setSlotSpeedFactor(int slot, float factor)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	if (slot >= 0 && slot < MAX_SLOTS && m_slots[slot].inputFile)
+		m_slots[slot].inputFile->setSpeedFactor(factor);
+}
+
+
+void Sampler::setSlotReverbMix(int slot, float mix)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	if (slot >= 0 && slot < MAX_SLOTS && m_slots[slot].inputFile)
+		m_slots[slot].inputFile->setReverbMix(mix);
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
 //---------------------------------------------------------------
 void Sampler::setLocalPlayback( bool enabled )
 {
-	m_localPlayback = enabled;
-	m_sampleProducerThread.setBufferEnabled(&m_sbPlayback, enabled);
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	m_localPlayback.store(enabled, std::memory_order_relaxed);
+	for (int i = 0; i < MAX_SLOTS; i++)
+		m_slots[i].producerThread.setBufferEnabled(&m_slots[i].sbPlayback, enabled);
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 void Sampler::setMuteMyself(bool enabled)
 {
-	m_muteMyself = enabled;
+	m_muteMyself.store(enabled, std::memory_order_relaxed);
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
+//---------------------------------------------------------------
+void Sampler::setEarrapeProtection(bool enabled)
+{
+	m_earrapeProtection.store(enabled, std::memory_order_relaxed);
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Set pitch factor for all active slots
+//---------------------------------------------------------------
+void Sampler::setPitchFactor(float factor)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	m_pitchFactor = factor;
+	for (int i = 0; i < MAX_SLOTS; i++)
+	{
+		PlaybackSlot &slot = m_slots[i];
+		if (slot.inputFile)
+			slot.inputFile->setPitchFactor(factor);
+	}
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Set speed factor for all active slots
+//---------------------------------------------------------------
+void Sampler::setSpeedFactor(float factor)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	m_speedFactor = factor;
+	for (int i = 0; i < MAX_SLOTS; i++)
+	{
+		PlaybackSlot &slot = m_slots[i];
+		if (slot.inputFile)
+			slot.inputFile->setSpeedFactor(factor);
+	}
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Set intensity (gain) multiplier
+//---------------------------------------------------------------
+void Sampler::setIntensityFactor(float factor)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	m_intensityFactor = factor;
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Set reverb mix for all active slots (0.0=dry, 1.0=full reverb)
+//---------------------------------------------------------------
+void Sampler::setReverbMix(float mix)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	m_reverbMix = mix;
+	for (int i = 0; i < MAX_SLOTS; i++)
+	{
+		PlaybackSlot &slot = m_slots[i];
+		if (slot.inputFile)
+			slot.inputFile->setReverbMix(mix);
+	}
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
 //---------------------------------------------------------------
 void Sampler::setVolumeDb( double decibel )
 {
@@ -443,101 +651,308 @@ void Sampler::setVolumeDb( double decibel )
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose: Stop a single slot
 //---------------------------------------------------------------
-void Sampler::stopSoundInternal()
+void Sampler::stopSlotInternal(int slot)
 {
-	if (m_inputFile)
+	PlaybackSlot &s = m_slots[slot];
+	if (s.inputFile)
 	{
-		m_state = eSILENT;
-		m_sampleProducerThread.setSource(NULL);
-		m_inputFile->close();
-		delete m_inputFile;
-		m_inputFile = NULL;
+		s.state = eSILENT;
+		s.producerThread.setSource(NULL);
+		s.inputFile->close();
+		delete s.inputFile;
+		s.inputFile = NULL;
 
-		//Clear buffers
-		SampleBuffer::Lock sblc(m_sbCapture.getMutex());
-		SampleBuffer::Lock sblp(m_sbPlayback.getMutex());
-		m_sbCapture.consume(NULL, m_sbCapture.avail());
-		m_sbPlayback.consume(NULL, m_sbPlayback.avail());
+		// Clear buffers
+		SampleBuffer::Lock sblc(s.sbCapture.getMutex());
+		SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
+		s.sbCapture.consume(NULL, s.sbCapture.avail());
+		s.sbPlayback.consume(NULL, s.sbPlayback.avail());
 
-		emit onStopPlaying();
+		// Reset per-slot volume to default
+		s.slotDbLocal = -1.0;
+		s.slotDbRemote = -1.0;
+
+		emit onStopPlaying(slot);
 	}
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose: Find a free slot, -1 if none available
 //---------------------------------------------------------------
-bool Sampler::playSoundInternal( const SoundInfo &sound, bool preview )
+int Sampler::findFreeSlot() const
+{
+	int maxSlots = m_multiMode ? MAX_SLOTS : 1;
+	for (int i = 0; i < maxSlots; i++)
+	{
+		if (m_slots[i].state.load() == eSILENT)
+			return i;
+	}
+	return -1;
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Play a sound in a specific slot (or find one if slot=-1)
+//---------------------------------------------------------------
+bool Sampler::playSoundInSlot(int slot, const SoundInfo &sound, bool preview)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
 
-	stopSoundInternal();
+	sdbgLog("playSoundInSlot: slot=%d file='%s' preview=%d startTime=%.2f playTime=%.2f vol=%.1f",
+		slot, sound.filename.toUtf8().constData(), preview, sound.getStartTime(), sound.getPlayTime(), (double)sound.volume);
 
-	m_inputFile = CreateInputFileFFmpeg();
-
-	if(m_inputFile->open(sound.filename.toUtf8(), sound.getStartTime(), sound.getPlayTime()) != 0)
+	if (slot == -1)
 	{
-		delete m_inputFile;
-		m_inputFile = NULL;
+		// In single mode, stop current sound first
+		if (!m_multiMode)
+		{
+			stopSlotInternal(0);
+			slot = 0;
+		}
+		else
+		{
+			slot = findFreeSlot();
+			if (slot == -1)
+			{
+				sdbgLog("  No free slot available (max %d)", m_multiMode ? MAX_SLOTS : 1);
+				return false;
+			}
+		}
+	}
+
+	if (slot < 0 || slot >= MAX_SLOTS)
+		return false;
+
+	// Stop this slot if it's already playing
+	stopSlotInternal(slot);
+
+	PlaybackSlot &s = m_slots[slot];
+
+	s.inputFile = CreateInputFileFFmpeg();
+	sdbgLog("  CreateInputFileFFmpeg returned %p for slot %d", s.inputFile, slot);
+
+	int openRet = s.inputFile->open(sound.filename.toUtf8(), sound.getStartTime(), sound.getPlayTime());
+	sdbgLog("  open() returned %d", openRet);
+	if (openRet != 0)
+	{
+		sdbgLog("  FAILED to open file, deleting inputFile");
+		delete s.inputFile;
+		s.inputFile = NULL;
 		return false;
 	}
 
-	m_soundDbSetting = (double)sound.volume;
-	setVolumeDb(m_globalDbSettingLocal + m_soundDbSetting);
+	s.soundDbSetting = (double)sound.volume;
+	// Initialize per-slot volume from global defaults
+	s.slotDbLocal = m_globalDbSettingLocal;
+	s.slotDbRemote = m_globalDbSettingRemote;
+	double localDb = m_multiMode ? s.slotDbLocal : m_globalDbSettingLocal;
+	setVolumeDb(localDb + s.soundDbSetting);
+	sdbgLog("  volume set: soundDb=%.1f globalLocal=%.1f globalRemote=%.1f", s.soundDbSetting, m_globalDbSettingLocal, m_globalDbSettingRemote);
 
-	SampleBuffer::Lock sblc(m_sbCapture.getMutex());
-	SampleBuffer::Lock sblp(m_sbPlayback.getMutex());
+	// Apply current pitch/speed factors to the new input file
+	if (m_pitchFactor != 1.0f)
+		s.inputFile->setPitchFactor(m_pitchFactor);
+	if (m_speedFactor != 1.0f)
+		s.inputFile->setSpeedFactor(m_speedFactor);
+	if (m_reverbMix > 0.0f)
+		s.inputFile->setReverbMix(m_reverbMix);
+	sdbgLog("  pitch=%.2f speed=%.2f reverb=%.2f applied to slot %d inputFile", m_pitchFactor, m_speedFactor, m_reverbMix, slot);
 
-	//Clear buffers
-	m_sbCapture.consume(NULL, m_sbCapture.avail());
-	m_sbPlayback.consume(NULL, m_sbPlayback.avail());
+	SampleBuffer::Lock sblc(s.sbCapture.getMutex());
+	SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
 
-	if(preview)
+	// Clear buffers
+	s.sbCapture.consume(NULL, s.sbCapture.avail());
+	s.sbPlayback.consume(NULL, s.sbPlayback.avail());
+
+	if (preview)
 	{
-		m_state = ePLAYING_PREVIEW;
-		m_sampleProducerThread.setBufferEnabled(&m_sbCapture, false);
-		m_sampleProducerThread.setBufferEnabled(&m_sbPlayback, true);
+		s.state = ePLAYING_PREVIEW;
+		s.producerThread.setBufferEnabled(&s.sbCapture, false);
+		s.producerThread.setBufferEnabled(&s.sbPlayback, true);
 	}
 	else
 	{
-		m_state = ePLAYING;
-		m_sampleProducerThread.setBufferEnabled(&m_sbCapture, true);
+		s.state = ePLAYING;
+		s.producerThread.setBufferEnabled(&s.sbCapture, true);
+		s.producerThread.setBufferEnabled(&s.sbPlayback, m_localPlayback.load(std::memory_order_relaxed));
 	}
 
-	m_sampleProducerThread.setSource(m_inputFile);
+	s.producerThread.setSource(s.inputFile);
 
-	emit onStartPlaying(preview, sound.filename);
+	emit onStartPlaying(slot, preview, sound.filename);
 
 	return true;
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose: Pause playback for specific slot or all
 //---------------------------------------------------------------
-void Sampler::pausePlayback()
+void Sampler::pausePlayback(int slot)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
-	if (m_state == ePLAYING)
+	if (slot == -1)
 	{
-		m_state = ePAUSED;
-		emit onPausePlaying();
+		for (int s = 0; s < MAX_SLOTS; s++)
+		{
+			if (m_slots[s].state == ePLAYING)
+			{
+				m_slots[s].state = ePAUSED;
+				emit onPausePlaying(s);
+			}
+		}
+	}
+	else if (slot >= 0 && slot < MAX_SLOTS)
+	{
+		if (m_slots[slot].state == ePLAYING)
+		{
+			m_slots[slot].state = ePAUSED;
+			emit onPausePlaying(slot);
+		}
 	}
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose: Unpause playback for specific slot or all
 //---------------------------------------------------------------
-void Sampler::unpausePlayback()
+void Sampler::unpausePlayback(int slot)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
-	if (m_state == ePAUSED)
+	if (slot == -1)
 	{
-		m_state = ePLAYING;
-		emit onUnpausePlaying();
+		for (int s = 0; s < MAX_SLOTS; s++)
+		{
+			if (m_slots[s].state == ePAUSED)
+			{
+				m_slots[s].state = ePLAYING;
+				emit onUnpausePlaying(s);
+			}
+		}
+	}
+	else if (slot >= 0 && slot < MAX_SLOTS)
+	{
+		if (m_slots[slot].state == ePAUSED)
+		{
+			m_slots[slot].state = ePLAYING;
+			emit onUnpausePlaying(slot);
+		}
 	}
 }
 
+
+//---------------------------------------------------------------
+// Purpose: Get playback position for a specific slot
+//---------------------------------------------------------------
+double Sampler::getPosition(int slot)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	if (slot >= 0 && slot < MAX_SLOTS)
+	{
+		PlaybackSlot &s = m_slots[slot];
+		if (s.inputFile && s.state != eSILENT)
+			return s.inputFile->getPosition();
+	}
+	return 0.0;
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Get total length for a specific slot
+//---------------------------------------------------------------
+double Sampler::getLength(int slot)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	if (slot >= 0 && slot < MAX_SLOTS)
+	{
+		PlaybackSlot &s = m_slots[slot];
+		if (s.inputFile && s.state != eSILENT)
+			return s.inputFile->getLength();
+	}
+	return 0.0;
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Seek to position for a specific slot
+//---------------------------------------------------------------
+void Sampler::seek(double seconds, int slot)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	if (slot >= 0 && slot < MAX_SLOTS)
+	{
+		PlaybackSlot &s = m_slots[slot];
+		if (s.inputFile && s.state != eSILENT)
+		{
+			s.inputFile->seek(seconds);
+
+			// Flush buffers to prevent old audio from playing
+			SampleBuffer::Lock sblc(s.sbCapture.getMutex());
+			SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
+			s.sbCapture.clear();
+			s.sbPlayback.clear();
+		}
+	}
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Get state of a specific slot
+//---------------------------------------------------------------
+Sampler::state_e Sampler::getState(int slot) const
+{
+	if (slot >= 0 && slot < MAX_SLOTS)
+		return m_slots[slot].state.load();
+	return eSILENT;
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Enable/disable multi-soundboard mode
+//---------------------------------------------------------------
+void Sampler::setMultiMode(bool enabled)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	m_multiMode = enabled;
+
+	// If disabling multi mode, stop all slots except slot 0
+	if (!enabled)
+	{
+		for (int s = 1; s < MAX_SLOTS; s++)
+			stopSlotInternal(s);
+	}
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Count active (non-silent) slots
+//---------------------------------------------------------------
+int Sampler::getActiveSlotCount() const
+{
+	int count = 0;
+	for (int i = 0; i < MAX_SLOTS; i++)
+	{
+		state_e st = m_slots[i].state.load();
+		if (st != eSILENT)
+			count++;
+	}
+	return count;
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Find first slot with the given state
+//---------------------------------------------------------------
+int Sampler::findSlotByState(state_e state) const
+{
+	for (int i = 0; i < MAX_SLOTS; i++)
+	{
+		if (m_slots[i].state.load() == state)
+			return i;
+	}
+	return -1;
+}

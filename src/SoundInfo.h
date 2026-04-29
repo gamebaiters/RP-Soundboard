@@ -38,6 +38,12 @@ public:
 	int cropStopAfterAt;
 	int cropStopValue;
 	int cropStopUnit;
+	float fxPitchSpeed;   // legacy (kept for config compat)
+	bool fxRemember;
+	int fxPitch;          // -100..100 slider value
+	int fxSpeed;          // -100..100 slider value
+	int fxReverb;         // 0..100 slider value
+	bool fxSyncPitchSpeed;
 };
 
 #endif // rpsbsrc__SoundInfo_H__

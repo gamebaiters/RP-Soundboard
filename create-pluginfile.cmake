@@ -6,11 +6,8 @@ execute_process(
 )
 string(STRIP "${gitVersionRaw}" gitVersion)
 
-set(outputFile "${RPSB_PLUGINFILE_OUTPUT_DIR}/rp_soundboard_${gitVersion}.ts3_plugin")
-
-message("Creating final plugin package in ${RPSB_PLUGINFILE_OUTPUT_DIR}")
-
+message("Running 7zip to create final plugin package in ${RPSB_PLUGINFILE_OUTPUT_DIR}")
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E tar "cfv" "${outputFile}" --format=zip .
+    COMMAND "C:/Program Files/7-Zip/7z.exe" a "${RPSB_PLUGINFILE_OUTPUT_DIR}/rp_soundboard_${gitVersion}.ts3_plugin" -tzip -mx=9 -mm=Deflate "*"
     WORKING_DIRECTORY "${CMAKE_INSTALL_PREFIX}"
 )

@@ -25,7 +25,7 @@ SampleProducerThread::SampleProducerThread() :
 	m_running(false),
 	m_stop(false)
 {
-	
+
 }
 
 
@@ -34,11 +34,11 @@ SampleProducerThread::SampleProducerThread() :
 //---------------------------------------------------------------
 void SampleProducerThread::start()
 {
-	if(m_running)
+	if(m_running.load())
 		return;
 
-	m_running = true;
-	m_stop = false;
+	m_running.store(true);
+	m_stop.store(false);
 	std::thread t(&SampleProducerThread::threadFunc, this);
 	m_thread = std::move(t);
 }
@@ -49,7 +49,7 @@ void SampleProducerThread::start()
 //---------------------------------------------------------------
 void SampleProducerThread::stop(bool wait)
 {
-	m_stop = true;
+	m_stop.store(true);
 	if(wait && m_thread.joinable())
 		m_thread.join();
 }
@@ -60,7 +60,7 @@ void SampleProducerThread::stop(bool wait)
 //---------------------------------------------------------------
 bool SampleProducerThread::isRunning()
 {
-	return m_running;
+	return m_running.load();
 }
 
 
@@ -69,9 +69,8 @@ bool SampleProducerThread::isRunning()
 //---------------------------------------------------------------
 void SampleProducerThread::setSource( SampleSource *source )
 {
-	m_mutex.lock();
+	Lock lock(m_mutex);
 	m_source = source;
-	m_mutex.unlock();
 }
 
 #define MIN_BUFFER_SAMPLES (48000 / 2)
@@ -80,12 +79,13 @@ void SampleProducerThread::setSource( SampleSource *source )
 //---------------------------------------------------------------
 void SampleProducerThread::run()
 {
-	while(!m_stop)
+	while(!m_stop.load(std::memory_order_relaxed))
 	{
-		m_mutex.lock();
-		if (m_source)
-			singleBufferFill();
-		m_mutex.unlock();
+		{
+			Lock lock(m_mutex);
+			if (m_source)
+				singleBufferFill();
+		}
 
 		// We now have half a second of samples available and have done
 		// so much work that we deserve a little rest
@@ -100,7 +100,7 @@ void SampleProducerThread::run()
 void SampleProducerThread::threadFunc()
 {
 	run();
-	m_running = false;
+	m_running.store(false);
 }
 
 
@@ -147,11 +147,12 @@ void SampleProducerThread::setBufferEnabled( SampleBuffer *buffer, bool enabled 
 //---------------------------------------------------------------
 void SampleProducerThread::produce( const short *samples, int count )
 {
+	Lock lock(m_mutex);
 	for(const buffer_t &buffer : m_buffers)
 	{
 		if(buffer.enabled)
 		{
-			SampleBuffer::Lock lock(buffer.buffer->getMutex());
+			SampleBuffer::Lock sbl(buffer.buffer->getMutex());
 			buffer.buffer->produce(samples, count);
 		}
 	}

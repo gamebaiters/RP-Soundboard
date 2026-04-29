@@ -38,6 +38,14 @@ public:
 		NOTIFY_SET_SHOW_HOTKEYS_ON_BUTTONS,
 		NOTIFY_SET_HOTKEYS_ENABLED,
 		NOTIFY_SET_NEXT_UPDATE_CHECK,
+		NOTIFY_SET_LINK_VOLUMES,
+		NOTIFY_SET_EARRAPE_PROTECTION,
+		NOTIFY_SET_PITCH_SPEED,
+		NOTIFY_SET_PITCH,
+		NOTIFY_SET_SPEED,
+		NOTIFY_SET_SYNC_PITCH_SPEED,
+		NOTIFY_SET_REVERB,
+		NOTIFY_SET_MULTI_SOUNDBOARD,
 	};
 
 	class Observer
@@ -100,6 +108,33 @@ public:
 	inline bool getHotkeysEnabled() const { return m_hotkeysEnabled; }
 	void setHotkeysEnabled(bool enabled);
 
+	inline bool getLinkVolumes() const { return m_linkVolumes; }
+	void setLinkVolumes(bool linked);
+
+	inline bool getEarrapeProtection() const { return m_earrapeProtection; }
+	void setEarrapeProtection(bool enabled);
+
+	inline int getPitchSpeedValue() const { return m_pitchSpeedValue; }
+	void setPitchSpeedValue(int val);
+
+	inline bool getRememberPitchSpeed() const { return m_rememberPitchSpeed; }
+	void setRememberPitchSpeed(bool remember);
+
+	inline int getPitchValue() const { return m_pitchValue; }
+	void setPitchValue(int val);
+
+	inline int getSpeedValue() const { return m_speedValue; }
+	void setSpeedValue(int val);
+
+	inline bool getSyncPitchSpeed() const { return m_syncPitchSpeed; }
+	void setSyncPitchSpeed(bool sync);
+
+	inline int getReverbValue() const { return m_reverbValue; }
+	void setReverbValue(int val);
+
+	inline bool getMultiSoundboard() const { return m_multiSoundboard; }
+	void setMultiSoundboard(bool enabled);
+
 	void addObserver(Observer *obs);
 	void remObserver(Observer *obs);
 
@@ -138,6 +173,15 @@ private:
 
 	bool m_showHotkeysOnButtons;
 	bool m_hotkeysEnabled;
+	bool m_linkVolumes;
+	bool m_earrapeProtection;
+	int m_pitchSpeedValue;
+	bool m_rememberPitchSpeed;
+	int m_pitchValue;
+	int m_speedValue;
+	bool m_syncPitchSpeed;
+	int m_reverbValue;
+	bool m_multiSoundboard;
 
 	uint m_nextUpdateCheck;
 };

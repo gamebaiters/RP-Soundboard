@@ -3,7 +3,9 @@
 #include <stdexcept>
 #include "common.h"
 
-class TalkStateManager : public QObject 
+class Sampler;
+
+class TalkStateManager : public QObject
 {
 	Q_OBJECT
 
@@ -15,18 +17,19 @@ public:
 		TS_PTT_WITH_VA,
 		TS_VOICE_ACTIVATION,
 		TS_CONT_TRANS,
-	};	
+	};
 	static const char *toString(talk_state_e ts);
 
 public:
 	TalkStateManager();
 	~TalkStateManager();
+	void setSampler(Sampler *s) { m_sampler = s; }
 
 public slots:
-	void onStartPlaying(bool preview, QString filename);
-	void onStopPlaying();
-	void onPauseSound();
-	void onUnpauseSound();
+	void onStartPlaying(int slot, bool preview, QString filename);
+	void onStopPlaying(int slot);
+	void onPauseSound(int slot);
+	void onUnpauseSound(int slot);
 
 public:
 	void setActiveServerId(uint64 id);
@@ -38,6 +41,7 @@ public:
 	void onClientStopsTalking();
 
 private:
+	bool anySlotStillPlaying() const;
 	void setTalkTransMode();
 	void setPlayTransMode();
 	talk_state_e previousTalkState;
@@ -45,5 +49,6 @@ private:
 	talk_state_e currentTalkState;
 	uint64 activeServerId;
 	uint64 playingServerId;
+	Sampler *m_sampler;
 
 };

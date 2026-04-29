@@ -19,6 +19,12 @@
 #define NAME_CROP_STOP_AFTER_AT "cropStopAfterAt"
 #define NAME_CROP_STOP_VALUE "cropStopValue"
 #define NAME_CROP_STOP_UNIT "cropStopUnit"
+#define NAME_FX_PITCH_SPEED "fxPitchSpeed"
+#define NAME_FX_REMEMBER "fxRemember"
+#define NAME_FX_PITCH "fxPitch"
+#define NAME_FX_SPEED "fxSpeed"
+#define NAME_FX_REVERB "fxReverb"
+#define NAME_FX_SYNC_PITCH_SPEED "fxSyncPitchSpeed"
 
 #define DEFAULT_PATH ""
 #define DEFAULT_CUSTOM_TEXT ""
@@ -30,6 +36,12 @@
 #define DEFAULT_CROP_STOP_AFTER_AT 0
 #define DEFAULT_CROP_STOP_VALUE 0
 #define DEFAULT_CROP_STOP_UNIT 1
+#define DEFAULT_FX_PITCH_SPEED 1.0f
+#define DEFAULT_FX_REMEMBER false
+#define DEFAULT_FX_PITCH 0
+#define DEFAULT_FX_SPEED 0
+#define DEFAULT_FX_REVERB 0
+#define DEFAULT_FX_SYNC_PITCH_SPEED false
 
 
 QColor stringToColor(const QString &str)
@@ -58,7 +70,13 @@ SoundInfo::SoundInfo() :
 	cropStartUnit(DEFAULT_CROP_START_UNIT),
 	cropStopAfterAt(DEFAULT_CROP_STOP_AFTER_AT),
 	cropStopValue(DEFAULT_CROP_STOP_VALUE),
-	cropStopUnit(DEFAULT_CROP_STOP_UNIT)
+	cropStopUnit(DEFAULT_CROP_STOP_UNIT),
+	fxPitchSpeed(DEFAULT_FX_PITCH_SPEED),
+	fxRemember(DEFAULT_FX_REMEMBER),
+	fxPitch(DEFAULT_FX_PITCH),
+	fxSpeed(DEFAULT_FX_SPEED),
+	fxReverb(DEFAULT_FX_REVERB),
+	fxSyncPitchSpeed(DEFAULT_FX_SYNC_PITCH_SPEED)
 {
 
 }
@@ -79,6 +97,12 @@ void SoundInfo::readFromConfig( const QSettings &settings )
 	cropStopAfterAt = settings.value(NAME_CROP_STOP_AFTER_AT, DEFAULT_CROP_STOP_AFTER_AT).toInt();
 	cropStopValue = settings.value(NAME_CROP_STOP_VALUE, DEFAULT_CROP_STOP_VALUE).toInt();
 	cropStopUnit = settings.value(NAME_CROP_STOP_UNIT, DEFAULT_CROP_STOP_UNIT).toInt();
+	fxPitchSpeed = settings.value(NAME_FX_PITCH_SPEED, DEFAULT_FX_PITCH_SPEED).toFloat();
+	fxRemember = settings.value(NAME_FX_REMEMBER, DEFAULT_FX_REMEMBER).toBool();
+	fxPitch = settings.value(NAME_FX_PITCH, DEFAULT_FX_PITCH).toInt();
+	fxSpeed = settings.value(NAME_FX_SPEED, DEFAULT_FX_SPEED).toInt();
+	fxReverb = settings.value(NAME_FX_REVERB, DEFAULT_FX_REVERB).toInt();
+	fxSyncPitchSpeed = settings.value(NAME_FX_SYNC_PITCH_SPEED, DEFAULT_FX_SYNC_PITCH_SPEED).toBool();
 }
 
 
@@ -97,6 +121,12 @@ void SoundInfo::saveToConfig( QSettings &settings ) const
 	settings.setValue(NAME_CROP_STOP_AFTER_AT, cropStopAfterAt);
 	settings.setValue(NAME_CROP_STOP_VALUE, cropStopValue);
 	settings.setValue(NAME_CROP_STOP_UNIT, cropStopUnit);
+	settings.setValue(NAME_FX_PITCH_SPEED, fxPitchSpeed);
+	settings.setValue(NAME_FX_REMEMBER, fxRemember);
+	settings.setValue(NAME_FX_PITCH, fxPitch);
+	settings.setValue(NAME_FX_SPEED, fxSpeed);
+	settings.setValue(NAME_FX_REVERB, fxReverb);
+	settings.setValue(NAME_FX_SYNC_PITCH_SPEED, fxSyncPitchSpeed);
 }
 
 

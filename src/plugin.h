@@ -47,6 +47,9 @@ PLUGINS_EXPORTDLL int ts3plugin_processCommand(uint64 serverConnectionHandlerID,
 PLUGINS_EXPORTDLL void ts3plugin_currentServerConnectionChanged(uint64 serverConnectionHandlerID);
 PLUGINS_EXPORTDLL void ts3plugin_freeMemory(void* data);
 PLUGINS_EXPORTDLL int ts3plugin_requestAutoload();
+PLUGINS_EXPORTDLL int ts3plugin_offersConfigure();
+PLUGINS_EXPORTDLL void ts3plugin_configure(void* handle, void* qParentWidget);
+PLUGINS_EXPORTDLL void ts3plugin_uninstall();
 PLUGINS_EXPORTDLL void ts3plugin_initMenus(struct PluginMenuItem*** menuItems, char** menuIcon);
 PLUGINS_EXPORTDLL void ts3plugin_initHotkeys(struct PluginHotkey*** hotkeys);
 

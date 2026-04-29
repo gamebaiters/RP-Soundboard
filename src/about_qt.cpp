@@ -26,7 +26,7 @@ AboutQt::AboutQt(QWidget *parent) :
 {
 	const char *ffmpeg_version = av_version_info();
 	ui->setupUi(this);
-	ui->l_version->setText(QString(buildinfo_getPluginVersion()) + 
+	ui->l_version->setText(QString(buildinfo_getPluginVersion()) +
 		"\nBuild on " + buildinfo_getBuildDate() + " " + buildinfo_getBuildTime() +
 	    "\nFFmpeg Version: " + (ffmpeg_version ? ffmpeg_version : "unknown") + 
 		"\nLinked against Qt " QT_VERSION_STR);

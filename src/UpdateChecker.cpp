@@ -1,26 +1,9 @@
-// src/UpdateChecker.cpp
 //----------------------------------
 // RP Soundboard Source Code
 // Copyright (c) 2015 Marius Graefe
-// All rights reserved
-// Contact: rp_soundboard@mgraefe.de
+// GameBaiters fork: update channel served from gamebaiters branch on GitHub.
+// Expected version.xml at GAMEBAITERS_VERSION_URL — see GAMEBAITERS_BRANCH.md.
 //----------------------------------
-
-
-//Parses XML Files from a server
-//Example File:
-
-// <?xml version="1.0" encoding="utf-8"?>
-//
-// <versionDescription>
-//   <product descVersion="1" name="rp_soundboard">
-//     <latestVersion>1101</latestVersion>
-//     <latestDownload>
-//       <url>http://mgraefe.de/rpsb/dl/rp_soundboard_1101.ts3_plugin</url>
-//     </latestDownload>
-//	   <featureUrl>http://mgraefe.de/rpsb/version/features_1101.txt</featureUrl>
-//   </product>
-// </versionDescription>
 
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -36,7 +19,7 @@
 #include "updater_qt.h"
 #include "ConfigModel.h"
 
-#define CHECK_URL "https://mgraefe.de/rpsb/version/version.xml"
+#define CHECK_URL "https://raw.githubusercontent.com/gamebaiters/RP-Soundboard/gamebaiters/version.xml"
 
 
 //---------------------------------------------------------------
@@ -149,7 +132,7 @@ void UpdateChecker::onFinishDownloadXml(QNetworkReply *reply)
 
 			if (m_explicitCheck)
 			{
-				QMessageBox::information(NULL, "Update Check", "Your version of RP Soundboard is up to date.");
+				QMessageBox::information(NULL, "Update Check", "Your version of GameBaiters - Soundboard is up to date.");
 			}
 		}
 	}
@@ -260,10 +243,10 @@ void UpdateChecker::askUserForUpdate()
 {
 	QMessageBox msgBox0;
 	msgBox0.setTextFormat(Qt::RichText);
-	msgBox0.setText(QString("A new version of RP Soundboard is available (%1).<br /><br />"\
+	msgBox0.setText(QString("A new version of GameBaiters - Soundboard is available (%1).<br /><br />"\
 		"Would you like to download and install it?").arg(m_verInfo.version));
 	msgBox0.setIcon(QMessageBox::Information);
-	msgBox0.setWindowTitle("New version of RP Soundboard!");
+	msgBox0.setWindowTitle("New version of GameBaiters - Soundboard!");
 	msgBox0.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
 	msgBox0.setDefaultButton(QMessageBox::Yes);
 	if (m_verInfo.features.length() > 0)
@@ -349,7 +332,7 @@ bool UpdateChecker::version_info_t::valid()
 //---------------------------------------------------------------
 QByteArray UpdateChecker::getUserAgent() // static
 {
-	return QByteArray("RP Soundboard Update Checker, ") + buildinfo_getPluginVersion();
+	return QByteArray("GameBaiters - Soundboard Update Checker, ") + buildinfo_getPluginVersion();
 }
 
 

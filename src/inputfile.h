@@ -51,10 +51,16 @@ public:
 	virtual int close() = 0;
 	virtual bool done() const = 0;
 	virtual int seek(double seconds) = 0;
+	virtual double getPosition() const = 0;
+	virtual double getLength() const = 0;
 	virtual int64_t outputSamplesEstimation() const = 0;
+	virtual void setPitchFactor(float factor) { (void)factor; }
+	virtual void setSpeedFactor(float factor) { (void)factor; }
+	virtual void setReverbMix(float mix) { (void)mix; }
 };
 
 extern InputFile *CreateInputFileFFmpeg(InputFileOptions options = InputFileOptions());
+extern void InitFFmpegLibrary();
 
 
 #endif // rpsbsrc__inputfile_H__

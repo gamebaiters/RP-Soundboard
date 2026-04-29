@@ -14,6 +14,7 @@
 
 #include <thread>
 #include <vector>
+#include <atomic>
 
 #include "SampleProducer.h"
 
@@ -45,14 +46,14 @@ private:
 	bool singleBufferFill();
 	void produce(const short *samples, int count) override;
 
-	typedef std::lock_guard<std::mutex> Lock;
+	typedef std::lock_guard<std::recursive_mutex> Lock;
 
 	std::thread m_thread;
-	SampleSource * volatile m_source;
+	SampleSource *m_source;
 	std::vector<buffer_t> m_buffers;
-	bool m_running;
-	volatile bool m_stop;
-	std::mutex m_mutex;	
+	std::atomic<bool> m_running;
+	std::atomic<bool> m_stop;
+	std::recursive_mutex m_mutex;
 };
 
 #endif // rpsbsrc__SampleProducerThread_H__

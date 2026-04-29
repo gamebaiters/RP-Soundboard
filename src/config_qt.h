@@ -22,6 +22,9 @@
 #include <QUrl>
 #include <QRadioButton>
 
+#include <QSlider>
+#include <QLabel>
+#include <QCheckBox>
 
 #include "ui_config_qt.h"
 #include "ConfigModel.h"
@@ -29,6 +32,40 @@
 class SpeechBubble;
 class ExpandableSection;
 class SoundButton;
+class SoundView;
+
+struct PlaybackBar
+{
+	int slot;
+	QFrame *frame;
+	QPushButton *stopButton;
+	QPushButton *pauseButton;
+	QLabel *filenameLabel;
+	QLabel *timeLabel;
+	SoundView *waveformView;
+	QSlider *volumeLocalSlider;
+	QSlider *volumeRemoteSlider;
+	QLabel *volumeLocalLabel;
+	QLabel *volumeRemoteLabel;
+	QPushButton *linkVolumesButton;
+	bool linked;
+	// Per-slot FX
+	QSlider *pitchSlider;
+	QSlider *speedSlider;
+	QSlider *combinedSlider;
+	QSlider *reverbSlider;
+	QLabel *pitchLabel;
+	QLabel *speedLabel;
+	QLabel *combinedLabel;
+	QLabel *reverbLabel;
+	QCheckBox *syncCheckbox;
+	QPushButton *resetFxButton;
+	// Skip buttons
+	QPushButton *skipBack10;
+	QPushButton *skipBack5;
+	QPushButton *skipFwd5;
+	QPushButton *skipFwd10;
+};
 
 namespace Ui {
 	class ConfigQt;
@@ -59,6 +96,14 @@ protected:
 	virtual void showEvent(QShowEvent *evt) override;
 
 private slots:
+	void onSkipBack10();
+	void onSkipBack5();
+	void onSkipFwd5();
+	void onSkipFwd10();
+	void onProgressSliderMoved(int value);
+	void onProgressSliderPressed();
+	void onProgressSliderReleased();
+	void onLinkVolumesChanged(bool checked);
 	void onClickedPlay();
 	void onClickedStop();
 	void onUpdateVolumeLocal(int val);
@@ -73,10 +118,10 @@ private slots:
 	void onColsBubbleFinished();
 	void showStopButtonContextMenu(const QPoint &point);
 	void showPauseButtonContextMenu(const QPoint &point);
-	void onStartPlayingSound(bool preview, QString filename);
-	void onStopPlayingSound();
-	void onPausePlayingSound();
-	void onUnpausePlayingSound();
+	void onStartPlayingSound(int slot, bool preview, QString filename);
+	void onStopPlayingSound(int slot);
+	void onPausePlayingSound(int slot);
+	void onUnpausePlayingSound(int slot);
 	void onPlayingIconTimer();
 	void onUpdateShowHotkeysOnButtons(bool val);
 	void onUpdateHotkeysDisabled(bool val);
@@ -86,6 +131,15 @@ private slots:
 	void onFilterEditTextChanged(const QString &filter);
 	void onVolumeSliderContextMenuLocal(const QPoint &point);
 	void onVolumeSliderContextMenuRemote(const QPoint &point);
+	void onWaveformSeek(double fraction);
+	void onEarrapeProtectionChanged(bool checked);
+	void onPitchValueChanged(int value);
+	void onSpeedValueChanged(int value);
+	void onCombinedValueChanged(int value);
+	void onSyncToggled(bool checked);
+	void onResetFx();
+	void onRememberPitchSpeedChanged(bool checked);
+	void onReverbValueChanged(int value);
 
     void onSetConfig();
     void onConfigHotkey();
@@ -137,8 +191,43 @@ private:
 	int playingIconIndex;
 	QIcon m_pauseIcon;
 	QIcon m_playIcon;
+	bool m_sliderPressed = false;
 	std::array<QRadioButton*, NUM_CONFIGS> m_configRadioButtons;
 	std::array<QPushButton*, NUM_CONFIGS> m_configHotkeyButtons;
+
+	// Multi-soundboard playback bars
+	QVBoxLayout *m_multiBarContainer;
+	std::vector<PlaybackBar*> m_playbackBars;  // dynamic bars for slots 1-4
+	PlaybackBar *createPlaybackBar(int slot, const QString &filename);
+	void removePlaybackBar(int slot);
+	void updateAllPlaybackBars();
+	void onMultiModeChanged(bool enabled);
+	void addVolumeSliders(PlaybackBar *bar);
+
+	// Slot-0 volume controls (shown in main bar when multi-mode is on)
+	QWidget *m_slot0VolumeWidget;
+	QSlider *m_slot0VolumeLocal;
+	QSlider *m_slot0VolumeRemote;
+	QLabel *m_slot0VolLocalLabel;
+	QLabel *m_slot0VolRemoteLabel;
+
+	// Pitch/Speed/Combined sliders
+	QSlider *m_pitchSlider;
+	QSlider *m_speedSlider;
+	QSlider *m_combinedSlider;
+	QLabel *m_pitchValueLabel;
+	QLabel *m_speedValueLabel;
+	QLabel *m_combinedValueLabel;
+	QSlider *m_reverbSlider;
+	QLabel *m_reverbValueLabel;
+	QPushButton *m_syncButton;
+	QPushButton *m_resetFxButton;
+	// Remembered values when switching between individual/combined mode
+	int m_rememberedPitchValue = 0;
+	int m_rememberedSpeedValue = 0;
+	int m_rememberedCombinedValue = 0;
+	void buildPitchSpeedUI();
+	void updatePitchSpeedLabels();
 };
 
 #endif // rpsbsrc__config_qt_H__

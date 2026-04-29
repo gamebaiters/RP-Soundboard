@@ -23,14 +23,14 @@
 #define BUILD_NAME "Unknown Build"
 #endif
 
-#define PLUGIN_NAME "RP Soundboard"
+#define PLUGIN_NAME "GameBaiters - Soundboard"
 
 #define PLUGIN_VERSION (TS3SB_VERSION_S " " BUILD_TARGET " " BUILD_NAME)
 #define PLUGIN_AUTHOR ("Marius Gr\xC3\xA4" "fe")
 #define PLUGIN_DESCRIPTION ("Easy to use Soundboard.\n" \
 	"This software uses libraries from the FFmpeg project under the LGPLv2.1. " \
 	"A copy of the used source code along with the relevant configuration files " \
-	"can be downloaded here: https://github.com/MGraefe/RP-Soundboard")
+	"can be downloaded here: http://mgraefe.de/rpsb/ffmpeg-source.zip")
 
 
 const char * buildinfo_getPluginVersion()

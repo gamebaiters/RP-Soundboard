@@ -10,65 +10,86 @@
 
 #include <QPainter>
 #include <QTimer>
+#include <QMouseEvent>
 #include "soundview_qt.h"
 #include "SampleVisualizerThread.h"
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 SoundView::SoundView( QWidget *parent /*= NULL*/ ) :
 	QWidget(parent),
 	m_timer(new QTimer(this)),
-	m_drawnBins(0)
+	m_drawnBins(0),
+	m_playbackPosition(-1.0),
+	m_dragging(false),
+	m_active(false)
 {
 	connect(m_timer, SIGNAL(timeout()), this, SLOT(onTimer()));
+	setMinimumHeight(24);
+	setCursor(Qt::PointingHandCursor);
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 void SoundView::paintEvent(QPaintEvent *evt)
 {
 	QPainter painter(this);
 	painter.setRenderHint(QPainter::Antialiasing, false);
 
-	painter.setPen(QColor(70, 70, 70));
-	painter.setBrush(QColor(30, 30, 30));
+	// Background
+	painter.setPen(QColor(50, 50, 50));
+	painter.setBrush(QColor(25, 25, 30));
 	painter.drawRect(QRect(0, 0, width() - 1, height() - 1));
 
-	painter.setPen(QColor(255, 255, 255));
-	painter.setBrush(QColor(255, 255, 255));
+	// Draw played portion background
+	if (m_playbackPosition > 0.0 && m_playbackPosition <= 1.0)
+	{
+		int posX = (int)(m_playbackPosition * (width() - 1));
+		painter.setPen(Qt::NoPen);
+		painter.setBrush(QColor(0, 120, 215, 40));
+		painter.drawRect(1, 1, posX - 1, height() - 2);
+	}
+
+	// Draw waveform
+	painter.setPen(QColor(0, 180, 255));
+	painter.setBrush(QColor(0, 140, 220, 180));
 	drawWaves(&painter);
 
+	// Draw crop region overlay (from SoundInfo)
 	double songLength = SampleVisualizerThread::GetInstance().fileLength();
-	double start = m_soundInfo.getStartTime();
-	double playTime = m_soundInfo.getPlayTime();
-	double end = (playTime > 0.0) ? (start + playTime) : songLength;
-	int startPixel = int(start / songLength * (width() - 1));
-	int endPixel = int(end / songLength * (width() - 1));
+	if (songLength > 0.0)
+	{
+		double start = m_soundInfo.getStartTime();
+		double playTime = m_soundInfo.getPlayTime();
+		double end = (playTime > 0.0) ? (start + playTime) : songLength;
+		int startPixel = int(start / songLength * (width() - 1));
+		int endPixel = int(end / songLength * (width() - 1));
 
-	painter.setPen(QColor(255, 174, 0));
-	painter.setBrush(Qt::NoBrush);
-	painter.drawRect(startPixel, 0, endPixel - startPixel, height() - 1);
+		// Dim regions outside crop
+		painter.setPen(Qt::NoPen);
+		painter.setBrush(QColor(0, 0, 0, 150));
+		if (start > 0.0)
+			painter.drawRect(0, 0, startPixel, height() - 1);
+		if (end < songLength)
+			painter.drawRect(endPixel + 1, 0, width() - 1 - (endPixel + 1), height() - 1);
+	}
 
-	painter.setCompositionMode(QPainter::CompositionMode_Multiply);
-	painter.setPen(Qt::NoPen);
-	painter.setBrush(QColor(0, 130, 230, 255));
-	painter.drawRect(startPixel + 1, 1, endPixel - startPixel - 1, height() - 2);
-
-	painter.setPen(Qt::NoPen);
-	painter.setBrush(QColor(100, 100, 100));
-	if (start > 0.0)
-		painter.drawRect(0, 0, startPixel, height() - 1);
-	if (end < songLength)
-		painter.drawRect(endPixel + 1, 0, width() - 1 - (endPixel + 1), height() - 1);
+	// Draw position cursor
+	if (m_playbackPosition >= 0.0 && m_playbackPosition <= 1.0)
+	{
+		int posX = (int)(m_playbackPosition * (width() - 1));
+		painter.setPen(QPen(QColor(255, 200, 0), 2));
+		painter.drawLine(posX, 0, posX, height() - 1);
+	}
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 void SoundView::resizeEvent(QResizeEvent *evt)
 {
@@ -78,17 +99,19 @@ void SoundView::resizeEvent(QResizeEvent *evt)
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 void SoundView::setSound( const SoundInfo &sound )
 {
 	bool filenameDiffers = m_soundInfo.filename != sound.filename;
 	m_soundInfo = sound;
 	m_drawnBins = 0;
+	m_playbackPosition = 0.0;
+	m_active = true;
 	if(filenameDiffers && !sound.filename.isEmpty())
 	{
 		SampleVisualizerThread::GetInstance().startAnalysis(sound.filename.toUtf8(), 1024);
-		m_timer->start(250);
+		m_timer->start(100);
 	}
 	else
 	{
@@ -98,19 +121,51 @@ void SoundView::setSound( const SoundInfo &sound )
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
-void SoundView::onTimer()
+void SoundView::setPlaybackPosition(double fraction)
 {
+	m_playbackPosition = fraction;
 	update();
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
+//---------------------------------------------------------------
+void SoundView::clearPlayback()
+{
+	m_active = false;
+	m_playbackPosition = -1.0;
+	m_drawnBins = 0;
+	m_path[0] = QPainterPath();
+	m_path[1] = QPainterPath();
+	m_soundInfo = SoundInfo();
+	m_timer->stop();
+	update();
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
+//---------------------------------------------------------------
+void SoundView::onTimer()
+{
+	SampleVisualizerThread &t = SampleVisualizerThread::GetInstance();
+	if (!t.isRunning() && m_drawnBins >= t.getBinsProcessed())
+		m_timer->stop();
+	update();
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
 //---------------------------------------------------------------
 void SoundView::drawWaves(QPainter *painter)
 {
+	if (!m_active)
+		return;
+
 	preparePaths();
 
 	painter->drawPath(m_path[0]);
@@ -119,7 +174,7 @@ void SoundView::drawWaves(QPainter *painter)
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 void SoundView::preparePaths()
 {
@@ -150,3 +205,59 @@ void SoundView::preparePaths()
 	}
 }
 
+
+//---------------------------------------------------------------
+// Purpose:
+//---------------------------------------------------------------
+double SoundView::fractionFromMouseX(int x) const
+{
+	if (width() <= 1)
+		return 0.0;
+	double fraction = (double)x / (double)(width() - 1);
+	if (fraction < 0.0) fraction = 0.0;
+	if (fraction > 1.0) fraction = 1.0;
+	return fraction;
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
+//---------------------------------------------------------------
+void SoundView::mousePressEvent(QMouseEvent *evt)
+{
+	if (evt->button() == Qt::LeftButton && m_playbackPosition >= 0.0)
+	{
+		m_dragging = true;
+		double frac = fractionFromMouseX(evt->x());
+		m_playbackPosition = frac;
+		update();
+	}
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
+//---------------------------------------------------------------
+void SoundView::mouseMoveEvent(QMouseEvent *evt)
+{
+	if (m_dragging)
+	{
+		double frac = fractionFromMouseX(evt->x());
+		m_playbackPosition = frac;
+		update();
+	}
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
+//---------------------------------------------------------------
+void SoundView::mouseReleaseEvent(QMouseEvent *evt)
+{
+	if (m_dragging)
+	{
+		m_dragging = false;
+		double frac = fractionFromMouseX(evt->x());
+		emit seekRequested(frac);
+	}
+}

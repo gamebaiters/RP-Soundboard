@@ -119,6 +119,12 @@ public:
 		return m_mutex;
 	}
 
+	//Clear the buffer
+	inline void clear() {
+		assert(!m_mutex.try_lock() && "Mutex not locked");
+		m_buf.clear();
+	}
+
 private:
 	const int m_channels;
 	const size_t m_maxSize;

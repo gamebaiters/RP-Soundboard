@@ -1,6 +1,7 @@
 ﻿
 #include "common.h"
 #include "TalkStateManager.h"
+#include "samples.h"
 #include "ts3log.h"
 #include "main.h"
 #include <QMetaEnum>
@@ -32,9 +33,10 @@ TalkStateManager::TalkStateManager() :
 	defaultTalkState(TS_INVALID),
 	currentTalkState(TS_INVALID),
 	activeServerId(0),
-	playingServerId(0)
+	playingServerId(0),
+	m_sampler(NULL)
 {
-	
+
 }
 
 
@@ -50,8 +52,9 @@ TalkStateManager::~TalkStateManager()
 //---------------------------------------------------------------
 // Purpose: 
 //---------------------------------------------------------------
-void TalkStateManager::onStartPlaying(bool preview, QString filename)
+void TalkStateManager::onStartPlaying(int slot, bool preview, QString filename)
 {
+	Q_UNUSED(slot);
 	if (!preview)
 	{
 		playingServerId = activeServerId;
@@ -61,29 +64,51 @@ void TalkStateManager::onStartPlaying(bool preview, QString filename)
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose: Only restore talk state when ALL slots are done
 //---------------------------------------------------------------
-void TalkStateManager::onStopPlaying()
+void TalkStateManager::onStopPlaying(int slot)
 {
-	setTalkTransMode();
+	Q_UNUSED(slot);
+	if (!anySlotStillPlaying())
+		setTalkTransMode();
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose: Only restore talk state when no slot is actively playing
 //---------------------------------------------------------------
-void TalkStateManager::onPauseSound()
+void TalkStateManager::onPauseSound(int slot)
 {
-	setTalkTransMode();
+	Q_UNUSED(slot);
+	if (!anySlotStillPlaying())
+		setTalkTransMode();
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
-void TalkStateManager::onUnpauseSound()
+void TalkStateManager::onUnpauseSound(int slot)
 {
+	Q_UNUSED(slot);
 	setPlayTransMode();
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Check if any slot is still actively playing (not paused)
+//---------------------------------------------------------------
+bool TalkStateManager::anySlotStillPlaying() const
+{
+	if (!m_sampler)
+		return false;
+	for (int i = 0; i < Sampler::MAX_SLOTS; i++)
+	{
+		Sampler::state_e st = m_sampler->getState(i);
+		if (st == Sampler::ePLAYING)
+			return true;
+	}
+	return false;
 }
 
 
@@ -232,7 +257,6 @@ bool TalkStateManager::setContinuousTransmission(uint64 scHandlerID)
 void TalkStateManager::onClientStopsTalking()
 {
 	// If we are in PTT mode and the client lets go of the PTT key while playing a sound, ptt state gets reset to not-talking.
-	// This function checks for that case and sets it again to TS_CONTR_TRANS
 	if (currentTalkState == TS_CONT_TRANS && (previousTalkState == TS_PTT_WITHOUT_VA || previousTalkState == TS_PTT_WITH_VA))
 		setPlayTransMode();
 }

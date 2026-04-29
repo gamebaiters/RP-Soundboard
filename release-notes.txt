@@ -1,0 +1,5 @@
+GameBaiters Soundboard 1.0.15 - Initial gamebaiters branch release
+- Removed dark mode override; UI now follows TeamSpeak palette
+- Added Audio Effects dialog (pitch / speed / intensity sliders)
+- Migrated update channel to GitHub gamebaiters branch
+- Build pipeline: FFmpeg dynamic + optional FFMPEG_STATIC

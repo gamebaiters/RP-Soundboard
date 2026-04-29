@@ -5,8 +5,36 @@
  */
 
 #ifdef _WIN32
+#pragma comment(lib, "Delayimp.lib")
+#pragma comment(linker, "/DELAYLOAD:avutil-58.dll")
+#pragma comment(linker, "/DELAYLOAD:swresample-4.dll")
+#pragma comment(linker, "/DELAYLOAD:avcodec-60.dll")
+#pragma comment(linker, "/DELAYLOAD:avformat-60.dll")
+#pragma comment(linker, "/DELAYLOAD:avfilter-9.dll")
 #pragma warning (disable : 4100)  /* Disable Unreferenced parameter warning */
-#include <Windows.h>
+#include <windows.h>
+#include <string>
+
+BOOL WINAPI DllMain(_In_ HINSTANCE hinstDLL, _In_ DWORD fdwReason, _In_ LPVOID lpvReserved)
+{
+	if (fdwReason == DLL_PROCESS_ATTACH)
+	{
+		WCHAR path[MAX_PATH];
+		if (GetModuleFileNameW(hinstDLL, path, MAX_PATH)) {
+			WCHAR* lastSlash = wcsrchr(path, L'\\');
+			if (lastSlash) {
+				*lastSlash = L'\0';
+				std::wstring dir = std::wstring(path) + L"\\rp_soundboard\\";
+				LoadLibraryExW((dir + L"avutil-58.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+				LoadLibraryExW((dir + L"swresample-4.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+				LoadLibraryExW((dir + L"avcodec-60.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+				LoadLibraryExW((dir + L"avformat-60.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+				LoadLibraryExW((dir + L"avfilter-9.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+			}
+		}
+	}
+	return TRUE;
+}
 #endif
 
 #include "common.h"
@@ -214,6 +242,80 @@ int ts3plugin_requestAutoload()
 	return 1;  /* 1 = request autoloaded, 0 = do not request autoload */
 }
 
+/*
+ * If the plugin offers a configuration UI, it must return PLUGIN_OFFERS_CONFIGURE_QT_THREAD or
+ * PLUGIN_OFFERS_CONFIGURE_NEW_THREAD. If not, return PLUGIN_OFFERS_NO_CONFIGURE.
+ */
+int ts3plugin_offersConfigure()
+{
+	return PLUGIN_OFFERS_CONFIGURE_QT_THREAD;
+}
+
+/*
+ * Called when the user clicks "Settings" for this plugin in the TS3 plugin dialog.
+ */
+void ts3plugin_configure(void* handle, void* qParentWidget)
+{
+	sb_openDialog();
+}
+
+/*
+ * Called when the user clicks "Uninstall" for this plugin in the TS3 plugin dialog.
+ * Remove plugin assets and config files. TS3 handles the DLL itself.
+ */
+void ts3plugin_uninstall()
+{
+#ifdef _WIN32
+	// Build path to plugin asset folder: %APPDATA%\TS3Client\plugins\rp_soundboard
+	WCHAR appdata[MAX_PATH];
+	if (!GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH))
+		return;
+
+	std::wstring pluginDir = std::wstring(appdata) + L"\\TS3Client\\plugins\\rp_soundboard";
+	std::wstring configFile = std::wstring(appdata) + L"\\TS3Client\\rpsb_debug.log";
+
+	// Helper: delete a file, schedule for reboot if locked
+	auto safeDelete = [](const std::wstring &path) {
+		if (DeleteFileW(path.c_str()))
+			return;
+		DWORD err = GetLastError();
+		if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND)
+			return;
+		// File is locked — schedule deletion on next reboot
+		MoveFileExW(path.c_str(), NULL, MOVEFILE_DELAY_UNTIL_REBOOT);
+	};
+
+	// Delete known asset files from the plugin subfolder
+	const wchar_t *assetFiles[] = {
+		L"\\rpmb_icon_16.png",
+		L"\\Airhorn Sonata.mp3",
+		L"\\Airhorn.mp3",
+		L"\\Airporn.mp3",
+		L"\\Peter Griffin Laugh.mp3",
+		L"\\Spooky.mp3",
+		L"\\avutil-58.dll",
+		L"\\swresample-4.dll",
+		L"\\avcodec-60.dll",
+		L"\\avformat-60.dll",
+		L"\\avfilter-9.dll",
+	};
+	for (const wchar_t *f : assetFiles)
+		safeDelete(pluginDir + f);
+
+	// Try to remove the directory (succeeds only if empty — safe)
+	RemoveDirectoryW(pluginDir.c_str());
+	if (GetLastError() == ERROR_DIR_NOT_EMPTY)
+	{
+		// Directory has user-added files; schedule for reboot removal
+		MoveFileExW(pluginDir.c_str(), NULL, MOVEFILE_DELAY_UNTIL_REBOOT);
+	}
+
+	// Remove debug log if present
+	safeDelete(configFile);
+#endif
+}
+
+
 /* Helper function to create a menu item */
 static struct PluginMenuItem* createMenuItem(enum PluginMenuType type, int id, const char* text, const char* icon) 
 {
@@ -267,7 +369,7 @@ void ts3plugin_initMenus(struct PluginMenuItem*** menuItems, char** menuIcon)
 	 */
 
 	BEGIN_CREATE_MENUS(3);  /* IMPORTANT: Number of menu items must be correct! */
-	CREATE_MENU_ITEM(PLUGIN_MENU_TYPE_GLOBAL,  MENU_ID_SHOW_CONFIG,  "Open Soundboard",  "rpmb_icon_16.png");
+	CREATE_MENU_ITEM(PLUGIN_MENU_TYPE_GLOBAL,  MENU_ID_SHOW_CONFIG,  "Open GameBaiters Soundboard",  "rpmb_icon_16.png");
 	CREATE_MENU_ITEM(PLUGIN_MENU_TYPE_GLOBAL,  MENU_ID_SHOW_ABOUT,  "About",  "rpmb_icon_16.png");
 	CREATE_MENU_ITEM(PLUGIN_MENU_TYPE_GLOBAL, MENU_ID_CHECK_FOR_UPDATES, "Check for update", "rpmb_icon_16.png");
 	END_CREATE_MENUS;  /* Includes an assert checking if the number of menu items matched */

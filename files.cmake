@@ -2,6 +2,8 @@ set(sources
 	src/about_qt.cpp
 	src/about_qt.h
 	src/about_qt.ui
+	src/AudioEffectsDialog.cpp
+	src/AudioEffectsDialog.h
 	src/buildinfo.c
 	src/buildinfo.h
 	src/bytebuffer.h

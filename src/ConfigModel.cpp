@@ -38,6 +38,15 @@ ConfigModel::ConfigModel()
 
 	m_showHotkeysOnButtons = false;
 	m_hotkeysEnabled = true;
+	m_linkVolumes = false;
+	m_earrapeProtection = false;
+	m_pitchSpeedValue = 100;
+	m_rememberPitchSpeed = false;
+	m_pitchValue = 0;
+	m_speedValue = 0;
+	m_syncPitchSpeed = false;
+	m_reverbValue = 0;
+	m_multiSoundboard = false;
 
     m_activeConfig = 0;
 	m_nextUpdateCheck = 0;
@@ -77,6 +86,15 @@ void ConfigModel::readConfig(const QString &file)
 	m_bubbleColsBuild = settings.value("bubble_cols_build", 0).toInt();
 	m_showHotkeysOnButtons = settings.value("show_hotkeys_on_buttons", false).toBool();
 	m_hotkeysEnabled = settings.value("hotkeys_enabled", true).toBool();
+	m_linkVolumes = settings.value("link_volumes", false).toBool();
+	m_earrapeProtection = settings.value("earrape_protection", false).toBool();
+	m_rememberPitchSpeed = settings.value("remember_pitch_speed", false).toBool();
+	m_pitchSpeedValue = m_rememberPitchSpeed ? settings.value("pitch_speed_value", 100).toInt() : 100;
+	m_pitchValue = m_rememberPitchSpeed ? settings.value("pitch_value", 0).toInt() : 0;
+	m_speedValue = m_rememberPitchSpeed ? settings.value("speed_value", 0).toInt() : 0;
+	m_syncPitchSpeed = settings.value("sync_pitch_speed", false).toBool();
+	m_reverbValue = m_rememberPitchSpeed ? settings.value("reverb_value", 0).toInt() : 0;
+	m_multiSoundboard = settings.value("multi_soundboard", false).toBool();
 	m_nextUpdateCheck = settings.value("next_update_check", 0).toUInt();
 
 	notifyAllEvents();
@@ -107,6 +125,15 @@ void ConfigModel::writeConfig(const QString &file)
     settings.setValue("bubble_cols_build", m_bubbleColsBuild);
     settings.setValue("show_hotkeys_on_buttons", m_showHotkeysOnButtons);
 	settings.setValue("hotkeys_enabled", m_hotkeysEnabled);
+	settings.setValue("link_volumes", m_linkVolumes);
+	settings.setValue("earrape_protection", m_earrapeProtection);
+	settings.setValue("remember_pitch_speed", m_rememberPitchSpeed);
+	settings.setValue("pitch_speed_value", m_pitchSpeedValue);
+	settings.setValue("pitch_value", m_pitchValue);
+	settings.setValue("speed_value", m_speedValue);
+	settings.setValue("sync_pitch_speed", m_syncPitchSpeed);
+	settings.setValue("reverb_value", m_reverbValue);
+	settings.setValue("multi_soundboard", m_multiSoundboard);
 	settings.setValue("next_update_check", m_nextUpdateCheck);
 
 	for (int i = 0; i < NUM_CONFIGS; i++)
@@ -481,6 +508,14 @@ void ConfigModel::notifyAllEvents()
 	notify(NOTIFY_SET_BUBBLE_COLS_BUILD, m_bubbleColsBuild);
 	notify(NOTIFY_SET_SHOW_HOTKEYS_ON_BUTTONS, m_showHotkeysOnButtons);
 	notify(NOTIFY_SET_HOTKEYS_ENABLED, m_hotkeysEnabled);
+	notify(NOTIFY_SET_LINK_VOLUMES, m_linkVolumes);
+	notify(NOTIFY_SET_EARRAPE_PROTECTION, m_earrapeProtection);
+	notify(NOTIFY_SET_PITCH_SPEED, m_pitchSpeedValue);
+	notify(NOTIFY_SET_PITCH, m_pitchValue);
+	notify(NOTIFY_SET_SPEED, m_speedValue);
+	notify(NOTIFY_SET_SYNC_PITCH_SPEED, m_syncPitchSpeed ? 1 : 0);
+	notify(NOTIFY_SET_REVERB, m_reverbValue);
+	notify(NOTIFY_SET_MULTI_SOUNDBOARD, m_multiSoundboard ? 1 : 0);
 }
 
 
@@ -492,5 +527,92 @@ void ConfigModel::setShowHotkeysOnButtons(bool show)
 	m_showHotkeysOnButtons = show;
 	writeConfig();
 	notify(NOTIFY_SET_SHOW_HOTKEYS_ON_BUTTONS, show ? 1 : 0);
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
+//---------------------------------------------------------------
+void ConfigModel::setLinkVolumes(bool linked)
+{
+	m_linkVolumes = linked;
+	writeConfig();
+	notify(NOTIFY_SET_LINK_VOLUMES, linked ? 1 : 0);
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
+//---------------------------------------------------------------
+void ConfigModel::setEarrapeProtection(bool enabled)
+{
+	m_earrapeProtection = enabled;
+	writeConfig();
+	notify(NOTIFY_SET_EARRAPE_PROTECTION, enabled ? 1 : 0);
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
+//---------------------------------------------------------------
+void ConfigModel::setPitchSpeedValue(int val)
+{
+	m_pitchSpeedValue = val;
+	if (m_rememberPitchSpeed)
+		writeConfig();
+	notify(NOTIFY_SET_PITCH_SPEED, val);
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
+//---------------------------------------------------------------
+void ConfigModel::setRememberPitchSpeed(bool remember)
+{
+	m_rememberPitchSpeed = remember;
+	writeConfig();
+}
+
+
+void ConfigModel::setPitchValue(int val)
+{
+	m_pitchValue = val;
+	if (m_rememberPitchSpeed)
+		writeConfig();
+	notify(NOTIFY_SET_PITCH, val);
+}
+
+
+void ConfigModel::setSpeedValue(int val)
+{
+	m_speedValue = val;
+	if (m_rememberPitchSpeed)
+		writeConfig();
+	notify(NOTIFY_SET_SPEED, val);
+}
+
+
+void ConfigModel::setSyncPitchSpeed(bool sync)
+{
+	m_syncPitchSpeed = sync;
+	writeConfig();
+	notify(NOTIFY_SET_SYNC_PITCH_SPEED, sync ? 1 : 0);
+}
+
+
+void ConfigModel::setReverbValue(int val)
+{
+	m_reverbValue = val;
+	if (m_rememberPitchSpeed)
+		writeConfig();
+	notify(NOTIFY_SET_REVERB, val);
+}
+
+
+void ConfigModel::setMultiSoundboard(bool enabled)
+{
+	m_multiSoundboard = enabled;
+	writeConfig();
+	notify(NOTIFY_SET_MULTI_SOUNDBOARD, enabled ? 1 : 0);
 }
 

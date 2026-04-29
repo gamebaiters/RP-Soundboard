@@ -46,7 +46,10 @@ public:
 	{
 		if (output > threshold)
 			sample *= threshold / output;
-		return (short)(sample + 0.5f);
+		// Clamp to short range to prevent overflow
+		if (sample > 32767.0f) sample = 32767.0f;
+		if (sample < -32768.0f) sample = -32768.0f;
+		return (short)(sample >= 0.0f ? sample + 0.5f : sample - 0.5f);
 	}
 
 	inline float getOutput() const { return output; }

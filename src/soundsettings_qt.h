@@ -15,6 +15,9 @@
 #include <QCloseEvent>
 #include <QIcon>
 #include <QTimer>
+#include <QSlider>
+#include <QLabel>
+#include <QGroupBox>
 #include "SoundInfo.h"
 
 class ConfigModel;
@@ -47,10 +50,19 @@ private slots:
 	void onColorEnabledPressed();
 	void onChooseColorPressed();
 	void updateSoundView();
+	void onFxPitchChanged(int value);
+	void onFxSpeedChanged(int value);
+	void onFxCombinedChanged(int value);
+	void onFxReverbChanged(int value);
+	void onFxSyncToggled(bool checked);
+	void onFxReset();
 
 private:
 	void initGui(const SoundInfo &sound);
 	void fillFromGui(SoundInfo &sound);
+	void updateFxLabels();
+	void applyFxToPreview();
+	int getPreviewSlot();
 
 private:
 	Ui::SoundSettingsQt *ui;
@@ -61,6 +73,19 @@ private:
 	QTimer *m_timer;
 	SoundView *m_soundview;
 	QColor customColor;
+
+	// Per-song FX (inside a checkable QGroupBox like Crop Sound)
+	QGroupBox *m_fxGroup;
+	QSlider *m_fxPitchSlider;
+	QSlider *m_fxSpeedSlider;
+	QSlider *m_fxCombinedSlider;
+	QSlider *m_fxReverbSlider;
+	QLabel *m_fxPitchLabel;
+	QLabel *m_fxSpeedLabel;
+	QLabel *m_fxCombinedLabel;
+	QLabel *m_fxReverbLabel;
+	QPushButton *m_fxSyncButton;
+	QPushButton *m_fxResetButton;
 };
 
 

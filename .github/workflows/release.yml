@@ -133,31 +133,56 @@ jobs:
 
   # ---------------- macOS x86_64 ----------------
   build-macos:
-    # Self-hosted runner on a personal Mac. The runner is Apple Silicon
-    # but TeamSpeak 3 on macOS is still x86_64-only, so we MUST link
-    # against x86_64 binaries of Qt5 and FFmpeg. Native /opt/homebrew
-    # on Apple Silicon installs arm64 only -> linker rejects them with
-    # "found architecture 'arm64', required architecture 'x86_64'".
-    # Fix: provision Intel Homebrew at /usr/local via Rosetta. That
-    # tree always installs x86_64 binaries no matter the host arch.
+    # Self-hosted runner on a personal Apple Silicon Mac.
+    # TeamSpeak 3 on macOS is x86_64-only, so we link against x86_64
+    # Qt5 / FFmpeg coming from an Intel Homebrew tree at /usr/local.
+    #
+    # ONE-TIME SETUP REQUIRED ON THE MAC (cannot be done from CI - needs sudo):
+    #   1. sudo softwareupdate --install-rosetta --agree-to-license
+    #   2. xcode-select --install      # if not already
+    #   3. arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    #   4. arch -x86_64 /usr/local/bin/brew install qt@5 ffmpeg
+    #
+    # After that the runner user owns /usr/local/Homebrew and the steps
+    # below run without sudo - 'brew update' and 'brew upgrade' on an
+    # already-bootstrapped tree never escalate privileges.
     runs-on: self-hosted
     env:
       INTEL_BREW: /usr/local/bin/brew
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure Rosetta 2 is present
+      - name: Verify Rosetta + Intel Homebrew prerequisites
         run: |
-          softwareupdate --install-rosetta --agree-to-license 2>/dev/null || true
-
-      - name: Install / use Intel (x86_64) Homebrew at /usr/local
-        run: |
+          # Rosetta - tests by running uname under x86_64 emulation
+          if ! arch -x86_64 /usr/bin/uname -m >/dev/null 2>&1; then
+              cat <<'EOF' >&2
+          ERROR: Rosetta 2 is not installed on this runner.
+          Run ONCE on the Mac (interactive sudo, can't run from CI):
+              sudo softwareupdate --install-rosetta --agree-to-license
+          EOF
+              exit 1
+          fi
+          arch -x86_64 /usr/bin/uname -m
+          # Intel Homebrew
           if [ ! -x "$INTEL_BREW" ]; then
+              cat <<'EOF' >&2
+          ERROR: Intel Homebrew is not installed at /usr/local.
+          Run ONCE on the Mac (interactive sudo, can't run from CI):
               arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+              arch -x86_64 /usr/local/bin/brew install qt@5 ffmpeg
+          EOF
+              exit 1
           fi
           arch -x86_64 "$INTEL_BREW" --version
-          arch -x86_64 "$INTEL_BREW" update
-          arch -x86_64 "$INTEL_BREW" install qt@5 ffmpeg
+
+      - name: Update Qt5 + FFmpeg via Intel Homebrew (no sudo)
+        run: |
+          # 'brew update' and installing/upgrading formulae never need
+          # sudo on a Homebrew tree the runner user already owns.
+          arch -x86_64 "$INTEL_BREW" update || true
+          arch -x86_64 "$INTEL_BREW" install qt@5 ffmpeg 2>&1 | tail -20 || true
+          arch -x86_64 "$INTEL_BREW" upgrade qt@5 ffmpeg 2>&1 | tail -20 || true
           echo "/usr/local/opt/qt@5/bin" >> "$GITHUB_PATH"
 
       - name: Sanity-check arch of dependencies

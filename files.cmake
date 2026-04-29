@@ -28,6 +28,9 @@ set(sources
 	src/plugin.cpp
 	src/plugin.h
 	src/qtres.qrc
+	src/dark_style.qss
+	src/style_helper.cpp
+	src/style_helper.h
 	src/SampleBuffer.cpp
 	src/SampleBuffer.h
 	src/SampleProducer.h

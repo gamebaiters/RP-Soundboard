@@ -57,6 +57,15 @@ static void sdbgLog(const char *fmt, ...)
 	fprintf(g_dbgSamples, "\n");
 	fflush(g_dbgSamples);
 }
+
+extern "C" void rpsb_close_debug_log()
+{
+	if (g_dbgSamples)
+	{
+		fclose(g_dbgSamples);
+		g_dbgSamples = nullptr;
+	}
+}
 #else
 #define sdbgLog(...) ((void)0)
 #endif

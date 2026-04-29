@@ -59,7 +59,7 @@ def main():
 	'#define ' + productNameCap + '_VERSION_MAJOR ' + groups[0] + '\n' + \
 	'#define ' + productNameCap + '_VERSION_MINOR ' + groups[1] + '\n' + \
 	'#define ' + productNameCap + '_VERSION_REVISION ' + groups[2] + '\n' + \
-	'#define ' + productNameCap + '_VERSION_BUILD ' + '1833' + '\n' + \
+	'#define ' + productNameCap + '_VERSION_BUILD ' + '1837' + '\n' + \
 	'\n#endif\n'
 	
 	os.makedirs(os.path.dirname(outFileVersion), exist_ok=True)

@@ -22,6 +22,7 @@
 #include <QColorDialog>
 #include <QPushButton>
 #include <cmath>
+#include "style_helper.h"
 
 
 //---------------------------------------------------------------
@@ -41,6 +42,7 @@ SoundSettingsQt::SoundSettingsQt(const SoundInfo &soundInfo, size_t buttonId, QW
 	m_soundview->setMinimumSize(QSize(0, 30));
 
 	ui->setupUi(this);
+	this->setStyleSheet(StyleHelper::loadDarkStyle());
 	ui->startSoundUnitCombo->addItem("milliseconds");
 	ui->startSoundUnitCombo->addItem("seconds");
 	ui->stopSoundUnitCombo->addItem("milliseconds");

@@ -23,11 +23,16 @@
 #include <QObject>
 #include <QMessageBox>
 #include <QString>
+#include <QCoreApplication>
+#include <QEventLoop>
+#include <QEvent>
+#include <QThread>
 
 #include "main.h"
 #include "ts3log.h"
 #include "inputfile.h"
 #include "samples.h"
+#include "SampleVisualizerThread.h"
 #include "config_qt.h"
 #include "about_qt.h"
 #include "ConfigModel.h"
@@ -35,6 +40,8 @@
 #include "SoundInfo.h"
 #include "TalkStateManager.h"
 #include "SpeechBubble.h"
+
+extern "C" void rpsb_close_debug_log();
 
 class ModelObserver_Prog : public ConfigModel::Observer
 {
@@ -223,38 +230,74 @@ CAPI void sb_saveConfig()
 
 CAPI void sb_kill()
 {
-	configModel->remObserver(modelObserver);
+	// Stop the singleton visualizer thread FIRST. It's a std::thread that holds
+	// references to DLL code; if it survives DLL unload, FreeLibrary fails and
+	// TS3's plugin uninstall leaves the file locked.
+	SampleVisualizerThread::GetInstance().stop(true);
+
+	if (configModel)
+	{
+		configModel->remObserver(modelObserver);
+	}
 	delete modelObserver;
 	modelObserver = NULL;
 
 	// Disconnect all signals from sampler before shutdown to prevent
 	// callbacks firing into deleted objects during slot cleanup.
-	QObject::disconnect(sampler, nullptr, nullptr, nullptr);
+	if (sampler)
+		QObject::disconnect(sampler, nullptr, nullptr, nullptr);
 
-	sampler->shutdown();
-	delete sampler;
-	sampler = NULL;
+	if (sampler)
+	{
+		sampler->shutdown();
+		delete sampler;
+		sampler = NULL;
+	}
 
 	delete tsMgr;
 	tsMgr = NULL;
 
-	configDialog->close();
-	delete configDialog;
-	configDialog = NULL;
+	if (configDialog)
+	{
+		configDialog->hide();
+		configDialog->setParent(nullptr);
+		delete configDialog;
+		configDialog = NULL;
+	}
 
-	configModel->writeConfig();
-	delete configModel;
-	configModel = NULL;
+	if (configModel)
+	{
+		configModel->writeConfig();
+		delete configModel;
+		configModel = NULL;
+	}
 
 	if(aboutDialog)
 	{
-		aboutDialog->close();
+		aboutDialog->hide();
+		aboutDialog->setParent(nullptr);
 		delete aboutDialog;
 		aboutDialog = NULL;
 	}
 
-	delete updateChecker;
-	updateChecker = NULL;
+	if (updateChecker)
+	{
+		delete updateChecker;
+		updateChecker = NULL;
+	}
+
+	// Drain pending deferred deletes scheduled by Qt during the teardown
+	// (QNetworkReply, QTimer one-shots, etc.). Without this, slots may run
+	// into already-unloaded DLL code when TS3 calls FreeLibrary.
+	if (QCoreApplication::instance())
+	{
+		QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+		QCoreApplication::processEvents(QEventLoop::AllEvents, 200);
+		QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+	}
+
+	// Close debug log file handle so the .log file isn't held open after unload.
+	rpsb_close_debug_log();
 }
 
 

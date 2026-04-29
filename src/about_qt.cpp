@@ -9,6 +9,7 @@
 
 #include "about_qt.h"
 #include "buildinfo.h"
+#include "style_helper.h"
 
 extern "C"
 {
@@ -26,6 +27,7 @@ AboutQt::AboutQt(QWidget *parent) :
 {
 	const char *ffmpeg_version = av_version_info();
 	ui->setupUi(this);
+	this->setStyleSheet(StyleHelper::loadDarkStyle());
 	ui->l_version->setText(QString(buildinfo_getPluginVersion()) +
 		"\nBuild on " + buildinfo_getBuildDate() + " " + buildinfo_getBuildTime() +
 	    "\nFFmpeg Version: " + (ffmpeg_version ? ffmpeg_version : "unknown") + 

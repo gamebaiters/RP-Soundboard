@@ -24,6 +24,7 @@
 #include "SpeechBubble.h"
 #include "buildinfo.h"
 #include "plugin.h"
+#include "style_helper.h"
 #include "ExpandableSection.h"
 #include "samples.h"
 #include "SoundButton.h"
@@ -59,6 +60,7 @@ ConfigQt::ConfigQt( ConfigModel *model, QWidget *parent /*= 0*/ ) :
     m_playIcon = QIcon(":/icon/img/playarrow_32.png");
 
     ui->setupUi(this);
+    this->setStyleSheet(StyleHelper::loadDarkStyle());
     //setAttribute(Qt::WA_DeleteOnClose);
 
 	createConfigButtons();
@@ -1035,14 +1037,15 @@ PlaybackBar *ConfigQt::createPlaybackBar(int slot, const QString &filename)
 	// Skip buttons
 	auto makeSkipBtn = [&](const QString &text) -> QPushButton* {
 		QPushButton *b = new QPushButton(text, bar->frame);
-		b->setFixedWidth(32);
-		QFont f = b->font(); f.setPointSize(7); b->setFont(f);
+		b->setMinimumWidth(44);
+		b->setMaximumWidth(56);
+		QFont f = b->font(); f.setPointSize(9); b->setFont(f);
 		return b;
 	};
-	bar->skipBack10 = makeSkipBtn("-10");
-	bar->skipBack5  = makeSkipBtn("-5");
-	bar->skipFwd5   = makeSkipBtn("+5");
-	bar->skipFwd10  = makeSkipBtn("+10");
+	bar->skipBack10 = makeSkipBtn("-10s");
+	bar->skipBack5  = makeSkipBtn("-5s");
+	bar->skipFwd5   = makeSkipBtn("+5s");
+	bar->skipFwd10  = makeSkipBtn("+10s");
 	connect(bar->skipBack10, &QPushButton::clicked, [this, slot]() {
 		Sampler *s = sb_getSampler();
 		if (s) s->seek((std::max)(0.0, s->getPosition(slot) - 10.0), slot);

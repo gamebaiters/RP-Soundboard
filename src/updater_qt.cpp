@@ -9,9 +9,13 @@
 
 #include "buildinfo.h"
 #include "updater_qt.h"
+#include "style_helper.h"
 #include "ts3log.h"
 #include <QMessageBox>
 #include <QProcess>
+#include <QFile>
+#include <QTextStream>
+#include <QDir>
 
 
 
@@ -30,6 +34,7 @@ UpdaterWindow::UpdaterWindow( QWidget *parent /*= 0*/ ) :
 	m_success(false)
 {
 	ui->setupUi(this);
+	this->setStyleSheet(StyleHelper::loadDarkStyle());
 	connect(ui->buttonBox, SIGNAL(clicked(QAbstractButton*)), this, SLOT(onClickedCancel(QAbstractButton*)));
 }
 
@@ -182,12 +187,57 @@ void UpdaterWindow::onFinished()
 //---------------------------------------------------------------
 bool UpdaterWindow::executeFile()
 {
-	bool status = QProcess::startDetached("package_inst.exe",
+#ifdef _WIN32
+	// Write a helper batch to %TEMP%. The helper:
+	//   1. Waits for TS3 to release the plugin DLL
+	//   2. Force-kills any lingering ts3client_*.exe
+	//   3. Deletes every prior plugin DLL variant (legacy + current name)
+	//      The user config rp_soundboard.ini at the TS3 root is intentionally
+	//      left untouched so settings survive the update.
+	//   4. Launches package_inst.exe via file association on the new .ts3_plugin
+	// The helper runs detached so it survives this DLL being unloaded.
+	QString helperPath = QDir::temp().absoluteFilePath("rpsb_update_helper.bat");
+	QFile helper(helperPath);
+	if (!helper.open(QIODevice::WriteOnly | QIODevice::Truncate))
+	{
+		logError("Could not write update helper to %s", helperPath.toUtf8().data());
+		return false;
+	}
+	QString tplugin = QDir::toNativeSeparators(m_fileinfo.absoluteFilePath());
+	QTextStream out(&helper);
+	out << "@echo off\r\n";
+	out << "REM GameBaiters Soundboard auto-update helper (generated at runtime)\r\n";
+	out << "echo Closing TeamSpeak 3 to apply Soundboard update...\r\n";
+	out << "timeout /t 2 /nobreak >nul\r\n";
+	out << "taskkill /F /IM ts3client_win64.exe >nul 2>&1\r\n";
+	out << "taskkill /F /IM ts3client_win32.exe >nul 2>&1\r\n";
+	out << "timeout /t 1 /nobreak >nul\r\n";
+	out << "REM Remove prior DLL variants (rp_soundboard.ini config is preserved)\r\n";
+	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard_fx_win64.dll\" 2>nul\r\n";
+	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard_fx_win32.dll\" 2>nul\r\n";
+	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard_win64.dll\" 2>nul\r\n";
+	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard_win32.dll\" 2>nul\r\n";
+	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard.dll\" 2>nul\r\n";
+	out << "REM Hand off to TeamSpeak's package_inst via file association\r\n";
+	out << "start \"\" \"" << tplugin << "\"\r\n";
+	helper.close();
+
+	bool status = QProcess::startDetached("cmd.exe",
+		QStringList() << "/c" << helperPath);
+	if (!status)
+	{
+		logError("Could not start update helper at %s", helperPath.toUtf8().data());
+		return false;
+	}
+	return true;
+#else
+	bool status = QProcess::startDetached("package_inst",
 		QStringList(m_fileinfo.absoluteFilePath()));
 	if(!status)
-		logError("Error starting the update process package_inst.exe with cmd line \"%s\"",
+		logError("Error starting package_inst with cmd line \"%s\"",
 			m_fileinfo.absoluteFilePath().toUtf8().data());
 	return status;
+#endif
 }
 
 

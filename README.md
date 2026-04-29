@@ -42,8 +42,8 @@ The per-sound settings dialog has been redesigned so each parameter lives explic
 
 ### Theming
 
-- Forced dark stylesheet (`dark_style.qss` + `style_helper.cpp/h`) **removed**.
-- All widgets now inherit `QPalette` from the running TeamSpeak instance, so the soundboard automatically follows the user's active TeamSpeak theme — light, dark, or custom.
+- Forced **dark theme** restored (`dark_style.qss` + `style_helper.cpp/h`).
+- All plugin dialogs render in a consistent dark palette regardless of the host TeamSpeak theme.
 
 ### Update channel
 

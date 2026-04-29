@@ -137,6 +137,34 @@ void ts3plugin_setFunctionPointers(const struct TS3Functions funcs) {
  * If the function returns 1 on failure, the plugin will be unloaded again.
  */
 int ts3plugin_init() {
+#ifdef _WIN32
+	/* Cleanup legacy DLL variants from prior installs (upstream binaries that
+	 * predate the GameBaiters rename). Without this they coexist in plugins/
+	 * and TS3 lists duplicate plugin entries.
+	 */
+	{
+		char pluginsDir[PATH_BUFSIZE];
+		if (ts3Functions.getConfigPath)
+		{
+			ts3Functions.getConfigPath(pluginsDir, PATH_BUFSIZE);
+			std::string base(pluginsDir);
+			if (!base.empty() && base.back() != '\\' && base.back() != '/')
+				base.push_back('\\');
+			base += "plugins\\";
+			const char* legacy[] = {
+				"rp_soundboard_win64.dll",
+				"rp_soundboard_win32.dll",
+				"rp_soundboard.dll",
+				NULL
+			};
+			for (int i = 0; legacy[i]; i++)
+			{
+				std::string full = base + legacy[i];
+				DeleteFileA(full.c_str());
+			}
+		}
+	}
+#endif
 	sb_init();
 
     return 0;  /* 0 = success, 1 = failure, -2 = failure but client will not show a "failed to load" warning */
@@ -148,14 +176,13 @@ int ts3plugin_init() {
 /* Custom code called right before the plugin is unloaded */
 void ts3plugin_shutdown() {
 	/*
-	 * Note:
-	 * If your plugin implements a settings dialog, it must be closed and deleted here, else the
-	 * TeamSpeak client will most likely crash (DLL removed but dialog from DLL code still open).
+	 * sb_kill() now drains the Qt event queue and stops the singleton
+	 * SampleVisualizerThread before returning. See main.cpp.
 	 */
 	sb_kill();
 
 	/* Free pluginID if we registered it */
-	if(pluginID) 
+	if(pluginID)
 	{
 		free(pluginID);
 		pluginID = NULL;

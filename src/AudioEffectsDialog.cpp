@@ -5,6 +5,7 @@
 
 #include "AudioEffectsDialog.h"
 #include "samples.h"
+#include "style_helper.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -36,6 +37,7 @@ AudioEffectsDialog::AudioEffectsDialog(Sampler *sampler, QWidget *parent)
 {
 	setWindowTitle("Audio Effects");
 	setMinimumWidth(350);
+	setStyleSheet(StyleHelper::loadDarkStyle());
 
 	QVBoxLayout *mainLayout = new QVBoxLayout(this);
 

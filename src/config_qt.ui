@@ -75,7 +75,7 @@
         <item>
          <widget class="QPushButton" name="b_skip_back_10">
           <property name="text"><string>-10s</string></property>
-          <property name="maximumSize"><size><width>35</width><height>16777215</height></size></property>
+          <property name="minimumSize"><size><width>48</width><height>0</height></size></property>
           <property name="sizePolicy">
            <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
             <horstretch>0</horstretch>
@@ -87,7 +87,7 @@
         <item>
          <widget class="QPushButton" name="b_skip_back_5">
           <property name="text"><string>-5s</string></property>
-          <property name="maximumSize"><size><width>35</width><height>16777215</height></size></property>
+          <property name="minimumSize"><size><width>48</width><height>0</height></size></property>
           <property name="sizePolicy">
            <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
             <horstretch>0</horstretch>
@@ -142,7 +142,7 @@
         <item>
          <widget class="QPushButton" name="b_skip_fwd_5">
           <property name="text"><string>+5s</string></property>
-          <property name="maximumSize"><size><width>35</width><height>16777215</height></size></property>
+          <property name="minimumSize"><size><width>48</width><height>0</height></size></property>
           <property name="sizePolicy">
            <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
             <horstretch>0</horstretch>
@@ -154,7 +154,7 @@
         <item>
          <widget class="QPushButton" name="b_skip_fwd_10">
           <property name="text"><string>+10s</string></property>
-          <property name="maximumSize"><size><width>35</width><height>16777215</height></size></property>
+          <property name="minimumSize"><size><width>48</width><height>0</height></size></property>
           <property name="sizePolicy">
            <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
             <horstretch>0</horstretch>

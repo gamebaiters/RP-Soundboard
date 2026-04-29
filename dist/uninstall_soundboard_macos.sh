@@ -5,6 +5,7 @@
 set -u
 
 CANDIDATES=(
+    "${HOME}/Library/Application Support/TeamSpeak 3"
     "${HOME}/Library/Application Support/TS3Client"
     "${HOME}/.ts3client"
 )

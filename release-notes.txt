@@ -1,25 +1,34 @@
-GameBaiters Soundboard 1.0.112
+GameBaiters Soundboard 1.0.113
 ==============================
 
 Critical fixes
 --------------
-* Windows plugin now ships as a single self-contained DLL with FFmpeg
-  statically linked in. The 1.0.111 attempt bundled six FFmpeg .dll
-  files alongside the plugin, cluttering the user's plugins folder
-  and leaving a fragile setup. CI now builds FFmpeg n6.1.1 from
-  source with the MSVC toolchain (--toolchain=msvc, --enable-static
-  --disable-shared) and links it directly into rp_soundboard_fx_win64.dll.
-  Result: one binary, no runtime DLL dependencies.
-* macOS install bundle Install_Soundboard_macOS.zip is now produced
-  by CI and attached to every release. Earlier releases were missing
-  it - macOS users had no double-click install path. The .app inside
-  is ad-hoc-signed and contains the embedded .ts3_plugin plus the
-  install script.
+* macOS plugin failed to load on every Mac that didn't have Homebrew
+  FFmpeg installed at the exact /usr/local/Cellar/ffmpeg/... path.
+  The CI build baked Homebrew's absolute install_name into the
+  plugin dylib's dependency list, so dyld couldn't find the FFmpeg
+  libraries on user machines and TeamSpeak 3 marked the plugin as
+  broken. Fixed: CI now rewrites every dep path to @loader_path so
+  the bundled FFmpeg dylibs sitting next to the plugin resolve
+  correctly. Inter-FFmpeg refs (libavformat -> libavcodec etc.)
+  also rewritten. Every binary re-signed ad-hoc after the rewrite.
+  A sanity check rejects the build if any /usr/local or /opt/homebrew
+  path is left in any shipped binary.
+* macOS uninstall script could not find the TS3 base directory.
+  The candidate list missed the canonical macOS path
+  ~/Library/Application Support/TeamSpeak 3 (with the space).
+  Added it as the first candidate; TS3Client and ~/.ts3client kept
+  as fallbacks for legacy installs.
 
-UI fixes (carried over from 1.0.110/111)
-----------------------------------------
+Carried over from 1.0.112
+-------------------------
+* Windows plugin ships as a single self-contained DLL with FFmpeg
+  statically linked in. No runtime FFmpeg DLL files alongside the
+  plugin.
+* macOS install bundle Install_Soundboard_macOS.zip is built and
+  attached to every release.
 * Checkbox indicators no longer render the playback arrow icon when
-  toggled - clean filled square in the accent color.
+  toggled.
 * Per-slot FX slider labels and value readouts at 9-10 pt regular
   weight; "Reset" button widened so the text never gets clipped.
 

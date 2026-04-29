@@ -44,18 +44,24 @@ jobs:
         with:
           arch: x64
 
-      - name: Download prebuilt FFmpeg (Gyan.dev shared)
+      - name: Download prebuilt FFmpeg (BtbN GitHub Releases, LGPL shared)
         shell: pwsh
         run: |
-          $url = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-shared.7z'
-          Invoke-WebRequest -Uri $url -OutFile ffmpeg.7z
-          7z x ffmpeg.7z -offmpeg-extract -y | Out-Null
+          # BtbN/FFmpeg-Builds publishes a "latest" tag with stable filenames.
+          # Using LGPL-shared so we link dynamically and stay license-clean.
+          $url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl-shared.zip'
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip -UseBasicParsing
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-extract -Force
           $root = Get-ChildItem ffmpeg-extract -Directory | Select-Object -First 1
           New-Item -ItemType Directory -Path "ffmpeg/lib_win_x64" -Force | Out-Null
+          New-Item -ItemType Directory -Path "ffmpeg/include"     -Force | Out-Null
           Copy-Item "$($root.FullName)/lib/*"     -Destination "ffmpeg/lib_win_x64/" -Recurse -Force
-          Copy-Item "$($root.FullName)/include/*" -Destination "ffmpeg/" -Recurse -Force
-          New-Item -ItemType Directory -Path "ffmpeg/include" -Force | Out-Null
-          Copy-Item "$($root.FullName)/include/*" -Destination "ffmpeg/include/" -Recurse -Force
+          Copy-Item "$($root.FullName)/include/*" -Destination "ffmpeg/include/"     -Recurse -Force
+          # also place DLLs next to the lib so cmake's find_library is happy
+          Copy-Item "$($root.FullName)/bin/*.dll" -Destination "ffmpeg/lib_win_x64/" -Force
+          "FFmpeg layout:"
+          Get-ChildItem ffmpeg/lib_win_x64 | Format-Table Name,Length
+          Get-ChildItem ffmpeg/include | Format-Table Name
 
       - name: Configure CMake
         run: cmake -G "NMake Makefiles" -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_INSTALL_PREFIX=install

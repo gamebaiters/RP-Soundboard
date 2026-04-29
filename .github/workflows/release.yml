@@ -133,18 +133,41 @@ jobs:
 
   # ---------------- macOS x86_64 ----------------
   build-macos:
-    # Self-hosted runner on a personal Mac (registered by the maintainer).
-    # Mirrors the configuration already validated on the test-automazione
-    # branch. Saves GitHub-hosted minutes and uses the exact toolchain
-    # the project owner has already verified locally.
+    # Self-hosted runner on a personal Mac. The runner is Apple Silicon
+    # but TeamSpeak 3 on macOS is still x86_64-only, so we MUST link
+    # against x86_64 binaries of Qt5 and FFmpeg. Native /opt/homebrew
+    # on Apple Silicon installs arm64 only -> linker rejects them with
+    # "found architecture 'arm64', required architecture 'x86_64'".
+    # Fix: provision Intel Homebrew at /usr/local via Rosetta. That
+    # tree always installs x86_64 binaries no matter the host arch.
     runs-on: self-hosted
+    env:
+      INTEL_BREW: /usr/local/bin/brew
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Qt + FFmpeg via Homebrew
+      - name: Ensure Rosetta 2 is present
         run: |
-          brew install qt@5 ffmpeg
-          echo "$(brew --prefix qt@5)/bin" >> "$GITHUB_PATH"
+          softwareupdate --install-rosetta --agree-to-license 2>/dev/null || true
+
+      - name: Install / use Intel (x86_64) Homebrew at /usr/local
+        run: |
+          if [ ! -x "$INTEL_BREW" ]; then
+              arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          fi
+          arch -x86_64 "$INTEL_BREW" --version
+          arch -x86_64 "$INTEL_BREW" update
+          arch -x86_64 "$INTEL_BREW" install qt@5 ffmpeg
+          echo "/usr/local/opt/qt@5/bin" >> "$GITHUB_PATH"
+
+      - name: Sanity-check arch of dependencies
+        run: |
+          file /usr/local/opt/qt@5/lib/QtCore.framework/QtCore | tee /tmp/arch.log
+          file /usr/local/opt/ffmpeg/lib/libavcodec.dylib       | tee -a /tmp/arch.log
+          if grep -E "arm64" /tmp/arch.log; then
+              echo "Dependencies are arm64 - link will fail. Aborting." >&2
+              exit 1
+          fi
 
       - name: Configure CMake (x86_64)
         run: |
@@ -152,9 +175,9 @@ jobs:
               -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
               -DCMAKE_INSTALL_PREFIX=install \
               -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-              -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
-              -DffmpegLibHint="$(brew --prefix ffmpeg)/lib" \
-              -DffmpegIncludeDir="$(brew --prefix ffmpeg)/include"
+              -DCMAKE_PREFIX_PATH=/usr/local/opt/qt@5 \
+              -DffmpegLibHint=/usr/local/opt/ffmpeg/lib \
+              -DffmpegIncludeDir=/usr/local/opt/ffmpeg/include
 
       - name: Build
         run: cmake --build build -j$(sysctl -n hw.ncpu)
@@ -176,7 +199,7 @@ jobs:
           DYLIB="$(find build -name 'librp_soundboard_fx*_mac.dylib' | head -1)"
           cp "$DYLIB" stage/plugins/librp_soundboard_fx_mac.dylib
           for lib in libavcodec libavformat libavfilter libavutil libswresample libswscale; do
-              for f in "$(brew --prefix ffmpeg)/lib/${lib}".*.dylib; do
+              for f in /usr/local/opt/ffmpeg/lib/${lib}.*.dylib; do
                   [ -e "$f" ] || continue
                   cp "$f" stage/plugins/
                   base="$(basename "$f")"

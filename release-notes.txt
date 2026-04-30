@@ -1,28 +1,29 @@
-GameBaiters Soundboard 1.0.116
+GameBaiters Soundboard 1.0.117
 ==============================
 
-Critical macOS file-playback fix
---------------------------------
-* Plugin loaded but no file would actually play on macOS - every
-  attempt failed silently with "Failed to open: <file>". Root cause:
-  the abuffersink filter's binary AVOptions ("sample_fmts",
-  "sample_rates", "channel_layouts") were being set with a SINGLE
-  enum value and no AV_SAMPLE_FMT_NONE / -1 sentinel terminator.
-  FFmpeg 6 (Windows static build) tolerated unterminated single-
-  element input. FFmpeg 7+ (Homebrew on macOS) strictly requires
-  the sentinel - the filter graph config call returned EINVAL
-  (-22) and open() bailed.
+Critical macOS file-playback fix (real one this time)
+-----------------------------------------------------
+* 1.0.116 attempted to fix macOS playback by terminating the
+  abuffersink format arrays with AV_SAMPLE_FMT_NONE / -1
+  sentinels - this was the right fix for FFmpeg 7, but the
+  Homebrew runner is on FFmpeg 8.1, where the abuffersink option
+  `sample_fmts` was REPLACED by `sample_formats` (a STRING type
+  taking '|'-separated values, not BINARY anymore). Trying to
+  write a binary array into a string option returned EINVAL
+  (-22) so the filter graph never built and every play attempt
+  silently failed.
 
-  Fix: every binary AVOption array now ends with the proper
-  terminator sentinel:
-      sample_fmts     -> { OUTPUT_FORMAT, AV_SAMPLE_FMT_NONE }
-      sample_rates    -> { rate, -1 }
-      channel_layouts -> { layout, -1 }   (FFmpeg < 5 path)
-  Backwards-compatible with FFmpeg 6.x (Windows) - termination
-  was always optional there, never wrong.
+  Fix: best-effort dual API for the abuffersink format
+  constraints - try the FFmpeg 8 STRING name first, fall back to
+  the FFmpeg 6/7 BINARY name. Never bail on failure, because the
+  `aformat` filter at the end of our filter chain already forces
+  s16 / 48000 Hz / stereo before the sink, so the sink doesn't
+  need explicit constraints to receive the right format.
+  Cross-compatible with FFmpeg 6.x (Windows static build),
+  FFmpeg 7.x, and FFmpeg 8.x.
 
-Carried over from 1.0.115
--------------------------
+Carried over from 1.0.116 / 1.0.115
+-----------------------------------
 * Plugin links against the bare Qt5 dylibs that TS3.app ships
   inside Contents/Frameworks (no QtWidgets.framework bundle on
   macOS - TS3 ships flat libQt5*.dylib).

@@ -526,40 +526,63 @@ int InputFileFFmpeg::buildFilterGraph()
 	dbgLog("  create_filter(abuffersink) = %d", ret);
 	if (ret < 0) return ret;
 
-	// FFmpeg 7+ strictly requires AV_SAMPLE_FMT_NONE-terminated arrays for
-	// abuffersink binary AVOptions. FFmpeg 6 tolerated single-element
-	// unterminated input. Always terminate so both work.
-	const enum AVSampleFormat out_fmts[] = { (enum AVSampleFormat)OUTPUT_FORMAT, AV_SAMPLE_FMT_NONE };
-	ret = av_opt_set_bin(m_bufSinkCtx, "sample_fmts",
-						(const uint8_t*)out_fmts, sizeof(out_fmts),
-						AV_OPT_SEARCH_CHILDREN);
-	dbgLog("  set sample_fmts = %d", ret);
-	if (ret < 0) return ret;
+	// abuffersink format constraints have changed names/types across FFmpeg
+	// versions:
+	//   FFmpeg 6: sample_fmts (BINARY, int array)
+	//   FFmpeg 7: sample_fmts (BINARY, must be sentinel-terminated)
+	//   FFmpeg 8: sample_formats (STRING, '|'-separated list - sample_fmts
+	//             returns EINVAL because the option's type changed)
+	// We don't actually NEED to set these on the sink because the aformat
+	// filter at the end of the chain (added below) already forces
+	// s16/48000/stereo before the sink. Sink with no explicit constraints
+	// accepts whatever aformat produces. Best-effort try both names so the
+	// sink also has the constraint baked in where supported, but never bail
+	// on failure.
+	auto setBestEffort = [&](const char *strName, const char *strVal,
+	                         const char *binName, const void *binVal, int binSz) {
+		int r = -1;
+		if (strName && strVal) {
+			r = av_opt_set(m_bufSinkCtx, strName, strVal, AV_OPT_SEARCH_CHILDREN);
+			dbgLog("  set %s (str) = %d", strName, r);
+			if (r >= 0) return;
+		}
+		if (binName && binVal) {
+			r = av_opt_set_bin(m_bufSinkCtx, binName, (const uint8_t*)binVal,
+			                   binSz, AV_OPT_SEARCH_CHILDREN);
+			dbgLog("  set %s (bin) = %d", binName, r);
+		}
+	};
+
+	// sample format: try FFmpeg 8 STRING name first, fall back to FFmpeg 6/7
+	// BINARY (sentinel-terminated)
+	const enum AVSampleFormat out_fmts[] = { (enum AVSampleFormat)OUTPUT_FORMAT,
+	                                          AV_SAMPLE_FMT_NONE };
+	setBestEffort("sample_formats", "s16",
+	              "sample_fmts", out_fmts, sizeof(out_fmts));
 
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59, 37, 100)
-    AVChannelLayout out_ch_layout;
-    av_channel_layout_from_mask(&out_ch_layout, m_outputChannelLayout);
-    char out_ch_layout_str[128];
-    av_channel_layout_describe(&out_ch_layout, out_ch_layout_str, sizeof(out_ch_layout_str));
-    dbgLog("  out_ch_layout_str='%s' m_outputChannelLayout=0x%llx", out_ch_layout_str, (long long)m_outputChannelLayout);
-    ret = av_opt_set(m_bufSinkCtx, "ch_layouts", out_ch_layout_str, AV_OPT_SEARCH_CHILDREN);
-    dbgLog("  set ch_layouts = %d", ret);
-    av_channel_layout_uninit(&out_ch_layout);
+	AVChannelLayout out_ch_layout;
+	av_channel_layout_from_mask(&out_ch_layout, m_outputChannelLayout);
+	char out_ch_layout_str[128];
+	av_channel_layout_describe(&out_ch_layout, out_ch_layout_str, sizeof(out_ch_layout_str));
+	dbgLog("  out_ch_layout_str='%s' m_outputChannelLayout=0x%llx",
+	       out_ch_layout_str, (long long)m_outputChannelLayout);
+	// ch_layouts has been STRING since FFmpeg 5+; same name in FFmpeg 6/7/8
+	int r_chl = av_opt_set(m_bufSinkCtx, "ch_layouts", out_ch_layout_str,
+	                        AV_OPT_SEARCH_CHILDREN);
+	dbgLog("  set ch_layouts = %d", r_chl);
+	av_channel_layout_uninit(&out_ch_layout);
 #else
 	const int64_t out_layouts[] = { (int64_t)m_outputChannelLayout, -1 };
-	ret = av_opt_set_bin(m_bufSinkCtx, "channel_layouts",
-						(const uint8_t*)out_layouts, sizeof(out_layouts),
-						AV_OPT_SEARCH_CHILDREN);
-	dbgLog("  set channel_layouts = %d", ret);
+	setBestEffort(nullptr, nullptr,
+	              "channel_layouts", out_layouts, sizeof(out_layouts));
 #endif
-	if (ret < 0) return ret;
 
 	const int out_rates[] = { m_outputSamplerate, -1 };
-	ret = av_opt_set_bin(m_bufSinkCtx, "sample_rates",
-						(const uint8_t*)out_rates, sizeof(out_rates),
-						AV_OPT_SEARCH_CHILDREN);
-	dbgLog("  set sample_rates = %d", ret);
-	if (ret < 0) return ret;
+	char rates_str[16];
+	snprintf(rates_str, sizeof(rates_str), "%d", m_outputSamplerate);
+	setBestEffort("sample_rates", rates_str,
+	              "sample_rates", out_rates, sizeof(out_rates));
 
 	// Locale-safe double formatter (Italian locale uses comma, which breaks FFmpeg)
 	auto fmtDbl = [](double v) -> std::string {

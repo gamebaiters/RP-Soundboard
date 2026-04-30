@@ -1,31 +1,33 @@
-GameBaiters Soundboard 1.0.115
+GameBaiters Soundboard 1.0.116
 ==============================
 
-Critical macOS fix
-------------------
-* Plugin failed to load with the error
-    Library not loaded: @rpath/QtWidgets.framework/Versions/5/QtWidgets
-  even after the quarantine xattr fix in 1.0.114. Root cause: TeamSpeak 3
-  on macOS does NOT ship Qt as framework bundles - it ships flat,
-  bare-named dylibs (libQt5Core.dylib, libQt5Widgets.dylib, ...)
-  inside Contents/Frameworks/. Linking the plugin against Homebrew's
-  framework-form Qt baked '@rpath/QtWidgets.framework/Versions/5/
-  QtWidgets' into the plugin's load commands; dyld then searched for
-  that exact path inside TS3.app and failed.
+Critical macOS file-playback fix
+--------------------------------
+* Plugin loaded but no file would actually play on macOS - every
+  attempt failed silently with "Failed to open: <file>". Root cause:
+  the abuffersink filter's binary AVOptions ("sample_fmts",
+  "sample_rates", "channel_layouts") were being set with a SINGLE
+  enum value and no AV_SAMPLE_FMT_NONE / -1 sentinel terminator.
+  FFmpeg 6 (Windows static build) tolerated unterminated single-
+  element input. FFmpeg 7+ (Homebrew on macOS) strictly requires
+  the sentinel - the filter graph config call returned EINVAL
+  (-22) and open() bailed.
 
-  Fix: CI now passes -DTS3_MAC_QT_LIB_DIR=/Applications/TeamSpeak 3
-  Client.app/Contents/Frameworks to CMake, which redirects Qt5::Core /
-  Widgets / Gui / Network to the bare dylibs TS3 ships. The
-  post-link rewriter also normalises any remaining Qt ref to the
-  '@rpath/libQt5XYZ.dylib' bare form. The runner now has a sanity
-  check that fails the build early if TS3.app Qt dylibs aren't
-  present at the expected path.
+  Fix: every binary AVOption array now ends with the proper
+  terminator sentinel:
+      sample_fmts     -> { OUTPUT_FORMAT, AV_SAMPLE_FMT_NONE }
+      sample_rates    -> { rate, -1 }
+      channel_layouts -> { layout, -1 }   (FFmpeg < 5 path)
+  Backwards-compatible with FFmpeg 6.x (Windows) - termination
+  was always optional there, never wrong.
 
-Carried over
-------------
+Carried over from 1.0.115
+-------------------------
+* Plugin links against the bare Qt5 dylibs that TS3.app ships
+  inside Contents/Frameworks (no QtWidgets.framework bundle on
+  macOS - TS3 ships flat libQt5*.dylib).
 * xattr -cr on the entire plugin folder after install (clears
-  quarantine on every transitive bundled dep) - fixes "failed to
-  open plugin" caused by Gatekeeper blocking quarantined dylibs.
+  quarantine on every transitive bundled dep).
 * Recursive dependency bundler with @loader_path rewrites for
   every Homebrew transitive dep (libssl, libvpx, libx264, ...).
 * Strip ad-hoc signature before install_name_tool changes; final

@@ -526,9 +526,12 @@ int InputFileFFmpeg::buildFilterGraph()
 	dbgLog("  create_filter(abuffersink) = %d", ret);
 	if (ret < 0) return ret;
 
-	int out_fmt = OUTPUT_FORMAT;
+	// FFmpeg 7+ strictly requires AV_SAMPLE_FMT_NONE-terminated arrays for
+	// abuffersink binary AVOptions. FFmpeg 6 tolerated single-element
+	// unterminated input. Always terminate so both work.
+	const enum AVSampleFormat out_fmts[] = { (enum AVSampleFormat)OUTPUT_FORMAT, AV_SAMPLE_FMT_NONE };
 	ret = av_opt_set_bin(m_bufSinkCtx, "sample_fmts",
-						(uint8_t*)&out_fmt, sizeof(out_fmt),
+						(const uint8_t*)out_fmts, sizeof(out_fmts),
 						AV_OPT_SEARCH_CHILDREN);
 	dbgLog("  set sample_fmts = %d", ret);
 	if (ret < 0) return ret;
@@ -543,15 +546,17 @@ int InputFileFFmpeg::buildFilterGraph()
     dbgLog("  set ch_layouts = %d", ret);
     av_channel_layout_uninit(&out_ch_layout);
 #else
+	const int64_t out_layouts[] = { (int64_t)m_outputChannelLayout, -1 };
 	ret = av_opt_set_bin(m_bufSinkCtx, "channel_layouts",
-						(uint8_t*)&m_outputChannelLayout, sizeof(m_outputChannelLayout),
+						(const uint8_t*)out_layouts, sizeof(out_layouts),
 						AV_OPT_SEARCH_CHILDREN);
 	dbgLog("  set channel_layouts = %d", ret);
 #endif
 	if (ret < 0) return ret;
 
+	const int out_rates[] = { m_outputSamplerate, -1 };
 	ret = av_opt_set_bin(m_bufSinkCtx, "sample_rates",
-						(uint8_t*)&m_outputSamplerate, sizeof(m_outputSamplerate),
+						(const uint8_t*)out_rates, sizeof(out_rates),
 						AV_OPT_SEARCH_CHILDREN);
 	dbgLog("  set sample_rates = %d", ret);
 	if (ret < 0) return ret;

@@ -1,39 +1,43 @@
-GameBaiters Soundboard 1.0.117
+GameBaiters Soundboard 1.0.118
 ==============================
 
-Critical macOS file-playback fix (real one this time)
------------------------------------------------------
-* 1.0.116 attempted to fix macOS playback by terminating the
-  abuffersink format arrays with AV_SAMPLE_FMT_NONE / -1
-  sentinels - this was the right fix for FFmpeg 7, but the
-  Homebrew runner is on FFmpeg 8.1, where the abuffersink option
-  `sample_fmts` was REPLACED by `sample_formats` (a STRING type
-  taking '|'-separated values, not BINARY anymore). Trying to
-  write a binary array into a string option returned EINVAL
-  (-22) so the filter graph never built and every play attempt
-  silently failed.
+Bugfixes
+--------
+* Windows: pitch / speed sliders no longer break audio playback when
+  moved off the center value. The Windows static FFmpeg build was
+  missing the `atempo` and `asetrate` filters, so as soon as the
+  filter graph included one of them (any non-zero pitch or speed)
+  `avfilter_graph_parse_ptr` returned -22 (EINVAL) and playback stopped
+  until the slider was returned to 0. The static build now enables
+  `atempo,asetrate` alongside the existing audio filters. Reverb was
+  not affected because reverb is processed in-plugin (Freeverb), not
+  via the FFmpeg filter graph.
 
-  Fix: best-effort dual API for the abuffersink format
-  constraints - try the FFmpeg 8 STRING name first, fall back to
-  the FFmpeg 6/7 BINARY name. Never bail on failure, because the
-  `aformat` filter at the end of our filter chain already forces
-  s16 / 48000 Hz / stereo before the sink, so the sink doesn't
-  need explicit constraints to receive the right format.
-  Cross-compatible with FFmpeg 6.x (Windows static build),
-  FFmpeg 7.x, and FFmpeg 8.x.
+* Windows / Linux installs are now clean. Previous releases shipped a
+  single multi-platform .ts3_plugin that contained the macOS
+  `libavcodec.62.dylib`, `libavfilter.11.dylib`, `libssl.3.dylib`, etc.
+  alongside the Windows DLL and Linux .so. TeamSpeak's installer
+  unconditionally extracts every file in the archive, so Windows users
+  ended up with ~20 macOS dylibs in their plugin folder doing nothing.
+  The release now ships three platform-specific .ts3_plugin files:
+    - rp_soundboard_fx_<ver>_win64.ts3_plugin
+    - rp_soundboard_fx_<ver>_linux_amd64.ts3_plugin
+    - rp_soundboard_fx_<ver>_macos_x86_64.ts3_plugin
+  plus the existing Install_Soundboard_macOS.zip wrapper for macOS
+  users. Each archive contains only the binary for that platform.
+  Auto-update on Windows now points at the win64-only file.
 
-Carried over from 1.0.116 / 1.0.115
------------------------------------
-* Plugin links against the bare Qt5 dylibs that TS3.app ships
-  inside Contents/Frameworks (no QtWidgets.framework bundle on
-  macOS - TS3 ships flat libQt5*.dylib).
-* xattr -cr on the entire plugin folder after install (clears
-  quarantine on every transitive bundled dep).
-* Recursive dependency bundler with @loader_path rewrites for
-  every Homebrew transitive dep (libssl, libvpx, libx264, ...).
-* Strip ad-hoc signature before install_name_tool changes; final
-  3-pass sweep catches any silent rewrite failures.
-* Re-codesign each Mach-O on the user's machine after copy.
+Carried over from 1.0.117
+-------------------------
+* macOS: best-effort dual API for `abuffersink` format constraints
+  (FFmpeg 8 renamed `sample_fmts` BINARY -> `sample_formats` STRING).
+  Cross-compatible with FFmpeg 6.x (Windows static), 7.x, and 8.x.
+* macOS: plugin links against the bare Qt5 dylibs that TS3.app ships
+  inside Contents/Frameworks (no QtWidgets.framework bundle).
+* macOS: xattr -cr on the entire plugin folder after install.
+* macOS: recursive dependency bundler with @loader_path rewrites for
+  every Homebrew transitive dep.
+* macOS: re-codesign each Mach-O on the user's machine after copy.
 
 Reminder for users on Apple Silicon
 -----------------------------------
@@ -53,7 +57,7 @@ Existing fork features
 Installation
 ------------
 
-* Windows: download rp_soundboard_fx_<version>.ts3_plugin and
+* Windows: download rp_soundboard_fx_<version>_win64.ts3_plugin and
   double-click. TeamSpeak's bundled installer takes over.
 * macOS: download Install_Soundboard_macOS.zip, unzip, RIGHT-CLICK
   Install Soundboard.app -> Open the first time so macOS Gatekeeper

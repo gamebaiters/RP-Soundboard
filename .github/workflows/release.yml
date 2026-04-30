@@ -62,7 +62,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ffmpeg-static
-          key: ffmpeg-static-msvc-x64-n6.1.1-v2
+          key: ffmpeg-static-msvc-x64-n6.1.1-v3-atempo
 
       - name: Build static FFmpeg with MSVC toolchain
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -83,7 +83,7 @@ jobs:
               --enable-demuxer=mp3,wav,ogg,flac,mov,matroska,avi,aac,asf,flv \
               --enable-protocol=file \
               --enable-parser=mpegaudio,vorbis,opus,flac,aac,ac3 \
-              --enable-filter=aresample,aformat,aeval,anull,silenceremove
+              --enable-filter=aresample,aformat,aeval,anull,silenceremove,atempo,asetrate
           make -j$(nproc) V=0
           make install
           ls -la ../ffmpeg-static/lib
@@ -528,27 +528,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Each platform's artifact lands in its own staging dir so the
+      # macOS dylib bundle does NOT leak into the Windows / Linux
+      # .ts3_plugin (TS3 unconditionally extracts every file in the zip
+      # into the user's plugin folder, regardless of OS).
       - uses: actions/download-artifact@v4
         with:
           name: windows-x64
-          path: combined/plugins/
+          path: pkg-win/plugins/
 
       - uses: actions/download-artifact@v4
         with:
           name: linux-x64
-          path: combined/plugins/
+          path: pkg-linux/plugins/
 
       - uses: actions/download-artifact@v4
         with:
           name: macos-x64
-          path: combined/plugins/
+          path: pkg-macos/plugins/
 
       - uses: actions/download-artifact@v4
         with:
           name: macos-installer
           path: ./
 
-      - name: Resolve version + write package.ini
+      - name: Resolve version + render package.ini per platform
         id: ver
         run: |
           TAG="${GITHUB_REF##refs/tags/}"
@@ -558,20 +562,28 @@ jobs:
               VERSION="0.0.0-$(date +%Y%m%d%H%M)-$(echo $GITHUB_SHA | cut -c1-7)"
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-          # render package.ini.in with the resolved version
-          sed "s/@version@/$VERSION/" src/package.ini.in > combined/package.ini
+          for d in pkg-win pkg-linux pkg-macos; do
+              sed "s/@version@/$VERSION/" src/package.ini.in > "$d/package.ini"
+          done
           echo "--- package.ini ---"
-          cat combined/package.ini
+          cat pkg-win/package.ini
 
-      - name: Build multi-platform .ts3_plugin
+      - name: Build per-platform .ts3_plugin packages
         run: |
-          cd combined
-          PKG="../rp_soundboard_fx_${{ steps.ver.outputs.VERSION }}.ts3_plugin"
-          rm -f "$PKG"
-          zip -r "$PKG" . -x "**/.DS_Store"
-          ls -la "$PKG"
-          echo "--- contents ---"
-          unzip -l "$PKG"
+          set -e
+          VERSION="${{ steps.ver.outputs.VERSION }}"
+          # Windows: only the .dll + soundboard assets
+          (cd pkg-win    && zip -r "../rp_soundboard_fx_${VERSION}_win64.ts3_plugin"        . -x "**/.DS_Store")
+          # Linux: only the .so + soundboard assets
+          (cd pkg-linux  && zip -r "../rp_soundboard_fx_${VERSION}_linux_amd64.ts3_plugin"  . -x "**/.DS_Store")
+          # macOS: bundled dylibs + soundboard assets (also wrapped in the .app installer)
+          (cd pkg-macos  && zip -r "../rp_soundboard_fx_${VERSION}_macos_x86_64.ts3_plugin" . -x "**/.DS_Store")
+          echo "--- packages ---"
+          ls -la rp_soundboard_fx_*.ts3_plugin
+          for f in rp_soundboard_fx_*.ts3_plugin; do
+              echo "=== $f ==="
+              unzip -l "$f"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
@@ -595,7 +607,9 @@ jobs:
           name: "GameBaiters Soundboard ${{ github.ref_name }}"
           body_path: ${{ steps.notes.outputs.NOTES_PATH }}
           files: |
-            rp_soundboard_fx_*.ts3_plugin
+            rp_soundboard_fx_*_win64.ts3_plugin
+            rp_soundboard_fx_*_linux_amd64.ts3_plugin
+            rp_soundboard_fx_*_macos_x86_64.ts3_plugin
             Install_Soundboard_macOS.zip
             dist/uninstall_soundboard.bat
             dist/uninstall_soundboard.sh

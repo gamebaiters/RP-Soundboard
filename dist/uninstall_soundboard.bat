@@ -112,6 +112,40 @@ for %%F in (
     )
 )
 
+REM --- Step 3b: Sweep cross-platform leftovers from <=1.0.117 ---
+REM v1.0.117 and earlier shipped a single multi-platform .ts3_plugin
+REM that dumped macOS dylibs and the Linux .so into the Windows plugins
+REM folder. v1.0.118 onwards ships per-platform packages, but users
+REM who upgraded over an older install still have the leftover files
+REM cluttering the folder. Wipe them here.
+echo.
+echo  Sweeping macOS / Linux leftovers from older multi-platform .ts3_plugin...
+for %%F in (
+    librp_soundboard_fx_mac.dylib
+    librp_soundboard_fx_linux_amd64.so
+    libavcodec.62.dylib
+    libavfilter.11.dylib
+    libavformat.62.dylib
+    libavutil.60.dylib
+    libcrypto.3.dylib
+    libdav1d.7.dylib
+    libmp3lame.0.dylib
+    libopus.0.dylib
+    libssl.3.dylib
+    libSvtAv1Enc.4.dylib
+    libswresample.6.dylib
+    libswscale.9.dylib
+    libvmaf.3.dylib
+    libvpx.12.dylib
+    libx264.165.dylib
+    libx265.216.dylib
+) do (
+    if exist "%TS3_PLUGINS%\%%F" (
+        del /F /Q "%TS3_PLUGINS%\%%F" >nul 2>&1
+        if not exist "%TS3_PLUGINS%\%%F" echo  [OK] Deleted %%F
+    )
+)
+
 REM --- Step 4: Delete plugin asset folders ---
 echo.
 echo  Removing plugin asset folders...

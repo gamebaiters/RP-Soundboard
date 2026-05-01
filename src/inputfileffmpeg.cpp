@@ -56,31 +56,19 @@ extern "C"
 #include <cstdlib>
 #include <limits.h>
 #endif
+#include "plugin.h"
 static FILE *g_debugFile = nullptr;
 static void dbgOpen()
 {
 	if (!g_debugFile)
 	{
-#ifdef _WIN32
-		char path[MAX_PATH];
-		if (GetEnvironmentVariableA("APPDATA", path, MAX_PATH))
+		const char *cfgDir = getTs3ConfigPath();
+		if (cfgDir && cfgDir[0])
 		{
-			strcat(path, "\\TS3Client\\rpsb_debug.log");
+			char path[PATH_BUFSIZE + 64];
+			snprintf(path, sizeof(path), "%srpsb_debug.log", cfgDir);
 			g_debugFile = fopen(path, "a");
 		}
-#else
-		const char *home = getenv("HOME");
-		if (home)
-		{
-			char path[PATH_MAX];
-#ifdef __APPLE__
-			snprintf(path, sizeof(path), "%s/Library/Application Support/TeamSpeak 3/rpsb_debug.log", home);
-#else
-			snprintf(path, sizeof(path), "%s/.ts3client/rpsb_debug.log", home);
-#endif
-			g_debugFile = fopen(path, "a");
-		}
-#endif
 		if (g_debugFile)
 		{
 			time_t t = time(NULL);

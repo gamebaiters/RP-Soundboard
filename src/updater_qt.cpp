@@ -11,6 +11,7 @@
 #include "updater_qt.h"
 #include "style_helper.h"
 #include "ts3log.h"
+#include "plugin.h"
 #include <QMessageBox>
 #include <QProcess>
 #include <QFile>
@@ -196,6 +197,12 @@ bool UpdaterWindow::executeFile()
 		return false;
 	}
 	QString tplugin = QDir::toNativeSeparators(m_fileinfo.absoluteFilePath());
+	const char *cfgDir = getTs3ConfigPath();
+	QString pluginsDir;
+	if (cfgDir && cfgDir[0])
+		pluginsDir = QDir::toNativeSeparators(QString::fromUtf8(cfgDir) + "plugins");
+	else
+		pluginsDir = "%APPDATA%\\TS3Client\\plugins";
 	QTextStream out(&helper);
 	out << "@echo off\r\n";
 	out << "REM GameBaiters Soundboard auto-update helper (generated at runtime)\r\n";
@@ -204,11 +211,11 @@ bool UpdaterWindow::executeFile()
 	out << "taskkill /F /IM ts3client_win64.exe >nul 2>&1\r\n";
 	out << "taskkill /F /IM ts3client_win32.exe >nul 2>&1\r\n";
 	out << "timeout /t 1 /nobreak >nul\r\n";
-	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard_fx_win64.dll\" 2>nul\r\n";
-	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard_fx_win32.dll\" 2>nul\r\n";
-	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard_win64.dll\" 2>nul\r\n";
-	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard_win32.dll\" 2>nul\r\n";
-	out << "del /F /Q \"%APPDATA%\\TS3Client\\plugins\\rp_soundboard.dll\" 2>nul\r\n";
+	out << "del /F /Q \"" << pluginsDir << "\\rp_soundboard_fx_win64.dll\" 2>nul\r\n";
+	out << "del /F /Q \"" << pluginsDir << "\\rp_soundboard_fx_win32.dll\" 2>nul\r\n";
+	out << "del /F /Q \"" << pluginsDir << "\\rp_soundboard_win64.dll\" 2>nul\r\n";
+	out << "del /F /Q \"" << pluginsDir << "\\rp_soundboard_win32.dll\" 2>nul\r\n";
+	out << "del /F /Q \"" << pluginsDir << "\\rp_soundboard.dll\" 2>nul\r\n";
 	out << "start \"\" \"" << tplugin << "\"\r\n";
 	helper.close();
 

@@ -66,6 +66,51 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hinstDLL, _In_ DWORD fdwReason, _In_ LPVOID l
 
 
 static char* pluginID = NULL;
+static char g_ts3ConfigPath[PATH_BUFSIZE] = {0};
+
+const char *getTs3ConfigPath()
+{
+	if (g_ts3ConfigPath[0] == '\0')
+	{
+		if (ts3Functions.getConfigPath)
+		{
+			ts3Functions.getConfigPath(g_ts3ConfigPath, PATH_BUFSIZE);
+			size_t len = strlen(g_ts3ConfigPath);
+			if (len > 0 && g_ts3ConfigPath[len-1] != '/' && g_ts3ConfigPath[len-1] != '\\' && len < PATH_BUFSIZE - 1)
+			{
+#ifdef _WIN32
+				g_ts3ConfigPath[len] = '\\';
+#else
+				g_ts3ConfigPath[len] = '/';
+#endif
+				g_ts3ConfigPath[len+1] = '\0';
+			}
+		}
+#ifdef _WIN32
+		if (g_ts3ConfigPath[0] == '\0')
+		{
+			char appdata[MAX_PATH];
+			if (GetEnvironmentVariableA("APPDATA", appdata, MAX_PATH))
+				snprintf(g_ts3ConfigPath, PATH_BUFSIZE, "%s\\TS3Client\\", appdata);
+		}
+#elif defined(__APPLE__)
+		if (g_ts3ConfigPath[0] == '\0')
+		{
+			const char *home = getenv("HOME");
+			if (home)
+				snprintf(g_ts3ConfigPath, PATH_BUFSIZE, "%s/Library/Application Support/TeamSpeak 3/", home);
+		}
+#else
+		if (g_ts3ConfigPath[0] == '\0')
+		{
+			const char *home = getenv("HOME");
+			if (home)
+				snprintf(g_ts3ConfigPath, PATH_BUFSIZE, "%s/.ts3client/", home);
+		}
+#endif
+	}
+	return g_ts3ConfigPath;
+}
 
 #ifdef _WIN32
 /* Helper function to convert wchar_T to Utf-8 encoded strings on Windows */
@@ -293,13 +338,17 @@ void ts3plugin_configure(void* handle, void* qParentWidget)
 void ts3plugin_uninstall()
 {
 #ifdef _WIN32
-	// Build path to plugin asset folder: %APPDATA%\TS3Client\plugins\rp_soundboard
-	WCHAR appdata[MAX_PATH];
-	if (!GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH))
+	const char *cfgDir = getTs3ConfigPath();
+	if (!cfgDir || !cfgDir[0])
 		return;
 
-	std::wstring pluginDir = std::wstring(appdata) + L"\\TS3Client\\plugins\\rp_soundboard";
-	std::wstring configFile = std::wstring(appdata) + L"\\TS3Client\\rpsb_debug.log";
+	int wlen = MultiByteToWideChar(CP_UTF8, 0, cfgDir, -1, NULL, 0);
+	std::wstring basePath(wlen, L'\0');
+	MultiByteToWideChar(CP_UTF8, 0, cfgDir, -1, &basePath[0], wlen);
+	basePath.resize(wlen - 1);
+
+	std::wstring pluginDir = basePath + L"plugins\\rp_soundboard";
+	std::wstring configFile = basePath + L"rpsb_debug.log";
 
 	// Helper: delete a file, schedule for reboot if locked
 	auto safeDelete = [](const std::wstring &path) {

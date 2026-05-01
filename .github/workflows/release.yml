@@ -62,7 +62,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ffmpeg-static
-          key: ffmpeg-static-msvc-x64-n6.1.1-v3-atempo
+          key: ffmpeg-static-msvc-x64-n6.1.1-v4-pcm
 
       - name: Build static FFmpeg with MSVC toolchain
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -79,7 +79,7 @@ jobs:
               --enable-static --disable-shared \
               --disable-programs --disable-doc --disable-debug \
               --disable-everything \
-              --enable-decoder=mp3,mp3float,aac,vorbis,opus,flac,pcm_s16le,pcm_f32le,pcm_s24le,pcm_s32le,wmav2,wmapro,ac3,eac3 \
+              --enable-decoder=mp3,mp3float,aac,vorbis,opus,flac,pcm_s16le,pcm_s16be,pcm_u16le,pcm_u16be,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le,pcm_u8,pcm_alaw,pcm_mulaw,wmav2,wmapro,ac3,eac3 \
               --enable-demuxer=mp3,wav,ogg,flac,mov,matroska,avi,aac,asf,flv \
               --enable-protocol=file \
               --enable-parser=mpegaudio,vorbis,opus,flac,aac,ac3 \

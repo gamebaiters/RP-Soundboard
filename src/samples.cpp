@@ -37,30 +37,18 @@
 #include <cstdarg>
 #include <ctime>
 static FILE *g_dbgSamples = nullptr;
+#include "plugin.h"
 static void sdbgOpen()
 {
 	if (!g_dbgSamples)
 	{
-#ifdef _WIN32
-		char path[MAX_PATH];
-		if (GetEnvironmentVariableA("APPDATA", path, MAX_PATH))
+		const char *cfgDir = getTs3ConfigPath();
+		if (cfgDir && cfgDir[0])
 		{
-			strcat(path, "\\TS3Client\\rpsb_debug.log");
+			char path[PATH_BUFSIZE + 64];
+			snprintf(path, sizeof(path), "%srpsb_debug.log", cfgDir);
 			g_dbgSamples = fopen(path, "a");
 		}
-#else
-		const char *home = getenv("HOME");
-		if (home)
-		{
-			char path[PATH_MAX];
-#ifdef __APPLE__
-			snprintf(path, sizeof(path), "%s/Library/Application Support/TeamSpeak 3/rpsb_debug.log", home);
-#else
-			snprintf(path, sizeof(path), "%s/.ts3client/rpsb_debug.log", home);
-#endif
-			g_dbgSamples = fopen(path, "a");
-		}
-#endif
 	}
 }
 static void sdbgLog(const char *fmt, ...)

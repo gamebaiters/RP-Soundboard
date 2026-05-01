@@ -1,49 +1,48 @@
-GameBaiters Soundboard 1.0.118
+GameBaiters Soundboard 1.0.119
 ==============================
 
 Bugfixes
 --------
-* Windows: pitch / speed sliders no longer break audio playback when
-  moved off the center value. The Windows static FFmpeg build was
-  missing the `atempo` and `asetrate` filters, so as soon as the
-  filter graph included one of them (any non-zero pitch or speed)
-  `avfilter_graph_parse_ptr` returned -22 (EINVAL) and playback stopped
-  until the slider was returned to 0. The static build now enables
-  `atempo,asetrate` alongside the existing audio filters. Reverb was
-  not affected because reverb is processed in-plugin (Freeverb), not
-  via the FFmpeg filter graph.
+* Windows: WAV files now play correctly. The static FFmpeg build was
+  missing several PCM decoders (pcm_u8, pcm_s16be, pcm_u16le/be,
+  pcm_f64le, pcm_alaw, pcm_mulaw). A WAV encoded with any of these
+  codecs would fail with "avcodec_find_decoder returned NULL" and
+  never produce audio. All common PCM variants are now enabled.
 
-* Windows / Linux installs are now clean. Previous releases shipped a
-  single multi-platform .ts3_plugin that contained the macOS
-  `libavcodec.62.dylib`, `libavfilter.11.dylib`, `libssl.3.dylib`, etc.
-  alongside the Windows DLL and Linux .so. TeamSpeak's installer
-  unconditionally extracts every file in the archive, so Windows users
-  ended up with ~20 macOS dylibs in their plugin folder doing nothing.
-  The release now ships three platform-specific .ts3_plugin files:
-    - rp_soundboard_fx_<ver>_win64.ts3_plugin
-    - rp_soundboard_fx_<ver>_linux_amd64.ts3_plugin
-    - rp_soundboard_fx_<ver>_macos_x86_64.ts3_plugin
-  plus the existing Install_Soundboard_macOS.zip wrapper for macOS
-  users. Each archive contains only the binary for that platform.
-  Auto-update on Windows now points at the win64-only file.
+* Windows: plugin and auto-updater no longer hardcode
+  %APPDATA%\TS3Client as the TeamSpeak config directory. If TS3 is
+  installed to a custom location the plugin now asks TS3 for the
+  actual config path via getConfigPath() at runtime, with fallback
+  to %APPDATA%\TS3Client for compatibility. This affects:
+    - Debug log (rpsb_debug.log) written to the correct TS3 dir
+    - Plugin uninstall (Settings > Plugins > Uninstall) cleaning
+      the correct plugin assets folder
+    - Auto-update helper script deleting old DLLs from the correct
+      plugins folder
+
+* Windows uninstaller (uninstall_soundboard.bat) now accepts an
+  optional argument for custom TS3 config paths:
+    uninstall_soundboard.bat "D:\Games\TS3Client"
+  Without an argument it defaults to %APPDATA%\TS3Client as before.
+
+macOS unchanged
+---------------
+None of the above changes affect macOS. The macOS code paths
+(debug log, updater, codesign) are untouched.
+
+Carried over from 1.0.118
+-------------------------
+* Windows: pitch / speed sliders fixed (atempo + asetrate enabled
+  in the static FFmpeg build).
+* Per-platform .ts3_plugin packages (no more macOS dylibs in
+  Windows installs).
+* Windows uninstaller sweeps macOS dylib leftovers from older
+  multi-platform installs.
 
 Carried over from 1.0.117
 -------------------------
-* macOS: best-effort dual API for `abuffersink` format constraints
-  (FFmpeg 8 renamed `sample_fmts` BINARY -> `sample_formats` STRING).
-  Cross-compatible with FFmpeg 6.x (Windows static), 7.x, and 8.x.
-* macOS: plugin links against the bare Qt5 dylibs that TS3.app ships
-  inside Contents/Frameworks (no QtWidgets.framework bundle).
-* macOS: xattr -cr on the entire plugin folder after install.
-* macOS: recursive dependency bundler with @loader_path rewrites for
-  every Homebrew transitive dep.
-* macOS: re-codesign each Mach-O on the user's machine after copy.
-
-Reminder for users on Apple Silicon
------------------------------------
-* TeamSpeak 3 on macOS is x86_64-only regardless of Mac hardware -
-  it runs through Rosetta 2 on Apple Silicon. The plugin therefore
-  ships as x86_64.
+* macOS: best-effort dual API for abuffersink format constraints
+  (FFmpeg 8 renamed sample_fmts -> sample_formats).
 
 Existing fork features
 ----------------------

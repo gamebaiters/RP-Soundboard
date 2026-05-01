@@ -4,7 +4,13 @@ REM  GameBaiters Soundboard - Uninstaller (Windows)
 REM ============================================================
 setlocal enabledelayedexpansion
 
-set "TS3_BASE=%APPDATA%\TS3Client"
+REM Accept custom TS3 config path as first argument for non-default
+REM installations (e.g. uninstall_soundboard.bat "D:\Games\TS3Client")
+if not "%~1"=="" (
+    set "TS3_BASE=%~1"
+) else (
+    set "TS3_BASE=%APPDATA%\TS3Client"
+)
 set "TS3_PLUGINS=%TS3_BASE%\plugins"
 set "TS3_SETTINGS=%TS3_BASE%\settings.db"
 set "TS3_CONFIG=%TS3_BASE%\rp_soundboard.ini"

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <versionDescription>
   <product descVersion="1" name="rp_soundboard">
-    <latestVersion>2000</latestVersion>
+    <latestVersion>20000</latestVersion>
     <latestVersionString>2.0.0</latestVersionString>
     <latestDownload>
       <url>https://github.com/gamebaiters/RP-Soundboard/releases/download/v2.0.0/rp_soundboard_fx_2.0.0_win64.ts3_plugin</url>

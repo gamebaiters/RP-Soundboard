@@ -73,6 +73,8 @@ def main():
 	productNameCap = productName.upper()
 
 	# Generate version.h
+	buildNum = int(groups[0]) * 10000 + int(groups[1]) * 100 + int(groups[2])
+
 	sh = \
 	'//CHANGES WILL BE OVERWRITTEN BY version.py\n\n' \
 	'#ifndef ' + productName + '_all__version_H__\n' \
@@ -82,7 +84,7 @@ def main():
 	'#define ' + productNameCap + '_VERSION_MAJOR ' + groups[0] + '\n' + \
 	'#define ' + productNameCap + '_VERSION_MINOR ' + groups[1] + '\n' + \
 	'#define ' + productNameCap + '_VERSION_REVISION ' + groups[2] + '\n' + \
-	'#define ' + productNameCap + '_VERSION_BUILD ' + '1919' + '\n' + \
+	'#define ' + productNameCap + '_VERSION_BUILD ' + str(buildNum) + '\n' + \
 	'\n#endif\n'
 
 	os.makedirs(os.path.dirname(outFileVersion), exist_ok=True)

@@ -1,42 +1,68 @@
-/* GameBaiters Soundboard - dark theme stylesheet */
+/* GameBaiters Soundboard - dark theme stylesheet
+ *
+ * EVERY rule is scoped under [isGBSoundboard="true"] so the stylesheet
+ * can be applied on qApp without leaking into the host TeamSpeak
+ * client. Top-level soundboard windows set this dynamic property in
+ * their constructor; the descendant selector then matches all child
+ * widgets without each child having to set the property too.
+ */
 
-QWidget {
+/* Top-level soundboard windows + their descendants */
+QWidget[isGBSoundboard="true"],
+QWidget[isGBSoundboard="true"] QWidget {
     background-color: #2b2b2b;
     color: #dcdcdc;
     selection-background-color: #5a5a5a;
     selection-color: #ffffff;
 }
 
-QDialog, QMainWindow, QFrame, QGroupBox {
+QWidget[isGBSoundboard="true"] QDialog,
+QWidget[isGBSoundboard="true"] QMainWindow,
+QWidget[isGBSoundboard="true"] QFrame,
+QWidget[isGBSoundboard="true"] QGroupBox {
     background-color: #2b2b2b;
 }
 
-QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+QWidget[isGBSoundboard="true"] QLineEdit,
+QWidget[isGBSoundboard="true"] QTextEdit,
+QWidget[isGBSoundboard="true"] QPlainTextEdit,
+QWidget[isGBSoundboard="true"] QSpinBox,
+QWidget[isGBSoundboard="true"] QDoubleSpinBox,
+QWidget[isGBSoundboard="true"] QComboBox {
     background-color: #1e1e1e;
     color: #dcdcdc;
     border: 1px solid #555555;
     border-radius: 2px;
     padding: 2px 4px;
+    selection-background-color: #4a90e2;
 }
 
-QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus,
-QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+QWidget[isGBSoundboard="true"] QLineEdit {
+    placeholder-text-color: #6a6a6a;
+}
+
+QWidget[isGBSoundboard="true"] QLineEdit:focus,
+QWidget[isGBSoundboard="true"] QTextEdit:focus,
+QWidget[isGBSoundboard="true"] QPlainTextEdit:focus,
+QWidget[isGBSoundboard="true"] QSpinBox:focus,
+QWidget[isGBSoundboard="true"] QDoubleSpinBox:focus,
+QWidget[isGBSoundboard="true"] QComboBox:focus {
     border: 1px solid #4a90e2;
 }
 
-QComboBox::drop-down {
+QWidget[isGBSoundboard="true"] QComboBox::drop-down {
     border-left: 1px solid #555555;
     width: 18px;
 }
 
-QComboBox QAbstractItemView {
+QWidget[isGBSoundboard="true"] QComboBox QAbstractItemView {
     background-color: #1e1e1e;
     color: #dcdcdc;
     selection-background-color: #4a90e2;
     border: 1px solid #555555;
 }
 
-QPushButton {
+QWidget[isGBSoundboard="true"] QPushButton {
     background-color: #3a3a3a;
     color: #dcdcdc;
     border: 1px solid #555555;
@@ -45,55 +71,35 @@ QPushButton {
     min-height: 18px;
 }
 
-QPushButton:hover {
+QWidget[isGBSoundboard="true"] QPushButton:hover {
     background-color: #4a4a4a;
     border-color: #6a6a6a;
 }
 
-QPushButton:pressed {
+QWidget[isGBSoundboard="true"] QPushButton:pressed {
     background-color: #1f1f1f;
 }
 
-QPushButton:checked {
+QWidget[isGBSoundboard="true"] QPushButton:checked {
     background-color: #4a90e2;
     color: #ffffff;
     border-color: #3a78c2;
 }
 
-QPushButton:disabled {
+QWidget[isGBSoundboard="true"] QPushButton:disabled {
     background-color: #2a2a2a;
     color: #6a6a6a;
     border-color: #3a3a3a;
 }
 
-QCheckBox, QRadioButton {
+QWidget[isGBSoundboard="true"] QCheckBox,
+QWidget[isGBSoundboard="true"] QRadioButton {
     color: #dcdcdc;
     spacing: 6px;
+    background: transparent;
 }
 
-QCheckBox::indicator {
-    width: 14px;
-    height: 14px;
-    background-color: #1e1e1e;
-    border: 1px solid #777777;
-    border-radius: 2px;
-}
-
-QCheckBox::indicator:checked {
-    background-color: #4a90e2;
-    border: 1px solid #4a90e2;
-}
-
-QCheckBox::indicator:checked:disabled {
-    background-color: #3a5a7a;
-    border-color: #3a5a7a;
-}
-
-QCheckBox::indicator:unchecked:hover, QCheckBox::indicator:checked:hover {
-    border: 1px solid #6ab0ff;
-}
-
-QRadioButton::indicator {
+QWidget[isGBSoundboard="true"] QRadioButton::indicator {
     width: 14px;
     height: 14px;
     background-color: #1e1e1e;
@@ -101,22 +107,22 @@ QRadioButton::indicator {
     border-radius: 7px;
 }
 
-QRadioButton::indicator:checked {
+QWidget[isGBSoundboard="true"] QRadioButton::indicator:checked {
     background-color: #4a90e2;
     border: 1px solid #4a90e2;
 }
 
-QRadioButton::indicator:hover {
+QWidget[isGBSoundboard="true"] QRadioButton::indicator:hover {
     border: 1px solid #6ab0ff;
 }
 
-QSlider::groove:horizontal {
+QWidget[isGBSoundboard="true"] QSlider::groove:horizontal {
     background: #1e1e1e;
     height: 6px;
     border-radius: 3px;
 }
 
-QSlider::handle:horizontal {
+QWidget[isGBSoundboard="true"] QSlider::handle:horizontal {
     background: #888888;
     width: 14px;
     margin: -5px 0;
@@ -124,22 +130,22 @@ QSlider::handle:horizontal {
     border: 1px solid #555555;
 }
 
-QSlider::handle:horizontal:hover {
+QWidget[isGBSoundboard="true"] QSlider::handle:horizontal:hover {
     background: #4a90e2;
 }
 
-QSlider::sub-page:horizontal {
+QWidget[isGBSoundboard="true"] QSlider::sub-page:horizontal {
     background: #4a90e2;
     border-radius: 3px;
 }
 
-QSlider::groove:vertical {
+QWidget[isGBSoundboard="true"] QSlider::groove:vertical {
     background: #1e1e1e;
     width: 6px;
     border-radius: 3px;
 }
 
-QSlider::handle:vertical {
+QWidget[isGBSoundboard="true"] QSlider::handle:vertical {
     background: #888888;
     height: 14px;
     margin: 0 -5px;
@@ -147,136 +153,141 @@ QSlider::handle:vertical {
     border: 1px solid #555555;
 }
 
-QSlider::handle:vertical:hover {
+QWidget[isGBSoundboard="true"] QSlider::handle:vertical:hover {
     background: #4a90e2;
 }
 
-QGroupBox {
-    border: 1px solid #555555;
-    border-radius: 3px;
-    margin-top: 10px;
-    padding-top: 6px;
+QWidget[isGBSoundboard="true"] QSlider:disabled {
+    color: #555555;
 }
 
-QGroupBox::title {
+QWidget[isGBSoundboard="true"] QSlider::groove:horizontal:disabled,
+QWidget[isGBSoundboard="true"] QSlider::groove:vertical:disabled {
+    background: #1a1a1a;
+}
+
+QWidget[isGBSoundboard="true"] QSlider::sub-page:horizontal:disabled,
+QWidget[isGBSoundboard="true"] QSlider::sub-page:vertical:disabled {
+    background: #3a3a3a;
+}
+
+QWidget[isGBSoundboard="true"] QSlider::handle:horizontal:disabled,
+QWidget[isGBSoundboard="true"] QSlider::handle:vertical:disabled {
+    background: #4a4a4a;
+    border-color: #3a3a3a;
+}
+
+QWidget[isGBSoundboard="true"] QLabel:disabled,
+QWidget[isGBSoundboard="true"] QCheckBox:disabled,
+QWidget[isGBSoundboard="true"] QRadioButton:disabled,
+QWidget[isGBSoundboard="true"] QSpinBox:disabled,
+QWidget[isGBSoundboard="true"] QDoubleSpinBox:disabled,
+QWidget[isGBSoundboard="true"] QComboBox:disabled,
+QWidget[isGBSoundboard="true"] QLineEdit:disabled {
+    color: #6a6a6a;
+}
+
+QWidget[isGBSoundboard="true"] QSpinBox:disabled,
+QWidget[isGBSoundboard="true"] QDoubleSpinBox:disabled,
+QWidget[isGBSoundboard="true"] QComboBox:disabled,
+QWidget[isGBSoundboard="true"] QLineEdit:disabled {
+    background-color: #161616;
+    border-color: #2e2e2e;
+}
+
+QWidget[isGBSoundboard="true"] QGroupBox {
+    border: 1px solid #555555;
+    border-radius: 3px;
+    margin-top: 22px;
+    padding-top: 10px;
+}
+
+QWidget[isGBSoundboard="true"] QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
     left: 8px;
+    top: 4px;
     padding: 0 4px;
     color: #dcdcdc;
 }
 
-QScrollBar:vertical {
+QWidget[isGBSoundboard="true"] QGroupBox::indicator {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 8px;
+    top: 4px;
+}
+
+QWidget[isGBSoundboard="true"] QScrollBar:vertical {
     background: #2b2b2b;
     width: 12px;
     border: none;
 }
 
-QScrollBar::handle:vertical {
+QWidget[isGBSoundboard="true"] QScrollBar::handle:vertical {
     background: #555555;
     min-height: 20px;
     border-radius: 6px;
 }
 
-QScrollBar::handle:vertical:hover {
+QWidget[isGBSoundboard="true"] QScrollBar::handle:vertical:hover {
     background: #6a6a6a;
 }
 
-QScrollBar:horizontal {
+QWidget[isGBSoundboard="true"] QScrollBar:horizontal {
     background: #2b2b2b;
     height: 12px;
     border: none;
 }
 
-QScrollBar::handle:horizontal {
+QWidget[isGBSoundboard="true"] QScrollBar::handle:horizontal {
     background: #555555;
     min-width: 20px;
     border-radius: 6px;
 }
 
-QScrollBar::handle:horizontal:hover {
+QWidget[isGBSoundboard="true"] QScrollBar::handle:horizontal:hover {
     background: #6a6a6a;
 }
 
-QScrollBar::add-line, QScrollBar::sub-line {
+QWidget[isGBSoundboard="true"] QScrollBar::add-line,
+QWidget[isGBSoundboard="true"] QScrollBar::sub-line {
     background: none;
     border: none;
 }
 
-QMenu {
+QWidget[isGBSoundboard="true"] QMenu {
     background-color: #2b2b2b;
     color: #dcdcdc;
     border: 1px solid #555555;
 }
 
-QMenu::item:selected {
+QWidget[isGBSoundboard="true"] QMenu::item:selected {
     background-color: #4a90e2;
     color: #ffffff;
 }
 
-QMenu::separator {
+QWidget[isGBSoundboard="true"] QMenu::separator {
     height: 1px;
     background: #555555;
     margin: 4px 6px;
 }
 
-QMenuBar {
-    background-color: #2b2b2b;
-    color: #dcdcdc;
-}
-
-QMenuBar::item:selected {
-    background-color: #4a90e2;
-}
-
-QToolTip {
+QWidget[isGBSoundboard="true"] QToolTip {
     background-color: #1e1e1e;
     color: #dcdcdc;
     border: 1px solid #555555;
     padding: 2px;
 }
 
-QLabel {
+QWidget[isGBSoundboard="true"] QLabel {
     background: transparent;
     color: #dcdcdc;
 }
 
-QTabWidget::pane {
-    border: 1px solid #555555;
-    background: #2b2b2b;
-}
-
-QTabBar::tab {
-    background: #3a3a3a;
-    color: #dcdcdc;
-    padding: 4px 10px;
-    border: 1px solid #555555;
-    border-bottom: none;
-}
-
-QTabBar::tab:selected {
-    background: #4a90e2;
-    color: #ffffff;
-}
-
-QTabBar::tab:hover:!selected {
-    background: #4a4a4a;
-}
-
-QProgressBar {
-    background-color: #1e1e1e;
-    border: 1px solid #555555;
-    border-radius: 3px;
-    text-align: center;
-    color: #dcdcdc;
-}
-
-QProgressBar::chunk {
-    background-color: #4a90e2;
-    border-radius: 2px;
-}
-
-QListView, QTreeView, QTableView {
+QWidget[isGBSoundboard="true"] QListView,
+QWidget[isGBSoundboard="true"] QTreeView,
+QWidget[isGBSoundboard="true"] QTableView {
     background-color: #1e1e1e;
     color: #dcdcdc;
     border: 1px solid #555555;
@@ -285,35 +296,41 @@ QListView, QTreeView, QTableView {
     alternate-background-color: #252525;
 }
 
-QHeaderView::section {
-    background-color: #3a3a3a;
-    color: #dcdcdc;
-    border: 1px solid #555555;
-    padding: 4px;
-}
-
-QSplitter::handle {
+QWidget[isGBSoundboard="true"] QSplitter::handle {
     background: #555555;
 }
 
-QStatusBar {
-    background-color: #2b2b2b;
-    color: #dcdcdc;
-    border-top: 1px solid #555555;
-}
-
-QToolButton {
+QWidget[isGBSoundboard="true"] QToolButton {
     background-color: transparent;
     border: 1px solid transparent;
     border-radius: 2px;
     padding: 2px;
 }
 
-QToolButton:hover {
+QWidget[isGBSoundboard="true"] QToolButton:hover {
     background-color: #4a4a4a;
     border-color: #555555;
 }
 
-QToolButton:pressed {
+QWidget[isGBSoundboard="true"] QToolButton:pressed {
+    background-color: #1f1f1f;
+}
+
+/* Bottom-bar gear button: full QPushButton-like styling so it follows
+   the theme like the rest of the buttons instead of looking flat. */
+QWidget[isGBSoundboard="true"] QToolButton#settingsButton {
+    background-color: #3a3a3a;
+    color: #dcdcdc;
+    border: 1px solid #555555;
+    border-radius: 5px;
+    padding: 4px 12px;
+}
+
+QWidget[isGBSoundboard="true"] QToolButton#settingsButton:hover {
+    background-color: #4a4a4a;
+    border-color: #777777;
+}
+
+QWidget[isGBSoundboard="true"] QToolButton#settingsButton:pressed {
     background-color: #1f1f1f;
 }

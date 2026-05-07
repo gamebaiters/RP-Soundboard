@@ -60,6 +60,7 @@ extern "C"
 static FILE *g_debugFile = nullptr;
 static void dbgOpen()
 {
+	if (!g_rpsbLogsEnabled) return;
 	if (!g_debugFile)
 	{
 		const char *cfgDir = getTs3ConfigPath();
@@ -82,6 +83,7 @@ static void dbgOpen()
 }
 static void dbgLog(const char *fmt, ...)
 {
+	if (!g_rpsbLogsEnabled) return;
 	dbgOpen();
 	if (!g_debugFile) return;
 	va_list ap;
@@ -660,8 +662,39 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 		reset();
 	}
 
+	{
+		// Pre-flight diagnostics: existence + readability + size on disk.
+		// Helps tell apart "file missing on this machine / VM" from
+		// "FFmpeg internal failure" when avformat_open_input returns -2.
+#ifdef _WIN32
+		int wlen = MultiByteToWideChar(CP_UTF8, 0, filename, -1, NULL, 0);
+		std::wstring wpath(wlen > 0 ? wlen - 1 : 0, L'\0');
+		if (wlen > 0) MultiByteToWideChar(CP_UTF8, 0, filename, -1, &wpath[0], wlen);
+		DWORD attrs = GetFileAttributesW(wpath.c_str());
+		if (attrs == INVALID_FILE_ATTRIBUTES) {
+			dbgLog("  preflight: GetFileAttributesW FAILED, GetLastError=%lu", GetLastError());
+		} else {
+			HANDLE h = CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL,
+			                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+			if (h == INVALID_HANDLE_VALUE) {
+				dbgLog("  preflight: CreateFileW FAILED, GetLastError=%lu", GetLastError());
+			} else {
+				LARGE_INTEGER sz; sz.QuadPart = 0;
+				GetFileSizeEx(h, &sz);
+				dbgLog("  preflight: file exists, %lld bytes, attrs=0x%08lx",
+				       (long long)sz.QuadPart, (unsigned long)attrs);
+				CloseHandle(h);
+			}
+		}
+#endif
+	}
+
 	int ret = avformat_open_input(&m_fmtCtx, filename, NULL, NULL);
-	dbgLog("  avformat_open_input returned %d", ret);
+	{
+		char errbuf[256] = {0};
+		av_strerror(ret, errbuf, sizeof(errbuf));
+		dbgLog("  avformat_open_input returned %d (%s)", ret, errbuf);
+	}
 	if(LogFFmpegError(ret, "Cannot open file") != 0)
 	{
 		dbgLog("  FAILED to open file");

@@ -29,6 +29,7 @@
 #include <QThread>
 
 #include "main.h"
+#include "plugin.h"
 #include "ts3log.h"
 #include "inputfile.h"
 #include "samples.h"
@@ -40,6 +41,12 @@
 #include "SoundInfo.h"
 #include "TalkStateManager.h"
 #include "SpeechBubble.h"
+#include "modules/main_page.h"
+#include "modules/main_page_wiring.h"
+#include "modules/theme.h"
+#include "modules/button_grid.h"
+#include "modules/hotkey_block.h"
+#include <QApplication>
 
 extern "C" void rpsb_close_debug_log();
 
@@ -54,7 +61,8 @@ static uint64 activeServerId = 1;
 
 ConfigModel *configModel = NULL;
 SpeechBubble *notConnectedBubble = NULL;
-ConfigQt *configDialog = NULL;
+ConfigQt *configDialog = NULL;          // legacy window, kept for fallback
+MainPage *mainPage = NULL;              // active modular UI
 AboutQt *aboutDialog = NULL;
 Sampler *sampler = NULL;
 TalkStateManager *tsMgr = NULL;
@@ -136,6 +144,29 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 	if (serverConnectionHandlerID != activeServerId)
 		return; //Ignore other servers
 
+	if (g_rpsbPreviewOnly)
+	{
+		// Preview-only: server must hear only the real mic. Earlier we
+		// just early-returned, but that left the sampler's per-slot
+		// state machine starved (it advances inside fetchInputSamples)
+		// so playing slots never transitioned to eSILENT after their
+		// file ended, and the internal sbCapture ring filled up. Side
+		// effect: TS3 picked up phantom voice activity from soundboard
+		// audio that never got consumed and looped on the next pass.
+		//
+		// Fix: still call fetchInputSamples so the state machine ticks
+		// and the ring drains, but route the mix into a discard buffer
+		// instead of the real `samples`. The mic buffer the client
+		// transmits stays exactly as captured, and we never set *edited
+		// so TS3 knows we did not modify the stream.
+		static thread_local std::vector<short> previewScratch;
+		const size_t needed = static_cast<size_t>(sampleCount) * channels;
+		if (previewScratch.size() < needed) previewScratch.assign(needed, 0);
+		else std::fill_n(previewScratch.begin(), needed, static_cast<short>(0));
+		sampler->fetchInputSamples(previewScratch.data(), sampleCount, channels, NULL);
+		return;
+	}
+
 	int written = sampler->fetchInputSamples(samples, sampleCount, channels, NULL);
 	if(written > 0)
 		*edited |= 0x1;
@@ -155,33 +186,51 @@ Sampler *sb_getSampler()
 	return sampler;
 }
 
-
-void sb_enableInterface(bool enabled) 
+TalkStateManager *sb_getTalkStateManager()
 {
-	if (!enabled)
+	return tsMgr;
+}
+
+
+void sb_enableInterface(bool enabled)
+{
+	// New modular UI: drive its full-surface overlay + stop any running
+	// playback when the user disconnects / gets kicked / loses connection.
+	if (mainPage)
 	{
-		if (!notConnectedBubble)
-		{
-			notConnectedBubble = new SpeechBubble(configDialog);
-			notConnectedBubble->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Minimum);
-			notConnectedBubble->setFixedSize(350, 80);
-			notConnectedBubble->setBackgroundColor(QColor(255, 255, 255));
-			notConnectedBubble->setBubbleStyle(false);
-			notConnectedBubble->setClosable(false);
-			notConnectedBubble->setText("You are not connected to a server.\n"
-				"GameBaiters - Soundboard is disabled until you are connected properly.");
-			notConnectedBubble->attachTo(configDialog);
-			if (configDialog->isVisible())
-				notConnectedBubble->show();
-		}
-	}
-	else if (notConnectedBubble)
-	{
-		delete notConnectedBubble;
-		notConnectedBubble = NULL;
+		mainPage->setConnected(enabled);
+		if (!enabled && sampler)
+			sampler->stopPlayback(-1);
 	}
 
-	configDialog->setEnabled(enabled);
+	// Legacy bubble path - only relevant if the legacy ConfigQt dialog is
+	// the visible window (RPSB_USE_LEGACY_UI=1).
+	if (configDialog)
+	{
+		if (!enabled)
+		{
+			if (!notConnectedBubble)
+			{
+				notConnectedBubble = new SpeechBubble(configDialog);
+				notConnectedBubble->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Minimum);
+				notConnectedBubble->setFixedSize(350, 80);
+				notConnectedBubble->setBackgroundColor(QColor(255, 255, 255));
+				notConnectedBubble->setBubbleStyle(false);
+				notConnectedBubble->setClosable(false);
+				notConnectedBubble->setText("You are not connected to a server.\n"
+					"GameBaiters - Soundboard is disabled until you are connected properly.");
+				notConnectedBubble->attachTo(configDialog);
+				if (configDialog->isVisible())
+					notConnectedBubble->show();
+			}
+		}
+		else if (notConnectedBubble)
+		{
+			delete notConnectedBubble;
+			notConnectedBubble = NULL;
+		}
+		configDialog->setEnabled(enabled);
+	}
 }
 
 CAPI void sb_init()
@@ -195,6 +244,9 @@ CAPI void sb_init()
 	QTimer::singleShot(10, []{
 		configModel = new ConfigModel();
 		configModel->readConfig();
+		// Persistent state: hotkey block list survives TS3 restarts so
+		// a Reset Hotkeys click is permanent until the user re-arms.
+		HotkeyBlock::load();
 
 		/* This if first QObject instantiated, it will load the resources */
 		sampler = new Sampler();
@@ -208,8 +260,17 @@ CAPI void sb_init()
 		QObject::connect(sampler, &Sampler::onUnpausePlaying, tsMgr, &TalkStateManager::onUnpauseSound, Qt::QueuedConnection);
 
 		configDialog = new ConfigQt(configModel);
-		//configDialog->showMinimized();
-		//configDialog->hide();
+		// Legacy ConfigQt is kept around for its static helpers + as a
+		// fallback UI. By default it's not the visible window. Detach it
+		// from the model so the hidden grid does NOT rebuild on every
+		// notification - that was the source of the rows/cols-spam lag.
+		// (Re-attached only if the user opts into the legacy UI via
+		// RPSB_USE_LEGACY_UI=1, see sb_openDialog.)
+		const char *legacyEnv = std::getenv("RPSB_USE_LEGACY_UI");
+		if (!(legacyEnv && legacyEnv[0] == '1')) {
+			configDialog->detachFromModel();
+		}
+		// MainPage is constructed lazily in sb_openDialog.
 
 		modelObserver = new ModelObserver_Prog();
 		configModel->addObserver(modelObserver);
@@ -256,6 +317,14 @@ CAPI void sb_kill()
 
 	delete tsMgr;
 	tsMgr = NULL;
+
+	if (mainPage)
+	{
+		mainPage->hide();
+		mainPage->setParent(nullptr);
+		delete mainPage;
+		mainPage = NULL;
+	}
 
 	if (configDialog)
 	{
@@ -316,11 +385,30 @@ CAPI void sb_onServerChange(uint64 serverID)
 
 CAPI void sb_openDialog()
 {
-	if(!configDialog)
-		configDialog = new ConfigQt(configModel);
-	configDialog->showNormal();
-	configDialog->raise();
-	configDialog->activateWindow();
+	// Default visible window is MainPage. Set RPSB_USE_LEGACY_UI=1 to
+	// fall back to the legacy ConfigQt window.
+	bool useLegacy = false;
+	{
+		const char *env = std::getenv("RPSB_USE_LEGACY_UI");
+		useLegacy = (env && env[0] == '1');
+	}
+
+	if (useLegacy) {
+		if (!configDialog)
+			configDialog = new ConfigQt(configModel);
+		configDialog->showNormal();
+		configDialog->raise();
+		configDialog->activateWindow();
+	} else {
+		if (!mainPage) {
+			Theme::apply(qApp);
+			mainPage = new MainPage();
+			MainPageWiring::wire(mainPage, configModel, sampler);
+		}
+		mainPage->showNormal();
+		mainPage->raise();
+		mainPage->activateWindow();
+	}
 
 	sb_enableInterface(connectionStatusMap[activeServerId]);
 }
@@ -378,21 +466,37 @@ CAPI int sb_playButtonEx(const char* button)
 
 CAPI void sb_playButton(int btn)
 {
-    if ((NULL != configDialog) && (configDialog->hotkeysEnabled()))
+    // Hotkey blocked at the Reset-hotkey level: short-circuit even if
+    // TS3 still holds the binding in its profile.
+    if (HotkeyBlock::isBlocked(btn)) return;
+
+    if ((NULL != configDialog) && !configDialog->hotkeysEnabled()) return;
+
+    // Route through the new modular UI's pipeline so hotkey playback uses
+    // the same round-robin slot picker, channel-FX integration, error
+    // dialog and preview-stop as a real mouse click. Without this routing
+    // hotkeys spawn extra slots via Sampler::playFile -> findFreeSlot,
+    // which is what made auto-repeat sound like overlapping playbacks.
+    if (mainPage)
     {
-        const SoundInfo *sound = configModel->getSoundInfo(btn);
-        if (sound)
+        QMetaObject::invokeMethod(mainPage, [btn]{
+            if (mainPage) mainPage->triggerButton(btn);
+        }, Qt::QueuedConnection);
+        return;
+    }
+
+    // Legacy fallback path (RPSB_USE_LEGACY_UI=1).
+    const SoundInfo *sound = configModel->getSoundInfo(btn);
+    if (sound)
+    {
+        if (sound->fxRemember)
         {
-            // Apply per-sound Custom FX (same logic as ConfigQt::playSound)
-            if (sound->fxRemember)
-            {
-                configModel->setPitchValue(sound->fxPitch);
-                configModel->setSpeedValue(sound->fxSpeed);
-                configModel->setReverbValue(sound->fxReverb);
-                configModel->setSyncPitchSpeed(sound->fxSyncPitchSpeed);
-            }
-            sb_playFile(*sound);
+            configModel->setPitchValue(sound->fxPitch);
+            configModel->setSpeedValue(sound->fxSpeed);
+            configModel->setReverbValue(sound->fxReverb);
+            configModel->setSyncPitchSpeed(sound->fxSyncPitchSpeed);
         }
+        sb_playFile(*sound);
     }
 }
 
@@ -444,6 +548,31 @@ CAPI void sb_onHotkeyRecordedEvent(const char *keyword, const char *key)
 {
 	if (configDialog)
 		configDialog->onHotkeyRecordedEvent(keyword, key);
+
+	// Mirror the binding into the new UI's overlay cache so "show
+	// hotkeys on buttons" reflects the hotkey the moment TS3 confirms
+	// it, without having to reopen the soundboard window. Recording a
+	// fresh hotkey also lifts any previous block on that button.
+	if (mainPage && keyword)
+	{
+		QString kw = QString::fromUtf8(keyword);
+		if (kw.startsWith("button_"))
+		{
+			bool ok = false;
+			int btnNum = kw.midRef(7).toInt(&ok);
+			if (ok)
+			{
+				int idx = btnNum - 1; // sb_getInternalHotkeyName uses i+1
+				HotkeyBlock::setBlocked(idx, false);
+				QString k = key ? QString::fromUtf8(key) : QString();
+				QMetaObject::invokeMethod(mainPage->buttonGrid(),
+					[idx, k]{
+						if (mainPage)
+							mainPage->buttonGrid()->setHotkeyOverlay(idx, k);
+					}, Qt::QueuedConnection);
+			}
+		}
+	}
 }
 
 

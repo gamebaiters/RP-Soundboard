@@ -68,6 +68,12 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hinstDLL, _In_ DWORD fdwReason, _In_ LPVOID l
 static char* pluginID = NULL;
 static char g_ts3ConfigPath[PATH_BUFSIZE] = {0};
 
+/* See plugin.h: master gate for rpsb_debug.log writers. Default off so a
+ * fresh install never touches the disk; ConfigModel writes the saved
+ * value into this on plugin init and on every settings toggle. */
+int g_rpsbLogsEnabled = 0;
+int g_rpsbPreviewOnly = 0;
+
 const char *getTs3ConfigPath()
 {
 	if (g_ts3ConfigPath[0] == '\0')

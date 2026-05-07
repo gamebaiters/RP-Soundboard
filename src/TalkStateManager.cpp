@@ -4,6 +4,7 @@
 #include "samples.h"
 #include "ts3log.h"
 #include "main.h"
+#include "plugin.h"
 #include <QMetaEnum>
 
 //---------------------------------------------------------------
@@ -55,7 +56,12 @@ TalkStateManager::~TalkStateManager()
 void TalkStateManager::onStartPlaying(int slot, bool preview, QString filename)
 {
 	Q_UNUSED(slot);
-	if (!preview)
+	// In preview-only mode the plugin must not touch TS3's transmission
+	// state. Forcing CLIENT_INPUT_DEACTIVATED -> ACTIVE (continuous
+	// transmission) is what was making the mic light up on the server
+	// even though no soundboard audio was being injected. Treat the
+	// global preview-only switch as if every sound was a preview.
+	if (!preview && !g_rpsbPreviewOnly)
 	{
 		playingServerId = activeServerId;
 		setPlayTransMode();
@@ -91,6 +97,8 @@ void TalkStateManager::onPauseSound(int slot)
 void TalkStateManager::onUnpauseSound(int slot)
 {
 	Q_UNUSED(slot);
+	if (g_rpsbPreviewOnly)
+		return;
 	setPlayTransMode();
 }
 
@@ -256,7 +264,30 @@ bool TalkStateManager::setContinuousTransmission(uint64 scHandlerID)
 //---------------------------------------------------------------
 void TalkStateManager::onClientStopsTalking()
 {
+	if (g_rpsbPreviewOnly)
+		return;
 	// If we are in PTT mode and the client lets go of the PTT key while playing a sound, ptt state gets reset to not-talking.
 	if (currentTalkState == TS_CONT_TRANS && (previousTalkState == TS_PTT_WITHOUT_VA || previousTalkState == TS_PTT_WITH_VA))
 		setPlayTransMode();
+}
+
+void TalkStateManager::onPreviewOnlyToggled(bool on)
+{
+	if (on)
+	{
+		// Switching ON mid-playback: the plugin had previously bumped
+		// TS3 to TS_CONT_TRANS so the soundboard could be transmitted.
+		// Restore the user's original talk state immediately so the
+		// mic stops transmitting now, not when the sound finishes.
+		if (currentTalkState == TS_CONT_TRANS && previousTalkState != TS_INVALID)
+			setTalkTransMode();
+	}
+	else
+	{
+		// Switching OFF mid-playback: if any slot is still active we
+		// need to re-arm continuous transmission so the soundboard can
+		// reach the server again.
+		if (anySlotStillPlaying())
+			setPlayTransMode();
+	}
 }

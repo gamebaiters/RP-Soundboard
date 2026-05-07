@@ -9,6 +9,7 @@
     <file>../img/playarrow_32.png</file>
     <file>../img/rpmb_icon_16.png</file>
     <file>../img/rpmb_icon_64.png</file>
+    <file>../img/check_14.png</file>
   </qresource>
   <qresource prefix="style">
     <file>dark_style.qss</file>

@@ -1,0 +1,325 @@
+#include "channel.h"
+#include "../SoundButton.h"
+#include "theme.h"
+#include "channel_meter.h"
+#include "channel_sandbox_dialog.h"
+
+// Defined in SoundButton.cpp (not exposed via header).
+extern const QString &getButtonMime();
+
+#include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QPushButton>
+#include <QFrame>
+#include <QLabel>
+#include <QLineEdit>
+#include <QStyle>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QMimeData>
+
+QByteArray ChannelState::toJson() const {
+    QJsonObject o;
+    o["volumeLocal"]   = volumeLocal;
+    o["volumeRemote"]  = volumeRemote;
+    o["volumesLinked"] = volumesLinked;
+    o["pitch"]         = pitch;
+    o["speed"]         = speed;
+    o["reverb"]        = reverb;
+    o["fxSync"]        = fxSync;
+    o["filename"]      = filename;
+    o["playbackPos"]   = playbackPos;
+    o["sandbox"]       = sandbox.toJson();
+    return QJsonDocument(o).toJson(QJsonDocument::Compact);
+}
+
+bool ChannelState::fromJson(const QByteArray &data, ChannelState &out) {
+    QJsonParseError err;
+    auto doc = QJsonDocument::fromJson(data, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) return false;
+    auto o = doc.object();
+    out.volumeLocal   = o.value("volumeLocal").toInt(100);
+    out.volumeRemote  = o.value("volumeRemote").toInt(100);
+    out.volumesLinked = o.value("volumesLinked").toBool(false);
+    out.pitch         = o.value("pitch").toInt(0);
+    out.speed         = o.value("speed").toInt(0);
+    out.reverb        = o.value("reverb").toInt(0);
+    out.fxSync        = o.value("fxSync").toBool(false);
+    out.filename      = o.value("filename").toString();
+    out.playbackPos   = o.value("playbackPos").toDouble(0.0);
+    out.sandbox       = SandboxState::fromJson(o.value("sandbox").toObject());
+    return true;
+}
+
+Channel::Channel(int channelId, QWidget *parent)
+    : QWidget(parent)
+    , m_id(channelId)
+    , m_volume(new VolumeControl(this))
+    , m_fx(new FxPanel(this))
+    , m_wave(new WaveformPlayer(this))
+    , m_addBtn(new QPushButton(tr("+ Add channel"), this))
+    , m_removeBtn(new QPushButton(this))
+    , m_titleEdit(new QLineEdit(this))
+{
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
+    setAcceptDrops(true);
+
+    m_removeBtn->setText(QString::fromUtf8("\xE2\x9C\x95")); // ✕
+    m_removeBtn->setVisible(false);
+    m_removeBtn->setToolTip(tr("Remove this channel (stops its playback)"));
+    m_removeBtn->setFixedSize(22, 22);
+    m_removeBtn->setCursor(Qt::PointingHandCursor);
+    m_removeBtn->setFlat(true);
+
+    m_titleEdit->setText(tr("Channel %1").arg(channelId + 1));
+    m_titleEdit->setFrame(false);
+    m_titleEdit->setMinimumWidth(120);
+
+    m_frame = new QFrame(this);
+    m_frame->setObjectName("channelFrame");
+    m_frame->setFrameShape(QFrame::StyledPanel);
+    m_frame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
+    refreshTheme();
+
+    // Per-channel meter sits VERTICALLY CENTERED between the volume
+    // controls and the FX panel - that's where the audio "leaves" the
+    // channel so it's the natural visual home. When the FX panel is
+    // hidden it slides next to the volume controls instead.
+    m_meter = new ChannelMeter(this);
+    m_meter->setMinimumWidth(180);
+    m_meter->setMaximumWidth(260);
+    m_meter->setFixedHeight(36);
+    m_meter->setToolTip(tr(
+        "Per-channel L/R peak meter (post-DSP, post-Remote-volume).\n"
+        "Always reflects what the SERVER hears, regardless of how the\n"
+        "Local volume slider is set. Cyan = headroom, amber = warning,\n"
+        "red = clipping. Hide via Settings > Audio sandbox."));
+
+    auto *controls = new QHBoxLayout;
+    controls->setContentsMargins(0,0,0,0);
+    controls->setSpacing(8);
+    controls->addWidget(m_volume, 1);
+    controls->addWidget(m_meter, 0, Qt::AlignVCenter);
+    m_fxSeparator = new QFrame(this);
+    m_fxSeparator->setFrameShape(QFrame::VLine);
+    controls->addWidget(m_fxSeparator);
+    controls->addWidget(m_fx, 1);
+
+    // Per-channel DSP entry point. The button label uses a Unicode
+    // gear (U+2699) that renders cleanly cross-platform - the previous
+    // PNG icon looked rendered like a thumbnail and didn't read as
+    // "settings".
+    m_sandboxBtn = new QPushButton(
+        QString::fromUtf8("\xE2\x9A\x99 ") + tr("Spatial / EQ / Stretch"),
+        this);
+    m_sandboxBtn->setFixedHeight(22);
+    m_sandboxBtn->setMinimumWidth(160);
+    m_sandboxBtn->setStyleSheet(
+        "QPushButton { padding: 2px 10px; }");
+    m_sandboxBtn->setToolTip(tr(
+        "Per-channel audio sandbox. Inside you'll find:\n"
+        "  - L/R Pan (simple stereo balance)\n"
+        "  - 3D HRTF (manual position / auto-orbit / 8D preset)\n"
+        "  - 16-band ISO graphic EQ (-12..+12 dB)\n"
+        "  - Paulstretch (extreme phase-randomised time-stretch)\n"
+        "Settings persist per channel and are bundled into macros."));
+
+    // Layout: [X][title.....stretch][sandboxBtn]
+    auto *titleRow = new QHBoxLayout;
+    titleRow->setContentsMargins(0,0,0,0);
+    titleRow->setSpacing(4);
+    titleRow->addWidget(m_removeBtn, 0, Qt::AlignVCenter);
+    titleRow->addWidget(m_titleEdit, 1);
+    titleRow->addWidget(m_sandboxBtn, 0, Qt::AlignVCenter);
+
+    auto *frameLayout = new QVBoxLayout(m_frame);
+    frameLayout->setContentsMargins(8,4,8,8);
+    frameLayout->setSpacing(4);
+    frameLayout->addLayout(titleRow);
+    frameLayout->addWidget(m_wave);
+    frameLayout->addLayout(controls);
+
+    m_addBtn->setVisible(false);
+
+    auto *root = new QVBoxLayout(this);
+    root->setContentsMargins(0,0,0,0);
+    root->setSpacing(0);
+    root->addWidget(m_frame);
+
+    auto onChange = [this]{ onAnyChange(); };
+    connect(m_volume, &VolumeControl::localChanged,   this, onChange);
+    connect(m_volume, &VolumeControl::remoteChanged,  this, onChange);
+    connect(m_volume, &VolumeControl::linkedChanged,  this, onChange);
+    connect(m_fx,     &FxPanel::pitchChanged,         this, onChange);
+    connect(m_fx,     &FxPanel::speedChanged,         this, onChange);
+    connect(m_fx,     &FxPanel::reverbChanged,        this, onChange);
+    connect(m_fx,     &FxPanel::syncChanged,          this, onChange);
+
+    connect(m_addBtn,    &QPushButton::clicked, this, [this]{ emit addChannelRequested(m_id); });
+    connect(m_removeBtn, &QPushButton::clicked, this, [this]{ emit removeChannelRequested(m_id); });
+    connect(m_titleEdit, &QLineEdit::editingFinished, this, &Channel::onTitleEditFinished);
+    connect(m_sandboxBtn,&QPushButton::clicked, this, [this]{ openSandboxDialog(); });
+}
+
+void Channel::setSandboxState(const SandboxState &s) {
+    m_sandbox = s;
+    if (m_sandboxDialog) m_sandboxDialog->setState(m_sandbox);
+}
+
+void Channel::openSandboxDialog() {
+    if (!m_sandboxFeatureEnabled) return;
+    if (!m_sandboxDialog) {
+        m_sandboxDialog = new ChannelSandboxDialog(m_id, this);
+        m_sandboxDialog->setProperty("isGBSoundboard", true);
+        connect(m_sandboxDialog, &ChannelSandboxDialog::stateChanged,
+                this, [this](const SandboxState &s){
+            m_sandbox = s;
+            emit sandboxStateChanged(m_id, s);
+            // Channel-state level change so the host persists it.
+            onAnyChange();
+        });
+        connect(m_sandboxDialog, &ChannelSandboxDialog::resetRequested,
+                this, [this](int id){ emit sandboxResetRequested(id); });
+    }
+    m_sandboxDialog->setChannelTitle(title());
+    m_sandboxDialog->setState(m_sandbox);
+    m_sandboxDialog->show();
+    m_sandboxDialog->raise();
+    m_sandboxDialog->activateWindow();
+}
+
+void Channel::setMeterPeak(float l, float r) {
+    if (m_meter) m_meter->setPeak(l, r);
+}
+
+void Channel::setMeterVisible(bool on) {
+    if (m_meter) m_meter->setVisible(on);
+}
+
+void Channel::setSandboxFeatureEnabled(bool on) {
+    m_sandboxFeatureEnabled = on;
+    if (m_sandboxBtn) m_sandboxBtn->setVisible(on);
+    if (!on && m_sandboxDialog && m_sandboxDialog->isVisible())
+        m_sandboxDialog->close();
+}
+
+void Channel::pushTitleToSandboxDialog() {
+    if (m_sandboxDialog) m_sandboxDialog->setChannelTitle(title());
+}
+
+void Channel::setRemovable(bool on) {
+    m_removeBtn->setVisible(on);
+}
+
+void Channel::refreshTheme() {
+    Theme::Derived d = Theme::derive(Theme::colors());
+    if (m_frame) {
+        m_frame->setStyleSheet(QString(
+            "#channelFrame { border: 1px solid %1; border-radius: 6px;"
+            " background-color: %2; }").arg(d.border.name(), d.surface.name()));
+    }
+    if (m_removeBtn) {
+        m_removeBtn->setStyleSheet(QString(
+            "QPushButton { background: transparent; color: #c64545;"
+            " border: none; border-radius: 4px; font-weight: bold;"
+            " font-size: 13px; padding: 0; }"
+            "QPushButton:hover { background-color: #c63131; color: white; }"
+            "QPushButton:pressed { background-color: #a32626; color: white; }"));
+    }
+    if (m_titleEdit) {
+        m_titleEdit->setStyleSheet(QString(
+            "QLineEdit { background: transparent; color: %1; border: none;"
+            " font-weight: bold; padding: 2px 4px; }"
+            "QLineEdit:focus { background: %2; border: 1px solid %3;"
+            " border-radius: 3px; }")
+            .arg(d.text.name(), d.surfaceAlt.name(), d.borderStrong.name()));
+    }
+    if (m_fx)     m_fx->refreshTheme();
+    if (m_volume) m_volume->refreshTheme();
+}
+
+void Channel::setFxVisible(bool on) {
+    m_fx->setVisible(on);
+    if (m_fxSeparator) m_fxSeparator->setVisible(on);
+    if (auto *p = parentWidget()) p->updateGeometry();
+    updateGeometry();
+}
+
+void Channel::setWaveformVisible(bool on) {
+    // Hides waveform paint only; transport + filename + time stay visible.
+    m_wave->setWavePaintVisible(on);
+    if (auto *p = parentWidget()) p->updateGeometry();
+    updateGeometry();
+}
+
+void Channel::setTitle(const QString &t) {
+    if (m_titleEdit->text() == t) return;
+    QSignalBlocker b(m_titleEdit);
+    m_titleEdit->setText(t);
+}
+
+QString Channel::title() const {
+    return m_titleEdit->text();
+}
+
+void Channel::onTitleEditFinished() {
+    emit titleChanged(m_id, m_titleEdit->text());
+}
+
+ChannelState Channel::state() const {
+    ChannelState s;
+    s.volumeLocal   = m_volume->local();
+    s.volumeRemote  = m_volume->remote();
+    s.volumesLinked = m_volume->linked();
+    s.pitch         = m_fx->pitch();
+    s.speed         = m_fx->speed();
+    s.reverb        = m_fx->reverb();
+    s.fxSync        = m_fx->sync();
+    s.filename      = m_wave->filename();
+    s.playbackPos   = 0.0;
+    s.sandbox       = m_sandbox;
+    return s;
+}
+
+void Channel::applyState(const ChannelState &s) {
+    m_volume->setLocal(s.volumeLocal);
+    m_volume->setRemote(s.volumeRemote);
+    m_volume->setLinked(s.volumesLinked);
+    m_fx->setPitch(s.pitch);
+    m_fx->setSpeed(s.speed);
+    m_fx->setReverb(s.reverb);
+    m_fx->setSync(s.fxSync);
+    m_wave->setFilename(s.filename);
+    setSandboxState(s.sandbox);
+    // Macro restore + session restore both go through applyState. Both
+    // need the wiring layer to push the sandbox state back to the
+    // sampler's slot DSP, otherwise the saved spatial / EQ / stretch
+    // settings load into the dialog but never reach the audio engine.
+    emit sandboxStateChanged(m_id, m_sandbox);
+}
+
+void Channel::onAnyChange() {
+    emit stateChanged(m_id);
+}
+
+void Channel::dragEnterEvent(QDragEnterEvent *e) {
+    if (e->mimeData() && e->mimeData()->hasFormat(getButtonMime()))
+        e->acceptProposedAction();
+}
+
+void Channel::dragMoveEvent(QDragMoveEvent *e) {
+    if (e->mimeData() && e->mimeData()->hasFormat(getButtonMime()))
+        e->acceptProposedAction();
+}
+
+void Channel::dropEvent(QDropEvent *e) {
+    if (!e->mimeData() || !e->mimeData()->hasFormat(getButtonMime())) return;
+    QObject *src = e->mimeData()->property("sourceButton").value<QObject *>();
+    if (!src) return;
+    int idx = src->property("buttonIndex").toInt();
+    emit soundDroppedFromButton(m_id, idx);
+    e->acceptProposedAction();
+}

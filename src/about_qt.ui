@@ -12,8 +12,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>383</width>
-    <height>155</height>
+    <width>460</width>
+    <height>220</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -29,7 +29,7 @@
    </size>
   </property>
   <property name="windowTitle">
-   <string>About RP Soundboard</string>
+   <string>About GameBaiters Soundboard</string>
   </property>
   <property name="windowIcon">
    <iconset resource="qtres.qrc">
@@ -58,7 +58,7 @@
           </font>
          </property>
          <property name="text">
-          <string>RP Soundboard</string>
+          <string>GameBaiters Soundboard</string>
          </property>
         </widget>
        </item>
@@ -72,7 +72,13 @@
        <item>
         <widget class="QLabel" name="label_2">
          <property name="text">
-          <string>Copyright © 2019 Marius Gräfe</string>
+          <string>Copyright © 2026 GameBaiters — &lt;a href=&quot;https://gamebaiters.net&quot;&gt;gamebaiters.net&lt;/a&gt;&lt;br/&gt;Fork rewritten from scratch on top of the original RP Soundboard source by Marius Gräfe (2015–2019).</string>
+         </property>
+         <property name="wordWrap">
+          <bool>true</bool>
+         </property>
+         <property name="openExternalLinks">
+          <bool>true</bool>
          </property>
         </widget>
        </item>
@@ -105,7 +111,7 @@
       </sizepolicy>
      </property>
      <property name="text">
-      <string>This software uses libraries from the FFmpeg project under the LGPLv2.1. A copy of the used source code along with the relevant configuration files can be downloaded here: &lt;a href=&quot;http://mgraefe.de/rpsb/ffmpeg-source.zip&quot;&gt;http://mgraefe.de/rpsb/ffmpeg-source.zip&lt;/a&gt;</string>
+      <string>This software uses libraries from the FFmpeg project under the LGPLv2.1. The exact FFmpeg source used in this build can be obtained from &lt;a href=&quot;https://ffmpeg.org/download.html&quot;&gt;ffmpeg.org/download.html&lt;/a&gt; (tag n6.1.1) or by request at &lt;a href=&quot;https://gamebaiters.net&quot;&gt;gamebaiters.net&lt;/a&gt;.</string>
      </property>
      <property name="wordWrap">
       <bool>true</bool>

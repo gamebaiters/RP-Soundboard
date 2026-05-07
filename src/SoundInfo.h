@@ -12,6 +12,7 @@
 
 #include <QSettings>
 #include <QColor>
+#include <QByteArray>
 #include <stdexcept>
 
 class SoundInfo
@@ -44,6 +45,16 @@ public:
 	int fxSpeed;          // -100..100 slider value
 	int fxReverb;         // 0..100 slider value
 	bool fxSyncPitchSpeed;
+
+	// Macro: triggering the button restores the JSON ChannelState in
+	// macroState instead of playing a sound.
+	bool isMacro;
+	QByteArray macroState;
+
+	// Optional background image for the button. Painted stretched over
+	// the whole button face; the label gets a translucent black backdrop
+	// in the center so it stays readable on top of any image.
+	QString imagePath;
 };
 
 #endif // rpsbsrc__SoundInfo_H__

@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QMouseEvent>
 #include "soundview_qt.h"
+#include "modules/theme.h"
 #include "SampleVisualizerThread.h"
 
 
@@ -40,9 +41,22 @@ void SoundView::paintEvent(QPaintEvent *evt)
 	QPainter painter(this);
 	painter.setRenderHint(QPainter::Antialiasing, false);
 
-	// Background
-	painter.setPen(QColor(50, 50, 50));
-	painter.setBrush(QColor(25, 25, 30));
+	// Background + frame derive from the active theme so the waveform pane
+	// retints with the rest of the UI when the user picks a custom color.
+	Theme::Colors tc = Theme::colors();
+	QColor bgFill, bgFrame, playedTint;
+	if (tc.enabled) {
+		Theme::Derived d = Theme::derive(tc);
+		bgFill   = d.surfaceAlt;
+		bgFrame  = d.border;
+		playedTint = QColor(d.accent.red(), d.accent.green(), d.accent.blue(), 50);
+	} else {
+		bgFill   = QColor(25, 25, 30);
+		bgFrame  = QColor(50, 50, 50);
+		playedTint = QColor(0, 120, 215, 40);
+	}
+	painter.setPen(bgFrame);
+	painter.setBrush(bgFill);
 	painter.drawRect(QRect(0, 0, width() - 1, height() - 1));
 
 	// Draw played portion background
@@ -50,13 +64,19 @@ void SoundView::paintEvent(QPaintEvent *evt)
 	{
 		int posX = (int)(m_playbackPosition * (width() - 1));
 		painter.setPen(Qt::NoPen);
-		painter.setBrush(QColor(0, 120, 215, 40));
+		painter.setBrush(playedTint);
 		painter.drawRect(1, 1, posX - 1, height() - 2);
 	}
 
-	// Draw waveform
-	painter.setPen(QColor(0, 180, 255));
-	painter.setBrush(QColor(0, 140, 220, 180));
+	// Draw waveform - tinted by Theme::colors().waveform when the user's
+	// custom theme is enabled. Default falls back to the original cyan.
+	{
+		Theme::Colors tc = Theme::colors();
+		QColor wave = tc.enabled ? tc.waveform : QColor(0, 180, 255);
+		QColor fill(wave.red(), wave.green(), wave.blue(), 180);
+		painter.setPen(wave);
+		painter.setBrush(fill);
+	}
 	drawWaves(&painter);
 
 	// Draw crop region overlay (from SoundInfo)

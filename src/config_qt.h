@@ -88,6 +88,11 @@ public:
 	static void openHotkeySetDialog(size_t buttonId, QWidget *parent);
 	void onHotkeyRecordedEvent(const char *keyword, const char *key);
 
+	// Detach from ConfigModel so this hidden window stops rebuilding its
+	// shadow grid on every notification when the new MainPage UI is the
+	// visible one. Idempotent.
+	void detachFromModel();
+
     void setConfiguration(int cfg);
     bool hotkeysEnabled();
 

@@ -10,3 +10,10 @@ src/version/version.h
 deploy/package.ini
 
 ffmpeg/build/
+
+# Local-only build artifacts (build_local.ps1 lives in the parent dir,
+# defend against accidental re-creation inside the repo)
+build_local/
+ffmpeg/include/
+ffmpeg/lib_win_x64/
+ffmpeg/bin_win_x64/

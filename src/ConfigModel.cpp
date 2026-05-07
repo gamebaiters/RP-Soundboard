@@ -13,6 +13,7 @@
 
 #include "ConfigModel.h"
 #include "main.h"
+#include "TalkStateManager.h"
 #include "buildinfo.h"
 #include "plugin.h"
 
@@ -42,11 +43,25 @@ ConfigModel::ConfigModel()
 	m_earrapeProtection = false;
 	m_pitchSpeedValue = 100;
 	m_rememberPitchSpeed = false;
+	m_restoreSession = false;
+	m_globalFxEnabled = true;
+	m_hideWaveform = false;
+	m_themeEnabled = false;
+	m_themeAccent = QStringLiteral("#4a90e2");
+	m_themeWaveform = QStringLiteral("#4a90e2");
+	m_themeBackground = QStringLiteral("#2b2b2b");
+	m_themeContrast = 50;
+	m_themeText = QString();
+	m_themeButton = QString();
 	m_pitchValue = 0;
 	m_speedValue = 0;
 	m_syncPitchSpeed = false;
 	m_reverbValue = 0;
 	m_multiSoundboard = false;
+	m_logsEnabled = false;
+	m_previewOnly = false;
+	m_audioSandboxEnabled = true;
+	m_audioMeterVisible = true;
 
     m_activeConfig = 0;
 	m_nextUpdateCheck = 0;
@@ -89,13 +104,33 @@ void ConfigModel::readConfig(const QString &file)
 	m_linkVolumes = settings.value("link_volumes", false).toBool();
 	m_earrapeProtection = settings.value("earrape_protection", false).toBool();
 	m_rememberPitchSpeed = settings.value("remember_pitch_speed", false).toBool();
+	m_restoreSession = settings.value("restore_session", false).toBool();
+	m_globalFxEnabled = settings.value("global_custom_fx", true).toBool();
+	m_hideWaveform    = settings.value("hide_waveform", false).toBool();
+	m_themeEnabled    = settings.value("theme_enabled", false).toBool();
+	m_themeAccent     = settings.value("theme_accent", "#4a90e2").toString();
+	m_themeWaveform   = settings.value("theme_waveform", "#4a90e2").toString();
+	m_themeBackground = settings.value("theme_background", "#2b2b2b").toString();
+	m_themeContrast   = settings.value("theme_contrast", 50).toInt();
+	m_themeText       = settings.value("theme_text", "").toString();
+	m_themeButton     = settings.value("theme_button", "").toString();
 	m_pitchSpeedValue = m_rememberPitchSpeed ? settings.value("pitch_speed_value", 100).toInt() : 100;
 	m_pitchValue = m_rememberPitchSpeed ? settings.value("pitch_value", 0).toInt() : 0;
 	m_speedValue = m_rememberPitchSpeed ? settings.value("speed_value", 0).toInt() : 0;
 	m_syncPitchSpeed = settings.value("sync_pitch_speed", false).toBool();
 	m_reverbValue = m_rememberPitchSpeed ? settings.value("reverb_value", 0).toInt() : 0;
 	m_multiSoundboard = settings.value("multi_soundboard", false).toBool();
+	m_logsEnabled = settings.value("logs_enabled", false).toBool();
+	m_previewOnly = settings.value("preview_only", false).toBool();
+	m_audioSandboxEnabled = settings.value("audio_sandbox_enabled", true).toBool();
+	m_audioMeterVisible   = settings.value("audio_meter_visible", true).toBool();
 	m_nextUpdateCheck = settings.value("next_update_check", 0).toUInt();
+
+	// Propagate the logging gate to the C-land writers immediately so
+	// subsequent rpsb_debug.log calls honor the saved preference even
+	// before the user opens Settings this session.
+	g_rpsbLogsEnabled = m_logsEnabled ? 1 : 0;
+	g_rpsbPreviewOnly = m_previewOnly ? 1 : 0;
 
 	notifyAllEvents();
 }
@@ -128,12 +163,26 @@ void ConfigModel::writeConfig(const QString &file)
 	settings.setValue("link_volumes", m_linkVolumes);
 	settings.setValue("earrape_protection", m_earrapeProtection);
 	settings.setValue("remember_pitch_speed", m_rememberPitchSpeed);
+	settings.setValue("restore_session", m_restoreSession);
+	settings.setValue("global_custom_fx", m_globalFxEnabled);
+	settings.setValue("hide_waveform", m_hideWaveform);
+	settings.setValue("theme_enabled", m_themeEnabled);
+	settings.setValue("theme_accent", m_themeAccent);
+	settings.setValue("theme_waveform", m_themeWaveform);
+	settings.setValue("theme_background", m_themeBackground);
+	settings.setValue("theme_contrast", m_themeContrast);
+	settings.setValue("theme_text", m_themeText);
+	settings.setValue("theme_button", m_themeButton);
 	settings.setValue("pitch_speed_value", m_pitchSpeedValue);
 	settings.setValue("pitch_value", m_pitchValue);
 	settings.setValue("speed_value", m_speedValue);
 	settings.setValue("sync_pitch_speed", m_syncPitchSpeed);
 	settings.setValue("reverb_value", m_reverbValue);
 	settings.setValue("multi_soundboard", m_multiSoundboard);
+	settings.setValue("logs_enabled", m_logsEnabled);
+	settings.setValue("preview_only", m_previewOnly);
+	settings.setValue("audio_sandbox_enabled", m_audioSandboxEnabled);
+	settings.setValue("audio_meter_visible", m_audioMeterVisible);
 	settings.setValue("next_update_check", m_nextUpdateCheck);
 
 	for (int i = 0; i < NUM_CONFIGS; i++)
@@ -567,6 +616,40 @@ void ConfigModel::setPitchSpeedValue(int val)
 //---------------------------------------------------------------
 // Purpose:
 //---------------------------------------------------------------
+void ConfigModel::setRestoreSession(bool on)
+{
+	m_restoreSession = on;
+	writeConfig();
+}
+
+
+void ConfigModel::setGlobalFxEnabled(bool on)
+{
+	m_globalFxEnabled = on;
+	writeConfig();
+}
+
+
+void ConfigModel::setHideWaveform(bool on)
+{
+	m_hideWaveform = on;
+	writeConfig();
+}
+
+
+void ConfigModel::setTheme(bool enabled, const QString &accent, const QString &waveform, const QString &background, int contrast, const QString &text, const QString &button)
+{
+	m_themeEnabled = enabled;
+	m_themeAccent = accent;
+	m_themeWaveform = waveform;
+	m_themeBackground = background;
+	m_themeContrast = contrast;
+	m_themeText = text;
+	m_themeButton = button;
+	writeConfig();
+}
+
+
 void ConfigModel::setRememberPitchSpeed(bool remember)
 {
 	m_rememberPitchSpeed = remember;
@@ -614,5 +697,37 @@ void ConfigModel::setMultiSoundboard(bool enabled)
 	m_multiSoundboard = enabled;
 	writeConfig();
 	notify(NOTIFY_SET_MULTI_SOUNDBOARD, enabled ? 1 : 0);
+}
+
+void ConfigModel::setLogsEnabled(bool on)
+{
+	m_logsEnabled = on;
+	g_rpsbLogsEnabled = on ? 1 : 0;
+	writeConfig();
+	notify(NOTIFY_SET_LOGS_ENABLED, on ? 1 : 0);
+}
+
+void ConfigModel::setPreviewOnly(bool on)
+{
+	m_previewOnly = on;
+	g_rpsbPreviewOnly = on ? 1 : 0;
+	// React to mid-playback toggles immediately: the plugin needs to
+	// pull TS3's mic out of forced CONT_TRANS the moment the user
+	// flips the switch.
+	if (auto *ts = sb_getTalkStateManager()) ts->onPreviewOnlyToggled(on);
+	writeConfig();
+	notify(NOTIFY_SET_PREVIEW_ONLY, on ? 1 : 0);
+}
+
+void ConfigModel::setAudioSandboxEnabled(bool on)
+{
+	m_audioSandboxEnabled = on;
+	writeConfig();
+}
+
+void ConfigModel::setAudioMeterVisible(bool on)
+{
+	m_audioMeterVisible = on;
+	writeConfig();
 }
 

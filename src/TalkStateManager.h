@@ -39,6 +39,10 @@ public:
 	bool setVoiceActivation(uint64 scHandlerID);
 	bool setContinuousTransmission(uint64 scHandlerID);
 	void onClientStopsTalking();
+	// Called when the global preview-only flag is toggled mid-playback
+	// so TS3's transmission state can react immediately instead of
+	// waiting for the next sound to start.
+	void onPreviewOnlyToggled(bool on);
 
 private:
 	bool anySlotStillPlaying() const;

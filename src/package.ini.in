@@ -1,14 +1,15 @@
-Name = GameBaiters - Soundboard
+Name = GameBaiters Soundboard
 Type = Plugin
-Author = Marius Gräfe
+Author = GameBaiters (gamebaiters.net) - based on RP Soundboard by Marius Graefe
 Version = @version@
 Platforms = win32, win64, linux_amd64, mac
-Description = Easy to use soundboard to annoy your friends. Play any sound file to all people in your channel (and yourself).
-No external tools and no changes to Teamspeaks settings required!
+Description = GameBaiters Soundboard - a from-scratch UI rewrite of the classic RP Soundboard. Multi-channel playback, per-channel pitch / speed / reverb, link locks, macros that snapshot every channel, and a single-DLL package with FFmpeg statically linked. No external tools, no TeamSpeak settings to change.
 
-Please note:
-This plugin is still in development. Any kind of constructive feedback is appreciated. Feel free to post into this thread or send me an email: rpsb@mgraefe.de
-Your microphone is constantly open (picking up your voice) while a sound is played unless you check "Mute myself during playback". That is due to the limited access that plugins have to the sound interface of Teamspeak and cannot be changed currently. However I do not think that this is that important.
+Built and maintained by GameBaiters: https://gamebaiters.net
+Original source: RP Soundboard by Marius Graefe (2015-2019).
+
+Note:
+Your microphone stays open while a sound plays unless "Mute myself during playback" is enabled. This is a limit of the TeamSpeak plugin sound interface and cannot be changed.
 
 Disclaimer:
-This software uses code of FFmpeg (http://ffmpeg.org) licensed under the LGPLv2.1 (http://www.gnu.org/licenses/old-licenses/lgpl-2.1.html) and its source can be downloaded here: http://mgraefe.de/rpsb/ffmpeg-source.zip"
+This software uses code of FFmpeg (https://ffmpeg.org) licensed under the LGPLv2.1 (https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html). The exact FFmpeg source used in this build (tag n6.1.1) is available from https://ffmpeg.org/download.html or by request at https://gamebaiters.net.

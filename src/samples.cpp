@@ -14,6 +14,8 @@
 #include "SoundInfo.h"
 #include "ts3log.h"
 #include "HighResClock.h"
+#include "dsp/SlotDsp.h"
+#include "dsp/SandboxState.h"
 
 #include <queue>
 #include <vector>
@@ -40,6 +42,7 @@ static FILE *g_dbgSamples = nullptr;
 #include "plugin.h"
 static void sdbgOpen()
 {
+	if (!g_rpsbLogsEnabled) return;
 	if (!g_dbgSamples)
 	{
 		const char *cfgDir = getTs3ConfigPath();
@@ -53,6 +56,7 @@ static void sdbgOpen()
 }
 static void sdbgLog(const char *fmt, ...)
 {
+	if (!g_rpsbLogsEnabled) return;
 	sdbgOpen();
 	if (!g_dbgSamples) return;
 	va_list ap;
@@ -117,6 +121,87 @@ Sampler::PlaybackSlot::PlaybackSlot() :
 	slotDbLocal(-1.0),
 	slotDbRemote(-1.0)
 {
+}
+
+// Out-of-line so unique_ptr<SlotDsp> sees the full type for its destructor.
+Sampler::PlaybackSlot::~PlaybackSlot() = default;
+
+void Sampler::setSlotSandboxState(int slot, const SandboxState &s)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	PlaybackSlot &sl = m_slots[slot];
+	bool wasStretchOn = sl.dsp ? sl.dsp->state().stretchEnabled : false;
+	bool wasDspMissing = (sl.dsp == nullptr);
+	if (!sl.dsp) sl.dsp = std::make_unique<SlotDsp>();
+	sl.dsp->setSampleRate(48000.0);
+	sl.dsp->applyState(s);
+	// Re-route any prior FxPanel reverb into the dsp's end-stage and
+	// disable the libavfilter pre-reverb. Without this, enabling the
+	// sandbox after a reverb was already set would leave the legacy
+	// decoder reverb running while the user expected it at the end.
+	if (wasDspMissing) {
+		sl.dsp->setFxReverbWet(sl.fxReverbWet);
+		if (sl.inputFile) sl.inputFile->setReverbMix(0.0f);
+	} else {
+		sl.dsp->setFxReverbWet(sl.fxReverbWet);
+	}
+
+	// On stretch toggle ON, drain whatever the decoder has already
+	// queued in sbPlayback into paulstretch's feed buffer so it has
+	// at least one full window of source ready immediately. Without
+	// this, the user heard ~1-2 seconds of silence (the streaming
+	// buffer warmup) and reported "non funziona". Drain sbCapture
+	// too to avoid backlog while the capture path consumes slowly.
+	if (s.stretchEnabled && !wasStretchOn) {
+		// Toggle ON => reset stretch state first so the new session
+		// starts cleanly. Without this, the second time the user
+		// enables paulstretch the inputPos resumes mid-buffer (left
+		// over from the previous session) and the output runs
+		// seconds behind the live audio.
+		sl.dsp->reset();
+		// Pre-fill BOTH stretch state buffers so paulstretch on
+		// capture and playback both have at least one window of
+		// source ready immediately - skips the 1-2 s warm-up silence
+		// that otherwise made stretch toggle look broken.
+		{
+			SampleBuffer::Lock sbl(sl.sbPlayback.getMutex());
+			int avail = sl.sbPlayback.avail();
+			if (avail > 0) {
+				int prefill = std::min(avail, 96000); // up to 2 sec @48k
+				sl.dsp->feedStretchShort(sl.sbPlayback.getBufferData(), prefill, /*isCapture=*/false);
+				sl.sbPlayback.consume(NULL, prefill);
+			}
+		}
+		{
+			SampleBuffer::Lock sblc(sl.sbCapture.getMutex());
+			int availC = sl.sbCapture.avail();
+			if (availC > 0) {
+				int prefillC = std::min(availC, 96000);
+				sl.dsp->feedStretchShort(sl.sbCapture.getBufferData(), prefillC, /*isCapture=*/true);
+				sl.sbCapture.consume(NULL, prefillC);
+			}
+		}
+	}
+}
+
+void Sampler::clearSlotSandbox(int slot)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	m_slots[slot].dsp.reset();
+	m_slots[slot].peakL.store(0.0f);
+	m_slots[slot].peakR.store(0.0f);
+}
+
+void Sampler::getSlotPeak(int slot, float &peakL, float &peakR) const
+{
+	if (slot < 0 || slot >= MAX_SLOTS) {
+		peakL = peakR = 0.0f;
+		return;
+	}
+	peakL = m_slots[slot].peakL.load();
+	peakR = m_slots[slot].peakR.load();
 }
 
 
@@ -232,7 +317,7 @@ double g_perfMeasurement = 0.0;
 //---------------------------------------------------------------
 // Purpose: Fetch and mix samples from a single buffer
 //---------------------------------------------------------------
-int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int count, int channels, bool eraseConsumed, int ciLeft, int ciRight, bool overLeft, bool overRight, float ampThresh )
+int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int count, int channels, bool eraseConsumed, int ciLeft, int ciRight, bool overLeft, bool overRight, float ampThresh, PlaybackSlot *slot)
 {
 	float thresh = (ampThresh > 0.0f) ? ampThresh : (float)AMP_THRESH;
 
@@ -257,17 +342,65 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 	const float volGain = m_volumeFactor;
 	const float intensity = m_intensityFactor;
 	const int avail = sb.avail();
-	const short* const in = sb.getBufferData();
+	const short* in = sb.getBufferData();
 	short* const out = samples;
 	int write = 0;
 	int consumed = 0;
 
 	write = std::min(count, avail);
+
+	// Per-slot sandbox DSP. When the slot has a DSP block installed we
+	// transform the chunk before it gets mixed into the host's output
+	// buffer; the meter peaks come out of the DSP stage so they reflect
+	// what the listener actually hears.
+	//
+	// Paulstretch path (slot->dsp->isStretchEnabled): the DSP pulls
+	// `needIn` source frames per `write` output frames (= write/factor,
+	// rounded up). The mix loop below stays the same; only the consume
+	// count changes.
+	static thread_local std::vector<short> dspTemp;
+	int  stretchConsumed = -1;     // -1 = not on stretch path
+	bool isCapturePath = slot && (&sb == &slot->sbCapture);
+	if (slot && slot->dsp && slot->dsp->isStretchEnabled())
+	{
+		int needIn = slot->dsp->inputFramesNeededFor(write);
+		if (needIn > avail) needIn = avail;
+		// Both paths run their own paulstretch instance now (one for
+		// capture, one for playback) so the server hears the stretched
+		// signal exactly like the local listener. Each path consumes
+		// `needIn` from its own sb ring, feeds it to its own
+		// paulstretch state, and produces stretched output back.
+		if (needIn > 0) slot->dsp->feedStretchShort(in, needIn, isCapturePath);
+		if ((int)dspTemp.size() < write * 2) dspTemp.resize(write * 2);
+		float pL = 0.0f, pR = 0.0f;
+		slot->dsp->produceStretchedShort(dspTemp.data(), write, 2, pL, pR, isCapturePath);
+		(void)pL; (void)pR;
+		in = dspTemp.data();
+		stretchConsumed = needIn;
+	}
+	else if (slot && slot->dsp)
+	{
+		if ((int)dspTemp.size() < write * 2) dspTemp.resize(write * 2);
+		std::memcpy(dspTemp.data(), in, sizeof(short) * write * 2);
+		float pL = 0.0f, pR = 0.0f;
+		slot->dsp->process(dspTemp.data(), write, 2, pL, pR, isCapturePath);
+		(void)pL; (void)pR;
+		in = dspTemp.data();
+	}
+	// Peak measurement is intentionally deferred to the mix loop below
+	// so it reflects the FINAL post-volume per-slot contribution. The
+	// channel meter only updates on the capture path so it always
+	// reads the REMOTE volume level (= what the server hears) - that
+	// is what the user explicitly asked for.
+	float slotMaxL = 0.0f, slotMaxR = 0.0f;
 	if (channels == 1)
 	{
 		for (int i = 0; i < write; i++)
 		{
 			float sbSample = volGain * intensity * (float(in[i * 2]) + float(in[i * 2 + 1])) * 0.5f;
+			float a = std::fabs(sbSample) * (1.0f / 32768.0f);
+			if (a > slotMaxL) slotMaxL = a;
+			if (a > slotMaxR) slotMaxR = a;
 			float mixed = (float)out[i] + sbSample;
 			if (intensity <= 1.01f)
 			{
@@ -289,11 +422,22 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 		{
 			float sbL = volGain * intensity * float(in[i * 2]);
 			float sbR = volGain * intensity * float(in[i * 2 + 1]);
+			float aL = std::fabs(sbL) * (1.0f / 32768.0f);
+			float aR = std::fabs(sbR) * (1.0f / 32768.0f);
+			if (aL > slotMaxL) slotMaxL = aL;
+			if (aR > slotMaxR) slotMaxR = aR;
 			float tsL = (float)out[i * channels + ciLeft];
 			float tsR = (float)out[i * channels + ciRight];
 			float mixL = tsL + sbL;
 			float mixR = tsR + sbR;
 			float resL, resR;
+			// PeakMeter limit kept active even on DSP-enabled slots:
+			// the user explicitly said removing it was a regression
+			// (earrape/boom protection). The real cause of the quality
+			// drop was the missing wet/dry mix + ambience reverb that
+			// audio_sandbox uses; both are now back in SlotDsp so the
+			// limiter is no longer doing double-duty against an
+			// over-driven DSP output.
 			if (intensity <= 1.01f)
 			{
 				pm.process(fabs(mixL) > fabs(mixR) ? mixL : mixR);
@@ -312,7 +456,25 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 			out[i * channels + ciRight] = (short)resR;
 		}
 	}
+
+	// Peak update: only on the capture path so the meter reads the
+	// REMOTE volume scaled output (that's what the user asked for -
+	// the local volume slider must NOT affect the meter). Envelope
+	// follower with 0.95 release.
+	if (isCapturePath && slot) {
+		float prevL = slot->peakL.load();
+		float prevR = slot->peakR.load();
+		slot->peakL.store(std::max(slotMaxL, prevL * 0.95f));
+		slot->peakR.store(std::max(slotMaxR, prevR * 0.95f));
+	}
 	consumed = write;
+	// On the paulstretch path the DSP only consumes `needIn` source
+	// frames per `write` output frames - tell the ring to advance by
+	// that smaller amount so the source playhead matches the stretched
+	// time-base. Without this override, fast-forwarding through the
+	// ring while paulstretch reads slowly produced silence after the
+	// first second.
+	if (stretchConsumed >= 0) consumed = stretchConsumed;
 
 	sb.consume(NULL, consumed, true);
 	return write;
@@ -354,7 +516,7 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 		bool muteCapture = m_muteMyself.load(std::memory_order_relaxed);
 		bool isFirstSlot = (totalWritten == 0);
 		int written = fetchSamples(slot.sbCapture, m_peakMeterCapture, samples, count, channels, true,
-			0, 1, muteCapture && isFirstSlot, muteCapture && isFirstSlot);
+			0, 1, muteCapture && isFirstSlot, muteCapture && isFirstSlot, 0.0f, &slot);
 		if (written > totalWritten)
 			totalWritten = written;
 
@@ -365,6 +527,8 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 			if (slot.sbCapture.avail() == 0)
 			{
 				slot.state = eSILENT;
+				slot.peakL.store(0.0f);
+				slot.peakR.store(0.0f);
 				emit onStopPlaying(s);
 			}
 		}
@@ -427,7 +591,7 @@ int Sampler::fetchOutputSamples(short *samples, int count, int channels, const u
 			ciLeft, ciRight,
 			isFirstSlot && ((*channelFillMask & bitMaskLeft) == 0),
 			isFirstSlot && ((*channelFillMask & bitMaskRight) == 0),
-			localThresh);
+			localThresh, &slot);
 
 		if (written > totalWritten)
 			totalWritten = written;
@@ -439,6 +603,8 @@ int Sampler::fetchOutputSamples(short *samples, int count, int channels, const u
 			if (slot.sbPlayback.avail() == 0)
 			{
 				slot.state = eSILENT;
+				slot.peakL.store(0.0f);
+				slot.peakR.store(0.0f);
 				emit onStopPlaying(s);
 			}
 		}
@@ -561,8 +727,29 @@ void Sampler::setSlotSpeedFactor(int slot, float factor)
 void Sampler::setSlotReverbMix(int slot, float mix)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
-	if (slot >= 0 && slot < MAX_SLOTS && m_slots[slot].inputFile)
-		m_slots[slot].inputFile->setReverbMix(mix);
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	auto &s = m_slots[slot];
+	s.fxReverbWet = mix;
+	if (s.dsp) {
+		// Sandbox active on this slot - route the FxPanel reverb to
+		// the END of the DSP pipeline (sandbox Reverb stage). User
+		// requested: "the reverb must be the absolute final part of
+		// the pipeline". Also clear the libavfilter pre-reverb so it
+		// doesn't double-apply at decode time.
+		s.dsp->setFxReverbWet(mix);
+		if (s.inputFile) s.inputFile->setReverbMix(0.0f);
+	} else if (s.inputFile) {
+		// No sandbox -> existing legacy path (libavfilter at decode).
+		s.inputFile->setReverbMix(mix);
+	}
+}
+
+
+void Sampler::setSlotSoundDb(int slot, double db)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	if (slot >= 0 && slot < MAX_SLOTS)
+		m_slots[slot].soundDbSetting = db;
 }
 
 
@@ -679,6 +866,11 @@ void Sampler::stopSlotInternal(int slot)
 		delete s.inputFile;
 		s.inputFile = NULL;
 
+		// Reset DSP so the next play starts paulstretch from a clean
+		// state - otherwise the stretched output keeps playing the
+		// previous sound's content for several seconds after stop.
+		if (s.dsp) s.dsp->reset();
+
 		// Clear buffers
 		SampleBuffer::Lock sblc(s.sbCapture.getMutex());
 		SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
@@ -688,6 +880,11 @@ void Sampler::stopSlotInternal(int slot)
 		// Reset per-slot volume to default
 		s.slotDbLocal = -1.0;
 		s.slotDbRemote = -1.0;
+
+		// Reset peak meter so the channel widget snaps back to zero
+		// instead of freezing at the last per-frame peak.
+		s.peakL.store(0.0f);
+		s.peakR.store(0.0f);
 
 		emit onStopPlaying(slot);
 	}
@@ -715,6 +912,12 @@ int Sampler::findFreeSlot() const
 bool Sampler::playSoundInSlot(int slot, const SoundInfo &sound, bool preview)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
+	// Reset per-slot DSP state on new playback so EQ biquads + HRTF
+	// smoothers + paulstretch ring don't carry residual state from
+	// the previous sound (which produced a brief robotic transient
+	// on start when the sandbox was already enabled).
+	if (slot >= 0 && slot < MAX_SLOTS && m_slots[slot].dsp)
+		m_slots[slot].dsp->reset();
 
 	sdbgLog("playSoundInSlot: slot=%d file='%s' preview=%d startTime=%.2f playTime=%.2f vol=%.1f",
 		slot, sound.filename.toUtf8().constData(), preview, sound.getStartTime(), sound.getPlayTime(), (double)sound.volume);
@@ -870,7 +1073,19 @@ double Sampler::getPosition(int slot)
 	{
 		PlaybackSlot &s = m_slots[slot];
 		if (s.inputFile && s.state != eSILENT)
-			return s.inputFile->getPosition();
+		{
+			// inputFile->getPosition() returns the DECODER position,
+			// not what the listener actually hears. Decoder runs ahead
+			// to fill sbPlayback (~5 s ring) so on a freshly-started
+			// 7-second clip the decoder is already at t~=5s while the
+			// audible position is still ~0s, and the waveform slider
+			// jumps to ~70% the moment Play is clicked. Subtracting the
+			// queued ring duration aligns the slider to actual playback.
+			double decoderPos = s.inputFile->getPosition();
+			double bufferedSec = s.sbPlayback.avail() / 48000.0;
+			double audible = decoderPos - bufferedSec;
+			return audible < 0.0 ? 0.0 : audible;
+		}
 	}
 	return 0.0;
 }
@@ -910,6 +1125,12 @@ void Sampler::seek(double seconds, int slot)
 			SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
 			s.sbCapture.clear();
 			s.sbPlayback.clear();
+
+			// Reset DSP state so paulstretch's source buffer + inputPos
+			// don't keep playing the pre-seek audio - the same fix the
+			// audio_sandbox standalone got. Without this, paulstretch
+			// stays seconds behind whatever the user just sought to.
+			if (s.dsp) s.dsp->reset();
 		}
 	}
 }

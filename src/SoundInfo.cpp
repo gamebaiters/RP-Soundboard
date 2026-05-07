@@ -25,6 +25,9 @@
 #define NAME_FX_SPEED "fxSpeed"
 #define NAME_FX_REVERB "fxReverb"
 #define NAME_FX_SYNC_PITCH_SPEED "fxSyncPitchSpeed"
+#define NAME_IS_MACRO "isMacro"
+#define NAME_MACRO_STATE "macroState"
+#define NAME_IMAGE_PATH "imagePath"
 
 #define DEFAULT_PATH ""
 #define DEFAULT_CUSTOM_TEXT ""
@@ -42,6 +45,7 @@
 #define DEFAULT_FX_SPEED 0
 #define DEFAULT_FX_REVERB 0
 #define DEFAULT_FX_SYNC_PITCH_SPEED false
+#define DEFAULT_IS_MACRO false
 
 
 QColor stringToColor(const QString &str)
@@ -76,7 +80,10 @@ SoundInfo::SoundInfo() :
 	fxPitch(DEFAULT_FX_PITCH),
 	fxSpeed(DEFAULT_FX_SPEED),
 	fxReverb(DEFAULT_FX_REVERB),
-	fxSyncPitchSpeed(DEFAULT_FX_SYNC_PITCH_SPEED)
+	fxSyncPitchSpeed(DEFAULT_FX_SYNC_PITCH_SPEED),
+	isMacro(DEFAULT_IS_MACRO),
+	macroState(),
+	imagePath()
 {
 
 }
@@ -103,6 +110,9 @@ void SoundInfo::readFromConfig( const QSettings &settings )
 	fxSpeed = settings.value(NAME_FX_SPEED, DEFAULT_FX_SPEED).toInt();
 	fxReverb = settings.value(NAME_FX_REVERB, DEFAULT_FX_REVERB).toInt();
 	fxSyncPitchSpeed = settings.value(NAME_FX_SYNC_PITCH_SPEED, DEFAULT_FX_SYNC_PITCH_SPEED).toBool();
+	isMacro = settings.value(NAME_IS_MACRO, DEFAULT_IS_MACRO).toBool();
+	macroState = settings.value(NAME_MACRO_STATE, QByteArray()).toByteArray();
+	imagePath = settings.value(NAME_IMAGE_PATH, QString()).toString();
 }
 
 
@@ -127,6 +137,9 @@ void SoundInfo::saveToConfig( QSettings &settings ) const
 	settings.setValue(NAME_FX_SPEED, fxSpeed);
 	settings.setValue(NAME_FX_REVERB, fxReverb);
 	settings.setValue(NAME_FX_SYNC_PITCH_SPEED, fxSyncPitchSpeed);
+	settings.setValue(NAME_IS_MACRO, isMacro);
+	settings.setValue(NAME_MACRO_STATE, macroState);
+	settings.setValue(NAME_IMAGE_PATH, imagePath);
 }
 
 

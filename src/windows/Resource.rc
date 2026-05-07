@@ -66,12 +66,12 @@ BEGIN
     BEGIN
         BLOCK "040704b0"
         BEGIN
-			VALUE "FileDescription", "GameBaiters - Soundboard"
+			VALUE "FileDescription", "GameBaiters Soundboard"
 			//VALUE "FileVersion", "1.0.0.1"
 			VALUE "InternalName", "rp_soundboard.dll"
-			VALUE "LegalCopyright", "Copyright (C) 2019 Marius Gräfe"
+			VALUE "LegalCopyright", "Copyright (C) 2026 GameBaiters - gamebaiters.net. Based on RP Soundboard (C) 2015-2019 Marius Graefe."
 			VALUE "OriginalFilename", "rp_soundboard.dll"
-			VALUE "ProductName", "GameBaiters - Soundboard"
+			VALUE "ProductName", "GameBaiters Soundboard"
         END
     END
     BLOCK "VarFileInfo"

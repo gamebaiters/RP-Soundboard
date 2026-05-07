@@ -62,4 +62,66 @@ set(sources
 	src/updater_qt.cpp
 	src/updater_qt.h
 	src/updater_qt.ui
+
+	# --- Modular UI (Phase 2+) ---
+	src/modules/module_registry.h
+	src/modules/module_registry.cpp
+	src/modules/fine_slider.h
+	src/modules/fine_slider.cpp
+	src/modules/hotkey_block.h
+	src/modules/hotkey_block.cpp
+	src/modules/volume_control.h
+	src/modules/volume_control.cpp
+	src/modules/fx_panel.h
+	src/modules/fx_panel.cpp
+	src/modules/waveform_player.h
+	src/modules/waveform_player.cpp
+	src/modules/channel.h
+	src/modules/channel.cpp
+	src/modules/search_bar.h
+	src/modules/search_bar.cpp
+	src/modules/button_grid.h
+	src/modules/button_grid.cpp
+	src/modules/button_advanced_panel.h
+	src/modules/button_advanced_panel.cpp
+	src/modules/settings_window.h
+	src/modules/settings_window.cpp
+	src/modules/config_io.h
+	src/modules/config_io.cpp
+	src/modules/reset_channels_btn.h
+	src/modules/reset_channels_btn.cpp
+	src/modules/channel_state_persistence.h
+	src/modules/channel_state_persistence.cpp
+	src/modules/help_bubble.h
+	src/modules/help_bubble.cpp
+	src/modules/theme.h
+	src/modules/theme.cpp
+	src/modules/main_page.h
+	src/modules/main_page.cpp
+	src/modules/main_page_wiring.h
+	src/modules/main_page_wiring.cpp
+
+	# --- Audio sandbox DSP (per-channel HRTF / paulstretch / EQ / reverb) ---
+	src/dsp/SandboxState.h
+	src/dsp/SandboxState.cpp
+	src/dsp/SlotDsp.h
+	src/dsp/SlotDsp.cpp
+	src/dsp/BiquadPeaking.h
+	src/dsp/BiquadPeaking.cpp
+	src/dsp/EqRack.h
+	src/dsp/EqRack.cpp
+	src/dsp/Positional.h
+	src/dsp/Positional.cpp
+	src/dsp/Reverb.h
+	src/dsp/Reverb.cpp
+	src/dsp/Paulstretch.h
+	src/dsp/Paulstretch.cpp
+
+	# --- Sandbox per-channel UI ---
+	src/modules/channel_meter.h
+	src/modules/channel_meter.cpp
+	src/modules/channel_sandbox_dialog.h
+	src/modules/channel_sandbox_dialog.cpp
+	src/modules/positional_pad.h
+	src/modules/positional_pad.cpp
 )

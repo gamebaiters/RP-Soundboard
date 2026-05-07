@@ -1,68 +1,297 @@
-GameBaiters Soundboard 1.0.119
-==============================
+GameBaiters Soundboard v2.0.0
+=============================
 
-Bugfixes
---------
-* Windows: WAV files now play correctly. The static FFmpeg build was
-  missing several PCM decoders (pcm_u8, pcm_s16be, pcm_u16le/be,
-  pcm_f64le, pcm_alaw, pcm_mulaw). A WAV encoded with any of these
-  codecs would fail with "avcodec_find_decoder returned NULL" and
-  never produce audio. All common PCM variants are now enabled.
+Major release. Plugin rebuilt around a modular UI, a per-channel
+audio sandbox (HRTF / EQ / Paulstretch / room reverb), and a long
+list of stability + quality fixes accumulated since the last 1.x
+build.
 
-* Windows: plugin and auto-updater no longer hardcode
-  %APPDATA%\TS3Client as the TeamSpeak config directory. If TS3 is
-  installed to a custom location the plugin now asks TS3 for the
-  actual config path via getConfigPath() at runtime, with fallback
-  to %APPDATA%\TS3Client for compatibility. This affects:
-    - Debug log (rpsb_debug.log) written to the correct TS3 dir
-    - Plugin uninstall (Settings > Plugins > Uninstall) cleaning
-      the correct plugin assets folder
-    - Auto-update helper script deleting old DLLs from the correct
-      plugins folder
+---------------------------------------------------------------------
+NEW UI
+---------------------------------------------------------------------
+* Brand-new MainPage layout. Search bar on top, button grid in the
+  middle, scrollable channel area below, transport / mute / settings
+  bar at the bottom.
+* Modular per-channel widget: editable title, drag-source for sound
+  buttons, volume control with Local / Remote sliders + 1:1 link
+  toggle, FX panel (pitch / speed / reverb + sync), waveform with
+  click-seek + skip buttons, dual-LR meter, and the new "Spatial /
+  EQ / Stretch" sandbox button.
+* Settings is a separate, scrollable window with grouped sections:
+  Audio engine, Channels, Button grid, Hotkeys, Logging, Audio
+  sandbox, Profiles, Custom theme, Configuration import/export.
+* Dark stylesheet is scoped under [isGBSoundboard="true"] and
+  bracketed inside a marked block on qApp so it co-exists with the
+  host TS3 client's own qApp stylesheet without clobbering it.
+* Help bubbles ("?" badge widgets) on every non-obvious control with
+  long-form descriptions.
 
-* Windows uninstaller (uninstall_soundboard.bat) now accepts an
-  optional argument for custom TS3 config paths:
-    uninstall_soundboard.bat "D:\Games\TS3Client"
-  Without an argument it defaults to %APPDATA%\TS3Client as before.
+---------------------------------------------------------------------
+PER-CHANNEL AUDIO SANDBOX
+---------------------------------------------------------------------
+The "Spatial / EQ / Stretch" button on each channel opens a per-slot
+DSP dialog. Settings persist between TS3 restarts and are bundled
+into Macros.
 
-macOS unchanged
----------------
-None of the above changes affect macOS. The macOS code paths
-(debug log, updater, codesign) are untouched.
+* Master "Enable audio sandbox on this channel" switch. When OFF the
+  whole DSP chain is bypassed (zero CPU cost) and every sub-control
+  in the dialog is disabled.
+* Spatial mode dropdown:
+    - Off (no spatial)
+    - L/R Pan: equal-power balance
+    - 3D Manual: drag a virtual source on the XY pad with elevation,
+      distance, stereo width, head sway
+    - 3D Rotate: source orbits around the head at a chosen RPM and
+      radius (CW / CCW)
+    - 3D 8D Preset: orbit + tight stereo width + head sway + room
+      ambience tuned to match the audio_sandbox standalone reference
+* Brown-Duda structural HRTF, dual virtual-speaker rendering. ITD
+  via Woodworth (up to 656 us), 1p/1z head shadow, 5-event sparse
+  pinna FIR, shoulder + torso single-tap reflections, peaking notch
+  for front/back, concha boost at 3 kHz, head-sway LFO, distance
+  attenuation + air absorption shelf.
+* "Spatial mix" slider blends the HRTF output with the raw stereo
+  input - matches the audio_sandbox standalone reference and stops
+  the source from feeling mono / over-coloured.
+* Room "Ambience" reverb (Schroeder-Moorer / Freeverb topology, 8
+  combs + 4 allpasses per channel). Independent from the FxPanel
+  reverb - this one shapes SPACE, FxPanel shapes the SOUND.
+* 16-band ISO 2/3-octave graphic EQ (-12..+12 dB, Q matched to band
+  spacing, anti-denormal protection, master "Enable EQ" toggle, big
+  step changes reset filter state to kill cascading transients).
+* Paulstretch (Paul Nasca's phase-randomisation extreme time-stretch).
+  Streaming-adapted: feeds from the live decoder ring at decode rate
+  while the synth stage advances slowly via FFT phase scrambling.
+  Per-path (capture + playback) instances so the stretched output
+  reaches BOTH the local listener and the server, in sync with each
+  channel's seek / skip / stop / restart events. Adjustable factor
+  1x..50x and window 50..1000 ms.
+* "3D 8D Preset" mode auto-loads tuned values (rotate 10 RPM, stereo
+  width 0, head sway on, ambience 12 %, spatial mix 85 %) for the
+  classic YouTube-style 8D listening experience.
+* "Reset audio sandbox for this channel" red button restores
+  defaults for that single channel.
 
-Carried over from 1.0.118
--------------------------
-* Windows: pitch / speed sliders fixed (atempo + asetrate enabled
-  in the static FFmpeg build).
-* Per-platform .ts3_plugin packages (no more macOS dylibs in
-  Windows installs).
-* Windows uninstaller sweeps macOS dylib leftovers from older
-  multi-platform installs.
+---------------------------------------------------------------------
+PER-CHANNEL METER
+---------------------------------------------------------------------
+* Two-row L/R LED-style meter at the centre of each channel. 96
+  segments (~0.4 dB resolution), cyan -> amber -> red colour ramp,
+  red flashing border on clip. Reflects the post-DSP, post-Remote-
+  volume signal so it always shows what the SERVER hears regardless
+  of the local playback slider.
+* Settings switch "Show audio meter on each channel" hides it for
+  users who don't want it.
+* Slot peak resets to zero when the slot stops, finishes, or is
+  cleared - no more frozen levels.
 
-Carried over from 1.0.117
--------------------------
-* macOS: best-effort dual API for abuffersink format constraints
-  (FFmpeg 8 renamed sample_fmts -> sample_formats).
+---------------------------------------------------------------------
+THEME ENGINE
+---------------------------------------------------------------------
+* Custom theme group with five colour pickers (Background, Accent,
+  Waveform, Text, Buttons) plus a Contrast slider 0..100 that scales
+  every auto-derived shade.
+* Per-token retint of dark_style.qss - every hex literal in the QSS
+  is mapped through the derived palette so picking a new background
+  recolours every surface, border, hover, disabled state and
+  contrast-flips the text.
+* "Auto" buttons next to Text and Buttons revert to the auto-derived
+  values; the swatch shows what the auto value resolved to instead
+  of a placeholder grey.
+* Copy theme / Paste theme produce a single share string (GBSB1..4)
+  carrying every colour + the contrast number so a friend can paste
+  it and load the exact same look in one click.
+* Theme block on qApp is bracketed by /*RPSB-BLOCK-START*/ ..
+  /*RPSB-BLOCK-END*/ markers so the soundboard never clobbers TS3's
+  own qApp stylesheet.
 
-Existing fork features
-----------------------
-* Pitch / Speed / Pitch+Speed / Reverb sliders
-* Earrape protection
-* Remember pitch / speed / reverb per slot
-* Skip +/- 5s and +/- 10s transport
-* Real-time waveform with click-to-seek
-* Multi-soundboard mode (up to 5 slots)
+---------------------------------------------------------------------
+SETTINGS WINDOW
+---------------------------------------------------------------------
+* Audio: master switch for custom FX (pitch / speed / reverb),
+  earrape protection.
+* Channels: link new-channel inheritance, remember pitch / speed /
+  reverb per channel, hide waveforms (compact view), restore last
+  session.
+* Button grid: rows / columns spinners.
+* Hotkeys: "Show hotkeys on buttons", "Disable hotkeys", "Reset all
+  hotkeys" red button.
+* Logging: opt-in debug log (rpsb_debug.log) under TS3's config dir.
+  Default OFF so a fresh install never writes to disk.
+* Audio sandbox: master enable, "Show audio meter on each channel",
+  "Reset all audio sandbox settings" red button.
+* Profiles: dropdown of 4 independent profiles + Export / Import
+  per-profile to legacy .ini files.
+* Configuration: full export / import (every profile, every macro,
+  every setting) as wrapped JSON or legacy .ini.
 
-Installation
-------------
+---------------------------------------------------------------------
+BUTTON GRID + MACROS
+---------------------------------------------------------------------
+* Drag a sound button onto another to swap their contents.
+* Drag a file from Explorer onto a button to load that audio.
+* Right-click context menu: Set hotkey, Reset hotkey, Clear, Edit,
+  Make macro from current channels, Paste / Copy.
+* Macros snapshot every visible channel's name + state + live
+  playback position - including sandbox settings - so re-playing a
+  macro restores the exact session.
+* Custom button colours, custom text, custom button image (stretched
+  over the button face with a translucent backdrop behind the
+  label).
+* Color swatch chip in the per-button advanced dialog shows the
+  currently picked colour at a glance.
 
-* Windows: download rp_soundboard_fx_<version>_win64.ts3_plugin and
-  double-click. TeamSpeak's bundled installer takes over.
-* macOS: download Install_Soundboard_macOS.zip, unzip, RIGHT-CLICK
-  Install Soundboard.app -> Open the first time so macOS Gatekeeper
-  accepts the ad-hoc signature.
-* Linux: from your TeamSpeak install directory run
-    LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH ./package_inst <path-to-.ts3_plugin>
+---------------------------------------------------------------------
+PER-CHANNEL CONTROLS
+---------------------------------------------------------------------
+* "+ Add channel" / "Reset channels" buttons on the bottom bar.
+* Per-channel controls survive a TS3 restart (link / sync state,
+  sandbox config). Channel-count restore stays gated by "Restore
+  last session".
+* Reset Channels button clears link + sync state on the primary
+  channel without leaving stale green highlights on the toggle
+  buttons.
+* Channel widgets refresh their themed inline stylesheets when the
+  active theme changes.
+* Channel removal stops the slot's playback first so audio + UI
+  tear down together.
 
-Uninstall scripts in the release assets keep your rp_soundboard.ini
-config by default - press Y at the first prompt for a full wipe.
+---------------------------------------------------------------------
+PREVIEW-ONLY MODE
+---------------------------------------------------------------------
+* New "Preview only (server hears nothing)" checkbox on the bottom
+  bar. With it ON the soundboard stays audible locally but the
+  server only hears the user's mic - useful to test or rehearse a
+  sound before broadcasting.
+* TalkStateManager respects the flag in real time: toggling preview
+  on while a sound is playing immediately restores TS3's original
+  talk-state, and toggling off mid-sound re-arms continuous
+  transmission.
+* sb_handleCaptureData drains the sampler ring into a scratch buffer
+  in preview mode - keeps state-machine + ring fill in sync without
+  ever modifying the captured mic samples.
+
+---------------------------------------------------------------------
+HOTKEYS / TRANSMISSION
+---------------------------------------------------------------------
+* Per-button hotkey assign / reset via the advanced dialog.
+* Globally enable / disable plugin hotkey handling.
+* "Reset all hotkeys" wipes every saved binding (TS3-side bindings
+  remain in TS3's own profile until cleared there).
+* TalkStateManager ensures TS3 transmits while a sound is playing
+  (when not in preview-only mode) and restores the previous state
+  when the last slot stops.
+
+---------------------------------------------------------------------
+WAVEFORM + TRANSPORT
+---------------------------------------------------------------------
+* Click on the waveform to seek; -10s / -5s / +5s / +10s skip
+  buttons; play / stop / pause-all / stop-all transport.
+* Slider position is the AUDIBLE position, not the decoder position
+  - subtracts the queued sb ring duration so a freshly-started
+  7-second clip starts the slider at 0 instead of at 70 %.
+* Seek + skip + stop + new-play all reset the per-slot DSP state
+  (EQ + Positional + Reverb + Paulstretch ring) so paulstretch
+  restarts cleanly on every transport event instead of staying
+  seconds behind.
+
+---------------------------------------------------------------------
+DSP PIPELINE
+---------------------------------------------------------------------
+Per-slot pipeline order, applied independently to capture (server)
+and playback (local) so each side keeps its own filter state:
+
+    decoder (FFmpeg, libavfilter pitch / speed)
+        v
+    sb ring (capture + playback)
+        v
+    Paulstretch (streaming, dual-instance, optional)
+        v
+    EQ 16-band (master Enable EQ + per-band gain)
+        v
+    Spatial: Off / L-R Pan / HRTF dual virtual speaker
+        v
+    Wet/dry crossfade with raw stereo (Spatial mix)
+        v
+    Reverb (Ambience + FxPanel reverb summed; END of pipeline)
+        v
+    Soft limiter (tanh past 0.95)
+        v
+    int16 clamp + per-slot volume scaling
+        v
+    PeakMeter limit (legacy earrape protection)
+        v
+    output
+
+* FxPanel reverb relocated from libavfilter at the decoder to the
+  end of the per-slot DSP chain (when sandbox is active) so it
+  sounds like a real "room" effect after spatial / EQ.
+* Anti-denormal injection at the top of the per-sample loop keeps
+  every IIR cascade above the float subnormal floor - eliminates
+  the robotic background hiss that used to surface on 8D mode over
+  silent intros.
+* Soft limiter tightened to T=0.95 with a strict bound at +/-1.0.
+
+---------------------------------------------------------------------
+PERSISTENCE
+---------------------------------------------------------------------
+* Per-channel state (link, sync, sandbox, name) ALWAYS persists to
+  disk regardless of the "Restore last session" setting.
+* "Restore last session" still controls whether saved channel COUNT
+  and the auto-load of files into those channels happens at boot.
+* Macros now bundle each channel's full sandbox state.
+* Sandbox state migrates cleanly through the JSON serializer so
+  older configs without the new fields load with sensible defaults.
+
+---------------------------------------------------------------------
+LOGGING
+---------------------------------------------------------------------
+* Single rpsb_debug.log in the TS3 config folder. Default OFF.
+* Toggle in Settings > Logging flips an in-process gate immediately
+  so subsequent samples / inputfileffmpeg writes honour the
+  preference without a plugin restart.
+
+---------------------------------------------------------------------
+NOTABLE BUG FIXES SINCE 1.0.x
+---------------------------------------------------------------------
+* Theme leak: opening the soundboard no longer wipes TS3's host
+  qApp stylesheet - the theme is bracketed and append-merged.
+* Drag-swap of grid cells no longer crashes (deferred via QTimer
+  singleShot so the drop event finishes before the model rebuild).
+* Sound-button cells respect their custom colour + theme palette
+  without flipping to opaque black on Qt 5.15.2 (QColor() invalid
+  alpha=255 trap).
+* HSL adjustL clamps h>=0 so achromatic / grey pickers don't
+  collapse the derived palette to pure black.
+* Per-deep-widget refreshTheme on FxPanel + VolumeControl + Channel
+  so QSS cascade misses don't leave sliders un-themed.
+* Reset Channels properly de-greens the link / sync toggle buttons
+  the first time (refreshTheme now always runs after setLinked /
+  setSync, even when the value already matches).
+* PeakMeter no longer compresses every transient on DSP-active
+  slots - the limiter still protects against earrape but the main
+  quality drop reported as "compressed YouTube" is gone.
+* Robotic transient on toggling "Mute on my client" (or any
+  capture / playback enable change) eliminated by giving each path
+  its own EQ + Positional + Reverb state.
+* Robotic burst on starting a new sound on a sandbox-active slot
+  eliminated by resetting per-slot DSP state in playSoundInSlot.
+* Robotic burst on activating 3D mode eliminated by snapping
+  Positional smoothers to target on reset, resetting PathState on
+  spatial-mode transitions, and guarding Reverb buffer realloc
+  against same-rate setSampleRate calls.
+
+---------------------------------------------------------------------
+PACKAGING / RELEASE
+---------------------------------------------------------------------
+* Multi-platform release workflow: Windows MSVC2019 x64, Linux
+  x86_64 (Ubuntu 22.04), macOS x86_64 (self-hosted runner via
+  Intel Homebrew + Rosetta 2).
+* Static FFmpeg n6.1.1 on Windows - single self-contained DLL,
+  no FFmpeg DLL dependencies.
+* macOS: recursive rpath bundler, Qt rewritten to @rpath/libQt5*
+  to match TS3.app's flat-dylib layout, ad-hoc codesigned, plus an
+  AppleScript ".app" installer wrapper users double-click to
+  install on macOS.
+* Per-platform .ts3_plugin packages on every release. macOS also
+  ships Install_Soundboard_macOS.zip.

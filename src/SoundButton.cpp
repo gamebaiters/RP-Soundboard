@@ -1,7 +1,7 @@
 #include "SoundButton.h"
 #include "main.h"
 #include "ConfigModel.h"
-#include "ts3log.h"
+#include "modules/theme.h"
 
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -10,11 +10,11 @@
 #include <QMimeData>
 #include <QUuid>
 #include <QDrag>
-#include <QStyle>
+#include <QPainter>
+#include <QFontMetrics>
+#include <QFileInfo>
 
-//---------------------------------------------------------------
-// Purpose: 
-//---------------------------------------------------------------
+
 const QString &getButtonMime()
 {
 	static QString uuid = QUuid::createUuid().toString();
@@ -22,28 +22,23 @@ const QString &getButtonMime()
 }
 
 
-//---------------------------------------------------------------
-// Purpose: 
-//---------------------------------------------------------------
-SoundButton::SoundButton(QWidget *parent) : 
+SoundButton::SoundButton(QWidget *parent) :
 	QPushButton(parent),
 	pressing(false),
-	dragging(false)
+	dragging(false),
+	macroDecoration(false),
+	hasOwnStyle(false)
 {
 	setAcceptDrops(true);
+	setProperty("buttonVariant", QVariant(QString("audio")));
+	setObjectName("GBSoundCell");
 }
 
 
-//---------------------------------------------------------------
-// Purpose: 
-//---------------------------------------------------------------
 SoundButton::~SoundButton()
 {}
 
 
-//---------------------------------------------------------------
-// Purpose: 
-//---------------------------------------------------------------
 void SoundButton::dragEnterEvent(QDragEnterEvent *evt)
 {
 	if (evt->mimeData()->hasUrls() || evt->mimeData()->hasFormat(getButtonMime()))
@@ -54,9 +49,6 @@ void SoundButton::dragEnterEvent(QDragEnterEvent *evt)
 }
 
 
-//---------------------------------------------------------------
-// Purpose: 
-//---------------------------------------------------------------
 void SoundButton::dragMoveEvent(QDragMoveEvent *evt)
 {
 	if (evt->mimeData()->hasUrls() || evt->mimeData()->hasFormat(getButtonMime()))
@@ -64,9 +56,6 @@ void SoundButton::dragMoveEvent(QDragMoveEvent *evt)
 }
 
 
-//---------------------------------------------------------------
-// Purpose: 
-//---------------------------------------------------------------
 void SoundButton::dragLeaveEvent(QDragLeaveEvent *)
 {
 	sb_disableHotkeysTemporarily(false);
@@ -77,9 +66,6 @@ void SoundButton::dragLeaveEvent(QDragLeaveEvent *)
 }
 
 
-//---------------------------------------------------------------
-// Purpose: 
-//---------------------------------------------------------------
 void SoundButton::dropEvent(QDropEvent *evt)
 {
 	pressing = false;
@@ -104,16 +90,11 @@ void SoundButton::dropEvent(QDropEvent *evt)
 }
 
 
-//---------------------------------------------------------------
-// Purpose: 
-//---------------------------------------------------------------
 void SoundButton::mousePressEvent(QMouseEvent *evt)
 {
-	// If the user has a hotkey 'switch config' bound to mouse 1 then
-	// this button is actually deleted before mouseReleaseEvent is called
-	// hence the clicked() signal is never emitted, resulting in silence
-	// instead of a lovely sound. Disabling hotkeys while a button is pressed
-	// is a workaround for this.
+	// 'switch config' bound to mouse-1 deletes the button before
+	// mouseReleaseEvent fires, so clicked() never emits. Disable hotkeys
+	// while the button is held down to dodge that race.
 	sb_disableHotkeysTemporarily(true);
 
 	pressing = true;
@@ -122,9 +103,6 @@ void SoundButton::mousePressEvent(QMouseEvent *evt)
 }
 
 
-//---------------------------------------------------------------
-// Purpose: 
-//---------------------------------------------------------------
 void SoundButton::mouseMoveEvent(QMouseEvent *evt)
 {
 	if (pressing && !dragging &&
@@ -146,9 +124,6 @@ void SoundButton::mouseMoveEvent(QMouseEvent *evt)
 }
 
 
-//---------------------------------------------------------------
-// Purpose: 
-//---------------------------------------------------------------
 void SoundButton::setBackgroundColor(const QColor &color)
 {
 	backgroundColor = color;
@@ -156,25 +131,48 @@ void SoundButton::setBackgroundColor(const QColor &color)
 }
 
 
-//---------------------------------------------------------------
-// Purpose: 
-//---------------------------------------------------------------
-void SoundButton::applyBackgroundColor(const QColor & color)
+void SoundButton::setMacroDecoration(bool on)
 {
-	if (color.alpha() != 0)
-	{
-		float brightness = 0.2126f * color.redF() + 0.7152f * color.greenF() + 0.0722f * color.blueF();
+	if (macroDecoration == on) return;
+	macroDecoration = on;
+	applyBackgroundColor(backgroundColor);
+}
+
+void SoundButton::applyBackgroundColor(const QColor &color)
+{
+	// Qt 5.15.2 QColor() default-ctor: isValid()=false yet alpha()==255.
+	// Plain `alpha()!=0` would always take the custom-color branch and
+	// force every cell to render solid black.
+	const bool hasCustom = color.isValid() && color.alpha() != 0;
+	if (macroDecoration) {
+		setStyleSheet(
+			"  color: #ffffff;"
+			"  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+			"      stop:0 #6a1b9a, stop:1 #4a148c);"
+			"  border: 2px solid #ffd54f;"
+			"  border-radius: 6px;"
+			"  padding: 2px 4px;"
+			"  font-weight: bold;");
+		hasOwnStyle = true;
+	} else if (hasCustom) {
+		float brightness = 0.2126f * color.redF()
+		                 + 0.7152f * color.greenF()
+		                 + 0.0722f * color.blueF();
 		QColor textColor = brightness < 0.5f ? Qt::white : Qt::black;
-		setStyleSheet(QString("color: %1; background-color: %2;").arg(textColor.name(), color.name()));
-	}
-	else
+		setStyleSheet(QString(
+			"color: %1; background-color: %2;"
+			" border-radius: 6px; padding: 2px 4px;")
+			.arg(textColor.name(), color.name()));
+		hasOwnStyle = true;
+	} else {
+		// Empty stylesheet -> qApp's themed QPushButton rule wins.
 		setStyleSheet(QString());
+		hasOwnStyle = false;
+	}
+	update();
 }
 
 
-//---------------------------------------------------------------
-// Purpose: 
-//---------------------------------------------------------------
 void SoundButton::mouseReleaseEvent(QMouseEvent *evt)
 {
 	sb_disableHotkeysTemporarily(false);
@@ -182,4 +180,40 @@ void SoundButton::mouseReleaseEvent(QMouseEvent *evt)
 	pressing = false;
 	dragging = false;
 	QPushButton::mouseReleaseEvent(evt);
+}
+
+
+void SoundButton::setBackgroundImage(const QString &path)
+{
+	if (path == backgroundImagePath) return;
+	backgroundImagePath = path;
+	if (path.isEmpty() || !QFileInfo::exists(path)) {
+		backgroundPixmap = QPixmap();
+	} else {
+		backgroundPixmap.load(path);
+	}
+	update();
+}
+
+
+void SoundButton::paintEvent(QPaintEvent *evt)
+{
+	QPushButton::paintEvent(evt);
+	if (backgroundPixmap.isNull()) return;
+
+	QPainter p(this);
+	p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+	QRect imgRect = rect().adjusted(2, 2, -2, -2);
+	p.drawPixmap(imgRect, backgroundPixmap);
+
+	QString t = text();
+	if (t.isEmpty()) return;
+	QFontMetrics fm(font());
+	QRect tr = fm.boundingRect(rect().adjusted(4, 4, -4, -4),
+	                           Qt::AlignCenter | Qt::TextWordWrap, t);
+	tr.adjust(-6, -3, 6, 3);
+	tr.moveCenter(rect().center());
+	p.fillRect(tr, QColor(0, 0, 0, 200));
+	p.setPen(Qt::white);
+	p.drawText(rect(), Qt::AlignCenter | Qt::TextWordWrap, t);
 }

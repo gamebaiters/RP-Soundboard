@@ -46,6 +46,8 @@ public:
 		NOTIFY_SET_SYNC_PITCH_SPEED,
 		NOTIFY_SET_REVERB,
 		NOTIFY_SET_MULTI_SOUNDBOARD,
+		NOTIFY_SET_LOGS_ENABLED,
+		NOTIFY_SET_PREVIEW_ONLY,
 	};
 
 	class Observer
@@ -120,6 +122,26 @@ public:
 	inline bool getRememberPitchSpeed() const { return m_rememberPitchSpeed; }
 	void setRememberPitchSpeed(bool remember);
 
+	inline bool getRestoreSession() const { return m_restoreSession; }
+	void setRestoreSession(bool on);
+
+	inline bool getGlobalFxEnabled() const { return m_globalFxEnabled; }
+	void setGlobalFxEnabled(bool on);
+
+	inline bool getHideWaveform() const { return m_hideWaveform; }
+	void setHideWaveform(bool on);
+
+	inline bool getThemeEnabled() const { return m_themeEnabled; }
+	inline QString getThemeAccent() const { return m_themeAccent; }
+	inline QString getThemeWaveform() const { return m_themeWaveform; }
+	inline QString getThemeBackground() const { return m_themeBackground; }
+	inline int getThemeContrast() const { return m_themeContrast; }
+	// Empty -> auto-derived (textOn(background)). Any valid hex string
+	// overrides text color across the UI.
+	inline QString getThemeText() const { return m_themeText; }
+	inline QString getThemeButton() const { return m_themeButton; }
+	void setTheme(bool enabled, const QString &accent, const QString &waveform, const QString &background, int contrast, const QString &text, const QString &button);
+
 	inline int getPitchValue() const { return m_pitchValue; }
 	void setPitchValue(int val);
 
@@ -134,6 +156,18 @@ public:
 
 	inline bool getMultiSoundboard() const { return m_multiSoundboard; }
 	void setMultiSoundboard(bool enabled);
+
+	inline bool getLogsEnabled() const { return m_logsEnabled; }
+	void setLogsEnabled(bool on);
+
+	inline bool getPreviewOnly() const { return m_previewOnly; }
+	void setPreviewOnly(bool on);
+
+	inline bool getAudioSandboxEnabled() const { return m_audioSandboxEnabled; }
+	void setAudioSandboxEnabled(bool on);
+
+	inline bool getAudioMeterVisible() const { return m_audioMeterVisible; }
+	void setAudioMeterVisible(bool on);
 
 	void addObserver(Observer *obs);
 	void remObserver(Observer *obs);
@@ -177,11 +211,25 @@ private:
 	bool m_earrapeProtection;
 	int m_pitchSpeedValue;
 	bool m_rememberPitchSpeed;
+	bool m_restoreSession;
+	bool m_globalFxEnabled;
+	bool m_hideWaveform;
+	bool m_themeEnabled;
+	QString m_themeAccent;
+	QString m_themeWaveform;
+	QString m_themeBackground;
+	int m_themeContrast;
+	QString m_themeText;
+	QString m_themeButton;
 	int m_pitchValue;
 	int m_speedValue;
 	bool m_syncPitchSpeed;
 	int m_reverbValue;
 	bool m_multiSoundboard;
+	bool m_logsEnabled;
+	bool m_previewOnly;
+	bool m_audioSandboxEnabled;
+	bool m_audioMeterVisible;
 
 	uint m_nextUpdateCheck;
 };

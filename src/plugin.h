@@ -31,6 +31,15 @@ extern struct TS3Functions ts3Functions;
 const char *getPluginID();
 const char *getTs3ConfigPath();
 
+/* When 0, every rpsb_debug.log writer is a no-op. Default 0 (off);
+ * flipped on by the user via Settings > Logging. */
+extern int g_rpsbLogsEnabled;
+
+/* Preview-only mode: when 1, sb_handleCaptureData skips the soundboard
+ * inject so the server only hears the user's mic (sound stays local).
+ * Inverse of mute-myself. Toggled from MainPage's bottom bar. */
+extern int g_rpsbPreviewOnly;
+
 /* Required functions */
 PLUGINS_EXPORTDLL const char* ts3plugin_name();
 PLUGINS_EXPORTDLL const char* ts3plugin_version();

@@ -4,6 +4,8 @@
 #include <QPushButton>
 #include <QList>
 #include <QUrl>
+#include <QPixmap>
+#include <QString>
 
 class ConfigModel;
 
@@ -22,8 +24,16 @@ public:
 	virtual void mousePressEvent(QMouseEvent *evt) override;
 	virtual void mouseReleaseEvent(QMouseEvent *evt) override;
 	virtual void mouseMoveEvent(QMouseEvent *evt) override;
+	virtual void paintEvent(QPaintEvent *evt) override;
 
 	void setBackgroundColor(const QColor &color);
+	// Macro decoration: applied on top of any custom color so macros are
+	// always visually identifiable (yellow border).
+	void setMacroDecoration(bool on);
+	// Background image stretched across the whole button face. Empty
+	// path clears it. The label is redrawn over the image with a
+	// translucent black backdrop so the text stays readable.
+	void setBackgroundImage(const QString &path);
 
 signals:
 	void fileDropped(const QList<QUrl>&);
@@ -36,7 +46,10 @@ private:
 	bool dragging;
 	QPoint dragStart;
 	QColor backgroundColor;
-	
+	bool macroDecoration;
+	bool hasOwnStyle;
+	QString backgroundImagePath;
+	QPixmap backgroundPixmap;
 };
 
 #endif // SOUNDBUTTON_H

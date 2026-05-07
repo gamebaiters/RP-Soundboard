@@ -139,6 +139,9 @@ elseif(MSVC OR MINGW)
 endif()
 
 target_include_directories(rp_soundboard_fx PUBLIC "pluginsdk/include" "src" ${ffmpegIncludeDir})
+# Required by the new audio-sandbox DSP modules so M_PI is defined when
+# they include <cmath> on MSVC.
+target_compile_definitions(rp_soundboard_fx PRIVATE _USE_MATH_DEFINES NOMINMAX)
 set_target_properties(rp_soundboard_fx PROPERTIES
 	SUFFIX ${libSuffix}
 	RUNTIME_OUTPUT_DIRECTORY_DEBUG debug

@@ -205,8 +205,17 @@ void ConfigQt::onConfigHotkey()
 //---------------------------------------------------------------
 ConfigQt::~ConfigQt()
 {
-	m_model->remObserver(&m_modelObserver);
+	if (m_model)
+		m_model->remObserver(&m_modelObserver);  // safe even if already detached
 	delete ui;
+}
+
+void ConfigQt::detachFromModel()
+{
+	if (!m_model) return;
+	m_model->remObserver(&m_modelObserver);
+	// Keep m_model pointer valid (other code paths read from it). Just
+	// stop receiving notifications so the hidden grid stops rebuilding.
 }
 
 void ConfigQt::onSaveModel()

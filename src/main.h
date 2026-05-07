@@ -59,4 +59,9 @@ CAPI void sb_disableHotkeysTemporarily(bool disable);
 #define HOTKEY_VOLUME_INCREASE "volume_increase"
 #define HOTKEY_VOLUME_DECREASE "volume_decrease"
 
+#ifdef __cplusplus
+class TalkStateManager;
+TalkStateManager *sb_getTalkStateManager();
+#endif
+
 #endif

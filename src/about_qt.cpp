@@ -1,9 +1,9 @@
 // src/about_qt.cpp
 //----------------------------------
-// RP Soundboard Source Code
-// Copyright (c) 2015 Marius Graefe
-// All rights reserved
-// Contact: rp_soundboard@mgraefe.de
+// GameBaiters Soundboard
+// Copyright (c) 2026 GameBaiters - https://gamebaiters.net
+// Fork rewritten from scratch on top of the original
+// RP Soundboard source by Marius Graefe (2015-2019).
 //----------------------------------
 
 

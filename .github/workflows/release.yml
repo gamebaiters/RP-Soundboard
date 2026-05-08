@@ -279,9 +279,9 @@ jobs:
         run: |
           set -e
           mkdir -p stage/plugins/rp_soundboard
-          DYLIB_SRC="$(find build -name 'librp_soundboard_fx*_mac.dylib' | head -1)"
+          DYLIB_SRC="$(find build -name '*rp_soundboard_fx*_mac.dylib' | head -1)"
           if [ -z "$DYLIB_SRC" ]; then
-              echo "dylib not found"; ls -la build; exit 1
+              echo "dylib not found"; find build -name '*.dylib' -o -name '*.so'; exit 1
           fi
           cp "$DYLIB_SRC" stage/plugins/librp_soundboard_fx_mac.dylib
           PLUGIN="stage/plugins/librp_soundboard_fx_mac.dylib"

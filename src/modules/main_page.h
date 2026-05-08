@@ -25,6 +25,7 @@ class QToolButton;
 class QVBoxLayout;
 class QScrollArea;
 class QCheckBox;
+class QButtonGroup;
 
 class MainPage : public QWidget {
     Q_OBJECT
@@ -42,6 +43,9 @@ public:
     class QPushButton *addChannelBtn()    { return m_addChannelBtn; }
     class QPushButton *pauseAllBtn()      { return m_pauseAllBtn; }
     class QPushButton *stopAllBtn()       { return m_stopAllBtn; }
+    class QPushButton *restoreMacroBtn()  { return m_restoreMacroBtn; }
+    QToolButton       *profileButton(int i) { return (i >= 0 && i < 4) ? m_profileButtons[i] : nullptr; }
+    QButtonGroup      *profileGroup()      { return m_profileGroup; }
 
     QVector<Channel *> channels() const   { return m_channels; }
     Channel           *channelAt(int idx) const;
@@ -92,4 +96,11 @@ private:
     class QPushButton  *m_stopAllBtn;
     class QFrame       *m_disconnectedOverlay;
     bool                m_connected = true;
+
+    // Profile switcher
+    QToolButton        *m_profileButtons[4] = {};
+    QButtonGroup       *m_profileGroup = nullptr;
+
+    // Macro restore
+    class QPushButton  *m_restoreMacroBtn = nullptr;
 };

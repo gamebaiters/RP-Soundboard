@@ -27,6 +27,8 @@ public:
     void setState(const SandboxState &s);
     SandboxState state() const { return m_state; }
 
+    void setAllControlsEnabled(bool on);
+
 signals:
     void stateChanged(const SandboxState &s);
     void resetRequested(int channelId);
@@ -50,6 +52,10 @@ private slots:
     void onStretchWindowChanged(int v);
     void onEqEnabledToggled(bool on);
     void onResetClicked();
+    void onCopyEq();
+    void onPasteEq();
+    void onCopySandbox();
+    void onPasteSandbox();
 
 private:
     void buildUi();
@@ -114,4 +120,90 @@ private:
     QCheckBox        *m_eqEnable = nullptr;
     QVector<QSlider*> m_eqSliders;
     QVector<QLabel*>  m_eqLabels;
+
+    // Compressor
+    QCheckBox *m_compEnable = nullptr;
+    QSlider *m_compThreshold = nullptr; QLabel *m_compThresholdLabel = nullptr;
+    QSlider *m_compRatio     = nullptr; QLabel *m_compRatioLabel     = nullptr;
+    QSlider *m_compAttack    = nullptr; QLabel *m_compAttackLabel    = nullptr;
+    QSlider *m_compRelease   = nullptr; QLabel *m_compReleaseLabel   = nullptr;
+    QSlider *m_compKnee      = nullptr; QLabel *m_compKneeLabel      = nullptr;
+    QSlider *m_compMakeup    = nullptr; QLabel *m_compMakeupLabel    = nullptr;
+
+    // Saturator
+    QCheckBox *m_satEnable = nullptr;
+    QSlider   *m_satDrive = nullptr; QLabel *m_satDriveLabel = nullptr;
+    QSlider   *m_satMix   = nullptr; QLabel *m_satMixLabel   = nullptr;
+    QSlider   *m_satTone  = nullptr; QLabel *m_satToneLabel  = nullptr;
+    QComboBox *m_satMode  = nullptr;
+
+    // Chorus
+    QCheckBox *m_chorusEnable = nullptr;
+    QSlider *m_chorusRate  = nullptr; QLabel *m_chorusRateLabel  = nullptr;
+    QSlider *m_chorusDepth = nullptr; QLabel *m_chorusDepthLabel = nullptr;
+    QSlider *m_chorusDelay = nullptr; QLabel *m_chorusDelayLabel = nullptr;
+    QSlider *m_chorusVoices= nullptr; QLabel *m_chorusVoicesLabel= nullptr;
+    QSlider *m_chorusMix   = nullptr; QLabel *m_chorusMixLabel   = nullptr;
+
+    // Flanger
+    QCheckBox *m_flangerEnable = nullptr;
+    QSlider *m_flangerRate     = nullptr; QLabel *m_flangerRateLabel     = nullptr;
+    QSlider *m_flangerDepth    = nullptr; QLabel *m_flangerDepthLabel    = nullptr;
+    QSlider *m_flangerFeedback = nullptr; QLabel *m_flangerFeedbackLabel = nullptr;
+    QSlider *m_flangerDelay    = nullptr; QLabel *m_flangerDelayLabel    = nullptr;
+    QSlider *m_flangerMix      = nullptr; QLabel *m_flangerMixLabel      = nullptr;
+
+    // Flangus
+    QCheckBox *m_flangusEnable = nullptr;
+    QSlider *m_flangusRate     = nullptr; QLabel *m_flangusRateLabel     = nullptr;
+    QSlider *m_flangusDepth    = nullptr; QLabel *m_flangusDepthLabel    = nullptr;
+    QSlider *m_flangusFeedback = nullptr; QLabel *m_flangusFeedbackLabel = nullptr;
+    QSlider *m_flangusVoices   = nullptr; QLabel *m_flangusVoicesLabel   = nullptr;
+    QSlider *m_flangusSpread   = nullptr; QLabel *m_flangusSpreadLabel   = nullptr;
+    QSlider *m_flangusMix      = nullptr; QLabel *m_flangusMixLabel      = nullptr;
+
+    // Phaser
+    QCheckBox *m_phaserEnable = nullptr;
+    QSlider *m_phaserRate     = nullptr; QLabel *m_phaserRateLabel     = nullptr;
+    QSlider *m_phaserDepth    = nullptr; QLabel *m_phaserDepthLabel    = nullptr;
+    QSlider *m_phaserFeedback = nullptr; QLabel *m_phaserFeedbackLabel = nullptr;
+    QSlider *m_phaserStages   = nullptr; QLabel *m_phaserStagesLabel   = nullptr;
+    QSlider *m_phaserMix      = nullptr; QLabel *m_phaserMixLabel      = nullptr;
+
+    // Delay
+    QCheckBox *m_delayEnable = nullptr;
+    QSlider   *m_delayTime     = nullptr; QLabel *m_delayTimeLabel     = nullptr;
+    QSlider   *m_delayFeedback = nullptr; QLabel *m_delayFeedbackLabel = nullptr;
+    QSlider   *m_delayMix      = nullptr; QLabel *m_delayMixLabel      = nullptr;
+    QSlider   *m_delayDamping  = nullptr; QLabel *m_delayDampingLabel  = nullptr;
+    QCheckBox *m_delayPingPong = nullptr;
+
+    // Limiter
+    QCheckBox *m_limiterEnable  = nullptr;
+    QComboBox *m_limiterModeBox = nullptr;
+    QSlider *m_limiterCeiling   = nullptr; QLabel *m_limiterCeilingLabel   = nullptr;
+    QSlider *m_limiterLookahead = nullptr; QLabel *m_limiterLookaheadLabel = nullptr;
+    QSlider *m_limiterRelease   = nullptr; QLabel *m_limiterReleaseLabel   = nullptr;
+    QSlider *m_limiterRatio     = nullptr; QLabel *m_limiterRatioLabel     = nullptr;
+    QSlider *m_limiterGate      = nullptr; QLabel *m_limiterGateLabel      = nullptr;
+
+    // DSP modules container (master gating)
+    QGroupBox *m_dspGroup = nullptr;
+
+    // Per-module reset buttons
+    QPushButton *m_resetComp    = nullptr;
+    QPushButton *m_resetSat     = nullptr;
+    QPushButton *m_resetChorus  = nullptr;
+    QPushButton *m_resetFlanger = nullptr;
+    QPushButton *m_resetFlangus = nullptr;
+    QPushButton *m_resetPhaser  = nullptr;
+    QPushButton *m_resetDelay   = nullptr;
+    QPushButton *m_resetLimiter = nullptr;
+
+    // Pipeline widget
+    class PipelineWidget *m_pipeline = nullptr;
+
+    // Preset manager combos
+    QComboBox *m_eqPresetBox      = nullptr;
+    QComboBox *m_sandboxPresetBox = nullptr;
 };

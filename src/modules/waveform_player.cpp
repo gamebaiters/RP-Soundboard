@@ -7,6 +7,7 @@
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QIcon>
+#include <QSignalBlocker>
 
 #include "../soundview_qt.h"
 
@@ -26,9 +27,11 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     , m_stop(new QPushButton(this))
     , m_playPause(new QPushButton(this))
     , m_fwd5(new QPushButton("+5s", this))
+    , m_loop(new QPushButton(tr("Loop"), this))
     , m_fwd10(new QPushButton("+10s", this))
     , m_playing(false)
     , m_paused(false)
+    , m_looping(false)
 {
     m_filenameLabel->setText(tr("(no file)"));
     m_filenameLabel->setMinimumWidth(80);
@@ -38,6 +41,10 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     m_back10->setMinimumWidth(40);
     m_back5->setMinimumWidth(36);
     m_fwd5->setMinimumWidth(36);
+    m_loop->setMinimumWidth(40);
+    m_loop->setCheckable(true);
+    m_loop->setToolTip(tr("Loop: repeat the sound endlessly until deactivated"));
+    m_loop->setMinimumHeight(28);
     m_fwd10->setMinimumWidth(40);
 
     m_stop->setIcon(QIcon(":/icon/img/stoparrow_32.png"));
@@ -52,6 +59,9 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     m_stop->setToolTip(tr("Stop playback"));
     m_playPause->setToolTip(tr("Play / pause the current sound"));
     m_fwd5->setToolTip(tr("Skip forward 5 seconds"));
+    m_loop->setStyleSheet(
+        "QPushButton:checked { background-color: #3c8c3c; color: white;"
+        " border: 1px solid #2a6e2a; border-radius: 3px; }");
     m_fwd10->setToolTip(tr("Skip forward 10 seconds"));
 
     m_wave->setMinimumHeight(28);
@@ -67,6 +77,8 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     transport->addWidget(m_playPause);
     transport->addWidget(m_fwd5);
     transport->addWidget(m_fwd10);
+    transport->addSpacing(4);
+    transport->addWidget(m_loop);
     transport->addSpacing(8);
     transport->addWidget(m_filenameLabel, 1);
     transport->addWidget(m_timeLabel);
@@ -86,6 +98,9 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     connect(m_back5,     &QPushButton::clicked, this, [this]{ emit skip( -5); });
     connect(m_fwd5,      &QPushButton::clicked, this, [this]{ emit skip( +5); });
     connect(m_fwd10,     &QPushButton::clicked, this, [this]{ emit skip(+10); });
+    connect(m_loop,      &QPushButton::toggled, this, [this](bool on){
+        m_looping = on; emit loopToggled(on);
+    });
     connect(m_stop,      &QPushButton::clicked, this, &WaveformPlayer::onStop);
     connect(m_playPause, &QPushButton::clicked, this, &WaveformPlayer::onPlayPause);
     connect(m_wave,      &SoundView::seekRequested, this, &WaveformPlayer::onWaveSeek);
@@ -94,6 +109,14 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
 QString WaveformPlayer::filename() const  { return m_fullPath; }
 bool    WaveformPlayer::isPlaying() const { return m_playing; }
 bool    WaveformPlayer::isPaused()  const { return m_paused;  }
+bool    WaveformPlayer::isLooping() const { return m_looping; }
+
+void WaveformPlayer::setLooping(bool on) {
+    if (m_looping == on) return;
+    m_looping = on;
+    QSignalBlocker b(m_loop);
+    m_loop->setChecked(on);
+}
 
 void WaveformPlayer::setSound(const SoundInfo &info) {
     m_wave->setSound(info);

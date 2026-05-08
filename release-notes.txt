@@ -1,3 +1,83 @@
+GameBaiters Soundboard v2.1.0
+=============================
+
+DSP pipeline overhaul: eight new real-time effects, draggable
+pipeline reordering, per-module reset, and a critical pitch-shift
+fix. Full changelog below; v2.0.0 notes follow after.
+
+---------------------------------------------------------------------
+NEW DSP EFFECTS
+---------------------------------------------------------------------
+* Compressor — threshold / ratio / attack / release / makeup gain.
+* Saturator — soft / hard / tape / tube modes, drive + mix knobs.
+* Chorus — rate / depth / mix, stereo widening via L/R phase offset.
+* Flanger — rate / depth / feedback / mix, classic jet sweep.
+* Flangus — dual-LFO flanger with cross-feedback for metallic tones.
+* Phaser — 4-stage all-pass, rate / depth / feedback / mix.
+* Delay — time / feedback / mix, stereo ping-pong mode, damping
+  filter on the feedback path.
+* Limiter — brick-wall look-ahead limiter at the end of the chain,
+  ceiling / release controls.
+
+All effects are per-channel, persist to disk, survive TS3 restarts,
+and are bundled into macros.
+
+---------------------------------------------------------------------
+DRAGGABLE DSP PIPELINE
+---------------------------------------------------------------------
+* Visual pipeline widget at the top of the sandbox dialog shows all
+  11 DSP stages as coloured blocks with arrows.
+* Drag any block to reorder the processing chain in real time.
+* Pipeline order persists per-channel (serialized in sandbox JSON).
+* Default order: EQ > Compressor > Saturator > Chorus > Flanger >
+  Flangus > Phaser > Delay > Positional > Reverb > Limiter.
+
+---------------------------------------------------------------------
+PER-MODULE RESET BUTTONS
+---------------------------------------------------------------------
+* Every DSP module header row now has a reset button (reload icon)
+  that restores only that module's parameters to defaults without
+  touching any other module.
+
+---------------------------------------------------------------------
+MASTER ENABLE GATING
+---------------------------------------------------------------------
+* The "Enable audio sandbox" checkbox now properly disables the
+  entire DSP group box. When unchecked, NO sandbox effects are
+  applied — only the FxPanel reverb (which lives outside the
+  sandbox) passes through.
+
+---------------------------------------------------------------------
+LAYOUT SWAP
+---------------------------------------------------------------------
+* Sandbox dialog left column: EQ + Spatial/3D positioning.
+* Sandbox dialog right column: Paulstretch + DSP modules.
+  (Previously EQ was on the right.)
+
+---------------------------------------------------------------------
+BUG FIXES
+---------------------------------------------------------------------
+* Fix pitch slider freezing audio permanently. Root cause: the
+  FFmpeg static build does not include the `asetrate` filter. Pitch
+  shift now works via abuffer sample-rate override + aresample,
+  requiring only filters already compiled in (aresample + atempo).
+* Fix ping-pong delay: both channels were receiving dry input.
+  Now mono-summed input feeds the left delay line only; right line
+  receives only the cross-feedback signal.
+* Fix sandbox bypass: toggling "Enable audio sandbox" OFF while
+  FxPanel reverb was active still ran all sandbox DSP stages.
+  Pipeline loop now skips non-reverb stages when sandbox is disabled.
+
+---------------------------------------------------------------------
+CODE CLEANUP
+---------------------------------------------------------------------
+* Debug file logging (RPSB_FILE_DEBUG) disabled for release builds.
+* Removed dead commented-out code blocks across plugin.cpp,
+  ConfigModel.cpp, SampleBuffer.cpp/h, about_qt.cpp.
+* Removed stale TODO comments and leftover printf debug output.
+
+=====================================================================
+
 GameBaiters Soundboard v2.0.0
 =============================
 

@@ -116,6 +116,22 @@ set(sources
 	src/dsp/Reverb.cpp
 	src/dsp/Paulstretch.h
 	src/dsp/Paulstretch.cpp
+	src/dsp/Compressor.h
+	src/dsp/Compressor.cpp
+	src/dsp/Chorus.h
+	src/dsp/Chorus.cpp
+	src/dsp/Flanger.h
+	src/dsp/Flanger.cpp
+	src/dsp/Flangus.h
+	src/dsp/Flangus.cpp
+	src/dsp/Phaser.h
+	src/dsp/Phaser.cpp
+	src/dsp/Saturator.h
+	src/dsp/Saturator.cpp
+	src/dsp/Delay.h
+	src/dsp/Delay.cpp
+	src/dsp/Limiter.h
+	src/dsp/Limiter.cpp
 
 	# --- Sandbox per-channel UI ---
 	src/modules/channel_meter.h
@@ -124,4 +140,10 @@ set(sources
 	src/modules/channel_sandbox_dialog.cpp
 	src/modules/positional_pad.h
 	src/modules/positional_pad.cpp
+	src/modules/preset_manager.h
+	src/modules/preset_manager.cpp
+	src/modules/audio_exporter.h
+	src/modules/audio_exporter.cpp
+	src/modules/pipeline_widget.h
+	src/modules/pipeline_widget.cpp
 )

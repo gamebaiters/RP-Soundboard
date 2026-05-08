@@ -46,7 +46,7 @@ extern "C"
 
 // ===== FILE DEBUG LOGGING =====
 // Set to 1 to enable debug log file, 0 to disable
-#define RPSB_FILE_DEBUG 1
+#define RPSB_FILE_DEBUG 0
 
 #if RPSB_FILE_DEBUG
 #include <cstdio>
@@ -377,7 +377,7 @@ private:
 	int _close();
 	void reset();
 	int getAudioStreamNum() const;
-	int buildFilterGraph();
+	int buildFilterGraph(bool allowPitch = true);
 	int _seek(double seconds); // Internal seek without locking (caller must hold m_mutex)
 
 	typedef std::lock_guard<std::mutex> Lock;
@@ -403,6 +403,7 @@ private:
 	float m_pitchFactor;
 	float m_speedFactor;
 	float m_reverbMix;
+	int m_abufferDeclaredRate;      // rate declared to abuffer (may differ from codec rate for pitch)
 	int64_t m_maxConvertedSamples;
 	int64_t m_nextSeekTimestamp;
 	int64_t m_skipSamples;
@@ -454,6 +455,7 @@ void InputFileFFmpeg::reset()
 	m_decodedSamples = 0;
 	m_convertedSamples = 0;
 	m_filePosition = 0.0;
+	m_abufferDeclaredRate = 0;
 	m_maxConvertedSamples = 0;
 	m_nextSeekTimestamp = 0;
 	m_skipSamples = 0;
@@ -469,9 +471,16 @@ InputFileFFmpeg::~InputFileFFmpeg()
 
 
 //---------------------------------------------------------------
-int InputFileFFmpeg::buildFilterGraph()
+int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
 {
-	dbgLog("buildFilterGraph() pitch=%.3f speed=%.3f reverb=%.3f", m_pitchFactor, m_speedFactor, m_reverbMix);
+	double pitch = m_pitchFactor;
+	double speed = m_speedFactor;
+	if (pitch < 0.01) pitch = 1.0;
+	if (speed < 0.01) speed = 1.0;
+
+	dbgLog("buildFilterGraph(allowPitch=%d) pitch=%.4f speed=%.4f reverb=%.3f codecSR=%d outSR=%d",
+	       allowPitch, pitch, speed, m_reverbMix,
+	       m_codecCtx ? m_codecCtx->sample_rate : 0, m_outputSamplerate);
 
 	if (m_filterGraph)
 		avfilter_graph_free(&m_filterGraph);
@@ -485,6 +494,23 @@ int InputFileFFmpeg::buildFilterGraph()
 	dbgLog("  abuffersrc=%p abuffersink=%p", abuffersrc, abuffersink);
 	if (!abuffersrc || !abuffersink) { dbgLog("  FAILED: filter not found!"); return -1; }
 
+	const AVFilter *asetrate_check = avfilter_get_by_name("asetrate");
+	const AVFilter *aresample_check = avfilter_get_by_name("aresample");
+	dbgLog("  asetrate=%p aresample=%p", asetrate_check, aresample_check);
+
+	bool usePitch = (pitch != 1.0) && allowPitch && aresample_check;
+	bool useAsetrate = usePitch && asetrate_check;
+
+	// Pitch via abuffer rate lie: declare the input sample rate as
+	// codecRate*pitch so the downstream aresample resamples from the
+	// "wrong" rate back to the real rate — identical to asetrate but
+	// works even when asetrate is not compiled in.
+	int declaredSR = m_codecCtx->sample_rate;
+	if (usePitch && !useAsetrate) {
+		declaredSR = (int)(m_codecCtx->sample_rate * pitch);
+		dbgLog("  pitch via abuffer rate lie: declared=%d real=%d", declaredSR, m_codecCtx->sample_rate);
+	}
+
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59, 37, 100)
     char ch_layout_str[128];
     av_channel_layout_describe(&m_codecCtx->ch_layout, ch_layout_str, sizeof(ch_layout_str));
@@ -492,7 +518,7 @@ int InputFileFFmpeg::buildFilterGraph()
 			"time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=%s",
 			m_fmtCtx->streams[m_streamIndex]->time_base.num,
 			m_fmtCtx->streams[m_streamIndex]->time_base.den,
-			m_codecCtx->sample_rate,
+			declaredSR,
 			av_get_sample_fmt_name(m_codecCtx->sample_fmt),
 			ch_layout_str);
 #else
@@ -500,34 +526,31 @@ int InputFileFFmpeg::buildFilterGraph()
 			"time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%" PRIx64,
 			m_fmtCtx->streams[m_streamIndex]->time_base.num,
 			m_fmtCtx->streams[m_streamIndex]->time_base.den,
-			m_codecCtx->sample_rate,
+			declaredSR,
 			av_get_sample_fmt_name(m_codecCtx->sample_fmt),
 			m_codecCtx->channel_layout);
 #endif
 
+	m_abufferDeclaredRate = declaredSR;
 	dbgLog("  abuffer args: %s", args);
 	int ret = avfilter_graph_create_filter(&m_bufSrcCtx, abuffersrc, "in",
 										args, NULL, m_filterGraph);
 	dbgLog("  create_filter(abuffersrc) = %d", ret);
-	if (ret < 0) return ret;
+	if (ret < 0) {
+		char errbuf[128]; av_strerror(ret, errbuf, sizeof(errbuf));
+		dbgLog("  FAILED create_filter(abuffersrc): %s", errbuf);
+		return ret;
+	}
 
 	ret = avfilter_graph_create_filter(&m_bufSinkCtx, abuffersink, "out",
 										NULL, NULL, m_filterGraph);
 	dbgLog("  create_filter(abuffersink) = %d", ret);
-	if (ret < 0) return ret;
+	if (ret < 0) {
+		char errbuf[128]; av_strerror(ret, errbuf, sizeof(errbuf));
+		dbgLog("  FAILED create_filter(abuffersink): %s", errbuf);
+		return ret;
+	}
 
-	// abuffersink format constraints have changed names/types across FFmpeg
-	// versions:
-	//   FFmpeg 6: sample_fmts (BINARY, int array)
-	//   FFmpeg 7: sample_fmts (BINARY, must be sentinel-terminated)
-	//   FFmpeg 8: sample_formats (STRING, '|'-separated list - sample_fmts
-	//             returns EINVAL because the option's type changed)
-	// We don't actually NEED to set these on the sink because the aformat
-	// filter at the end of the chain (added below) already forces
-	// s16/48000/stereo before the sink. Sink with no explicit constraints
-	// accepts whatever aformat produces. Best-effort try both names so the
-	// sink also has the constraint baked in where supported, but never bail
-	// on failure.
 	auto setBestEffort = [&](const char *strName, const char *strVal,
 	                         const char *binName, const void *binVal, int binSz) {
 		int r = -1;
@@ -543,8 +566,6 @@ int InputFileFFmpeg::buildFilterGraph()
 		}
 	};
 
-	// sample format: try FFmpeg 8 STRING name first, fall back to FFmpeg 6/7
-	// BINARY (sentinel-terminated)
 	const enum AVSampleFormat out_fmts[] = { (enum AVSampleFormat)OUTPUT_FORMAT,
 	                                          AV_SAMPLE_FMT_NONE };
 	setBestEffort("sample_formats", "s16",
@@ -557,7 +578,6 @@ int InputFileFFmpeg::buildFilterGraph()
 	av_channel_layout_describe(&out_ch_layout, out_ch_layout_str, sizeof(out_ch_layout_str));
 	dbgLog("  out_ch_layout_str='%s' m_outputChannelLayout=0x%llx",
 	       out_ch_layout_str, (long long)m_outputChannelLayout);
-	// ch_layouts has been STRING since FFmpeg 5+; same name in FFmpeg 6/7/8
 	int r_chl = av_opt_set(m_bufSinkCtx, "ch_layouts", out_ch_layout_str,
 	                        AV_OPT_SEARCH_CHILDREN);
 	dbgLog("  set ch_layouts = %d", r_chl);
@@ -574,7 +594,6 @@ int InputFileFFmpeg::buildFilterGraph()
 	setBestEffort("sample_rates", rates_str,
 	              "sample_rates", out_rates, sizeof(out_rates));
 
-	// Locale-safe double formatter (Italian locale uses comma, which breaks FFmpeg)
 	auto fmtDbl = [](double v) -> std::string {
 		char b[32];
 		snprintf(b, sizeof(b), "%.4f", v);
@@ -583,16 +602,17 @@ int InputFileFFmpeg::buildFilterGraph()
 	};
 
 	std::string filters;
-	double pitch = m_pitchFactor;
-	double speed = m_speedFactor;
-	if (pitch < 0.01) pitch = 1.0;
-	if (speed < 0.01) speed = 1.0;
 
-	if (pitch != 1.0) {
-		filters += "asetrate=" + std::to_string((int)(m_codecCtx->sample_rate * pitch)) + ",aresample=" + std::to_string(m_codecCtx->sample_rate) + ",";
+	if (useAsetrate) {
+		int newRate = (int)(m_codecCtx->sample_rate * pitch);
+		dbgLog("  pitch via asetrate=%d, aresample=%d", newRate, m_codecCtx->sample_rate);
+		filters += "asetrate=" + std::to_string(newRate) + ",aresample=" + std::to_string(m_codecCtx->sample_rate) + ",";
+	} else if (usePitch) {
+		dbgLog("  pitch via abuffer rate lie + aresample=%d", m_codecCtx->sample_rate);
+		filters += "aresample=" + std::to_string(m_codecCtx->sample_rate) + ",";
 	}
 
-	double t = speed / pitch;
+	double t = usePitch ? (speed / pitch) : speed;
 	while (t < 0.5) { filters += "atempo=0.5,"; t /= 0.5; }
 	while (t > 100.0) { filters += "atempo=100.0,"; t /= 100.0; }
 	if (t != 1.0) { filters += "atempo=" + fmtDbl(t) + ","; }
@@ -609,7 +629,7 @@ int InputFileFFmpeg::buildFilterGraph()
 
 	AVFilterInOut *outputs = avfilter_inout_alloc();
 	AVFilterInOut *inputs  = avfilter_inout_alloc();
-	
+
 	outputs->name       = av_strdup("in");
 	outputs->filter_ctx = m_bufSrcCtx;
 	outputs->pad_idx    = 0;
@@ -624,7 +644,12 @@ int InputFileFFmpeg::buildFilterGraph()
 
 	ret = avfilter_graph_parse_ptr(m_filterGraph, filters.c_str(),
 									&inputs, &outputs, NULL);
-	dbgLog("  avfilter_graph_parse_ptr returned %d", ret);
+	if (ret < 0) {
+		char errbuf[128]; av_strerror(ret, errbuf, sizeof(errbuf));
+		dbgLog("  avfilter_graph_parse_ptr FAILED: %d (%s)", ret, errbuf);
+	} else {
+		dbgLog("  avfilter_graph_parse_ptr OK: %d", ret);
+	}
 	avfilter_inout_free(&inputs);
 	avfilter_inout_free(&outputs);
 
@@ -633,16 +658,29 @@ int InputFileFFmpeg::buildFilterGraph()
 		m_filterGraph = NULL;
 		m_bufSrcCtx = NULL;
 		m_bufSinkCtx = NULL;
+
+		if (allowPitch && pitch != 1.0) {
+			dbgLog("  >>> RETRYING without asetrate (fallback to speed-only)");
+			return buildFilterGraph(false);
+		}
 		return ret;
 	}
 
 	ret = avfilter_graph_config(m_filterGraph, NULL);
-	dbgLog("  avfilter_graph_config returned %d", ret);
 	if (ret < 0) {
+		char errbuf[128]; av_strerror(ret, errbuf, sizeof(errbuf));
+		dbgLog("  avfilter_graph_config FAILED: %d (%s)", ret, errbuf);
 		avfilter_graph_free(&m_filterGraph);
 		m_filterGraph = NULL;
 		m_bufSrcCtx = NULL;
 		m_bufSinkCtx = NULL;
+
+		if (allowPitch && pitch != 1.0) {
+			dbgLog("  >>> RETRYING without asetrate (fallback to speed-only)");
+			return buildFilterGraph(false);
+		}
+	} else {
+		dbgLog("  avfilter_graph_config OK: %d", ret);
 	}
 	return ret;
 }
@@ -814,7 +852,12 @@ int InputFileFFmpeg::_seek( double seconds )
 	avcodec_flush_buffers(m_codecCtx);
 
 	// Rebuild graph to flush filter buffers
-	buildFilterGraph();
+	int graphRet = buildFilterGraph();
+	dbgLog("  _seek: buildFilterGraph returned %d (src=%p sink=%p)", graphRet, m_bufSrcCtx, m_bufSinkCtx);
+	if (graphRet < 0) {
+		dbgLog("  _seek: CRITICAL - filter graph rebuild failed, audio will stall!");
+		return -1;
+	}
 	m_freeverb.mute();
 
 	m_nextSeekTimestamp = ts;
@@ -886,6 +929,9 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 						}
 						m_nextSeekTimestamp = 0;
 					}
+
+					if (m_abufferDeclaredRate > 0)
+						frame->sample_rate = m_abufferDeclaredRate;
 
 					if (av_buffersrc_add_frame_flags(m_bufSrcCtx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0)
 					{
@@ -1067,8 +1113,12 @@ void InputFileFFmpeg::setPitchFactor(float factor)
 {
 	Lock lock(m_mutex);
 	if (m_pitchFactor != factor) {
+		dbgLog("setPitchFactor(%.4f -> %.4f) pos=%.3f opened=%d", m_pitchFactor, factor, m_filePosition, m_opened);
 		m_pitchFactor = factor;
-		if (m_opened) buildFilterGraph();
+		if (m_opened) {
+			int ret = _seek(m_filePosition);
+			dbgLog("  setPitchFactor _seek returned %d (src=%p sink=%p)", ret, m_bufSrcCtx, m_bufSinkCtx);
+		}
 	}
 }
 
@@ -1077,8 +1127,12 @@ void InputFileFFmpeg::setSpeedFactor(float factor)
 {
 	Lock lock(m_mutex);
 	if (m_speedFactor != factor) {
+		dbgLog("setSpeedFactor(%.4f -> %.4f) pos=%.3f opened=%d", m_speedFactor, factor, m_filePosition, m_opened);
 		m_speedFactor = factor;
-		if (m_opened) buildFilterGraph();
+		if (m_opened) {
+			int ret = _seek(m_filePosition);
+			dbgLog("  setSpeedFactor _seek returned %d (src=%p sink=%p)", ret, m_bufSrcCtx, m_bufSinkCtx);
+		}
 	}
 }
 

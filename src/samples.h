@@ -113,6 +113,7 @@ public:
 	// --- Audio-sandbox per-slot DSP API ---
 	// Apply / replace the slot's sandbox state. Lazily allocates the DSP
 	// block the first time a non-default state hits a slot.
+	void setSlotLoop(int slot, bool on);
 	void setSlotSandboxState(int slot, const SandboxState &s);
 	// Drop the slot's DSP block (frees ~few hundred KB). Used by the
 	// "Reset all sandbox" command in Settings.
@@ -157,6 +158,7 @@ private:
 		// the routing decision (decoder vs end-of-DSP reverb) can be
 		// re-applied whenever the slot's dsp is created/cleared.
 		float fxReverbWet = 0.0f;
+		bool loop = false;
 
 		PlaybackSlot();
 		~PlaybackSlot();

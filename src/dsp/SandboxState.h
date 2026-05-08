@@ -14,6 +14,24 @@
 // regardless so the user can A/B test cheaply.
 struct SandboxState
 {
+    enum DspStage {
+        Stage_EQ = 0,
+        Stage_Compressor,
+        Stage_Saturator,
+        Stage_Spatial,
+        Stage_Chorus,
+        Stage_Flanger,
+        Stage_Flangus,
+        Stage_Phaser,
+        Stage_Delay,
+        Stage_Reverb,
+        Stage_Limiter,
+        Stage_COUNT
+    };
+
+    static const char *stageName(int stage);
+    static void defaultPipelineOrder(int out[Stage_COUNT]);
+
     // Stable enum values - new modes appended at the end so existing
     // INI files keep loading correctly.
     enum SpatialMode {
@@ -63,6 +81,81 @@ struct SandboxState
     // spatialiser). The two complement each other: FxPanel reverb
     // shapes the SOUND, sandbox ambience places it in a SPACE.
     float reverbWet      = 0.0f;       // 0..1 ambience wet mix
+
+    // ---- Compressor ----
+    bool  compEnabled     = false;
+    float compThresholdDb = -20.0f;
+    float compRatio       = 4.0f;
+    float compAttackMs    = 10.0f;
+    float compReleaseMs   = 100.0f;
+    float compKneeDb      = 6.0f;
+    float compMakeupDb    = 0.0f;
+
+    // ---- Chorus ----
+    bool  chorusEnabled   = false;
+    float chorusRate      = 1.0f;
+    float chorusDepth     = 3.0f;
+    float chorusBaseDelay = 10.0f;
+    int   chorusVoices    = 2;
+    float chorusMix       = 0.0f;
+
+    // ---- Flanger ----
+    bool  flangerEnabled   = false;
+    float flangerRate      = 0.5f;
+    float flangerDepth     = 0.7f;
+    float flangerFeedback  = 0.5f;
+    float flangerBaseDelay = 2.0f;
+    float flangerMix       = 0.0f;
+
+    // ---- Flangus (Flanger-Chorus hybrid) ----
+    bool  flangusEnabled   = false;
+    float flangusRate      = 0.8f;
+    float flangusDepth     = 0.5f;
+    float flangusFeedback  = 0.3f;
+    int   flangusVoices    = 3;
+    float flangusSpread    = 0.5f;
+    float flangusMix       = 0.0f;
+
+    // ---- Phaser ----
+    bool  phaserEnabled    = false;
+    float phaserRate       = 0.5f;
+    float phaserDepth      = 0.7f;
+    float phaserFeedback   = 0.3f;
+    int   phaserStages     = 6;
+    float phaserMix        = 0.0f;
+
+    // ---- Saturator ----
+    bool  saturatorEnabled = false;
+    float saturatorDrive   = 2.0f;
+    float saturatorMix     = 0.0f;
+    float saturatorTone    = 8000.0f;
+    int   saturatorMode    = 0;        // 0=Soft
+
+    // ---- Delay ----
+    bool  delayEnabled     = false;
+    float delayTimeMs      = 300.0f;
+    float delayFeedback    = 0.4f;
+    float delayMix         = 0.0f;
+    float delayDamping     = 5000.0f;
+    bool  delayPingPong    = false;
+
+    // ---- Limiter ----
+    bool  limiterEnabled   = false;
+    int   limiterMode      = 0;        // 0=Limiter, 1=Compressor, 2=Gate
+    float limiterCeiling   = -0.3f;
+    float limiterLookahead = 1.0f;
+    float limiterRelease   = 100.0f;
+    float limiterRatio     = 4.0f;
+    float limiterGateThresh = -60.0f;
+
+    // DSP pipeline order (user-draggable). Default matches the
+    // hardcoded chain: EQ→Comp→Sat→Spatial→Chorus→Flanger→Flangus→
+    // Phaser→Delay→Reverb→Limiter.
+    int pipelineOrder[Stage_COUNT] = {
+        Stage_EQ, Stage_Compressor, Stage_Saturator, Stage_Spatial,
+        Stage_Chorus, Stage_Flanger, Stage_Flangus, Stage_Phaser,
+        Stage_Delay, Stage_Reverb, Stage_Limiter
+    };
 
     QJsonObject toJson() const;
     static SandboxState fromJson(const QJsonObject &o);

@@ -8,6 +8,7 @@
 #include "reset_channels_btn.h"
 #include "settings_window.h"
 #include "../style_helper.h"
+#include "help_bubble.h"
 #include "theme.h"
 
 #include <QVBoxLayout>
@@ -15,6 +16,7 @@
 #include <QScrollArea>
 #include <QToolButton>
 #include <QPushButton>
+#include <QButtonGroup>
 #include <QFrame>
 #include <QSizePolicy>
 #include <QCheckBox>
@@ -55,11 +57,9 @@ MainPage::MainPage(QWidget *parent)
     m_channelsScroll->setWidgetResizable(true);
     m_channelsScroll->setFrameShape(QFrame::NoFrame);
     m_channelsScroll->setWidget(m_channelsHost);
-    // Pane fits one channel; extras scroll inside.
-    // updateChannelsAreaHeight flips the height for the no-waveform mode.
-    m_channelsScroll->setMinimumHeight(230);
-    m_channelsScroll->setMaximumHeight(230);
-    m_channelsScroll->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_channelsScroll->setMinimumHeight(130);
+    m_channelsScroll->setMaximumHeight(500);
+    m_channelsScroll->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_channelsScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
     // Bottom bar - Reset (left) | spacer | Settings (right, gear icon)
@@ -80,12 +80,35 @@ MainPage::MainPage(QWidget *parent)
     m_pauseAllBtn->setIconSize(QSize(16,16));
     m_stopAllBtn->setIconSize(QSize(16,16));
 
+    // Profile switcher buttons
+    m_profileGroup = new QButtonGroup(this);
+    m_profileGroup->setExclusive(true);
+    for (int i = 0; i < 4; ++i) {
+        m_profileButtons[i] = new QToolButton(this);
+        m_profileButtons[i]->setText(tr("P%1").arg(i + 1));
+        m_profileButtons[i]->setCheckable(true);
+        m_profileButtons[i]->setMinimumSize(36, 28);
+        m_profileButtons[i]->setToolTip(tr("Profile %1").arg(i + 1));
+        m_profileButtons[i]->setProperty("profileRole", QVariant(QString("selector")));
+        m_profileGroup->addButton(m_profileButtons[i], i);
+    }
+    m_profileButtons[0]->setChecked(true);
+
+    // Macro restore button (hidden by default)
+    m_restoreMacroBtn = new QPushButton(tr("Restore pre-macro"), this);
+    m_restoreMacroBtn->setMinimumHeight(28);
+    m_restoreMacroBtn->setVisible(false);
+    m_restoreMacroBtn->setStyleSheet(
+        "QPushButton { background-color: #3c6e9c; color: white; padding: 2px 10px;"
+        " border-radius: 4px; } QPushButton:hover { background-color: #4a8bc2; }");
+
     auto *bottom = new QHBoxLayout;
     bottom->setContentsMargins(10,6,10,6);
     bottom->setSpacing(8);
     bottom->addWidget(m_addChannelBtn);
     bottom->addWidget(m_pauseAllBtn);
     bottom->addWidget(m_stopAllBtn);
+    bottom->addWidget(m_restoreMacroBtn);
     bottom->addSpacing(16);
     bottom->addWidget(m_muteLocally);
     bottom->addWidget(m_muteMyself);
@@ -94,6 +117,13 @@ MainPage::MainPage(QWidget *parent)
         "Useful to test a sound or check timing before playing it for\n"
         "everyone in voice."));
     bottom->addWidget(m_previewOnly);
+    bottom->addSpacing(12);
+    for (int i = 0; i < 4; ++i) bottom->addWidget(m_profileButtons[i]);
+    bottom->addWidget(new HelpBubble(tr(
+        "Profiles (P1-P4): switch between four independent button-grid\n"
+        "configurations. Each profile stores its own set of sounds, names\n"
+        "and positions. Channel volume/FX/sandbox settings are shared\n"
+        "across all profiles."), this));
     bottom->addStretch(1);
     bottom->addWidget(m_settingsBtn);
     bottom->addSpacing(8);
@@ -106,7 +136,6 @@ MainPage::MainPage(QWidget *parent)
     root->setContentsMargins(8, 6, 8, 6);
     root->setSpacing(6);
     root->addWidget(m_search);
-    // Grid stretches; channels area stays anchored above the bottom bar.
     root->addWidget(m_grid, 1);
     root->addWidget(separator);
     root->addWidget(m_channelsScroll, 0);
@@ -152,9 +181,7 @@ void MainPage::refreshTheme() {
 }
 
 void MainPage::updateChannelsAreaHeight(bool waveformVisible) {
-    int h = waveformVisible ? 230 : 130;
-    m_channelsScroll->setMinimumHeight(h);
-    m_channelsScroll->setMaximumHeight(h);
+    m_channelsScroll->setMinimumHeight(waveformVisible ? 170 : 100);
 }
 
 void MainPage::setConnected(bool connected) {

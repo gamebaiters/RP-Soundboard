@@ -41,6 +41,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     , m_logsEnabled(new QCheckBox(tr("Write debug log file"), this))
     , m_sandboxEnabled(new QCheckBox(tr("Enable audio sandbox (per-channel HRTF / EQ / reverb)"), this))
     , m_meterVisible(new QCheckBox(tr("Show audio meter on each channel"), this))
+    , m_exportEnabled(new QCheckBox(tr("Show export button on each channel"), this))
     , m_resetAllSandbox(new QPushButton(tr("Reset all audio sandbox settings"), this))
     , m_profileCombo(new QComboBox(this))
     , m_profileExport(new QPushButton(tr("Export profile..."), this))
@@ -203,6 +204,10 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         "Render the dual L/R peak meter (cyan; turns red on clipping)\n"
         "directly on each channel. Pure visual - turn off if you don't\n"
         "want the meter eating header space."), this));
+    sandboxLay->addLayout(checkRow(m_exportEnabled, tr(
+        "Show an Export button on each channel. Exports the loaded audio\n"
+        "file as a WAV with all current DSP effects (EQ, spatial,\n"
+        "reverb, chorus, etc.) baked in."), this));
     m_resetAllSandbox->setStyleSheet(
         "QPushButton { background-color: #c63131; color: white;"
         " border: 1px solid #7c1c1c; border-radius: 5px; padding: 4px 12px; }"
@@ -419,6 +424,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_logsEnabled,    &QCheckBox::toggled, this, &SettingsWindow::logsEnabledChanged);
     connect(m_sandboxEnabled, &QCheckBox::toggled, this, &SettingsWindow::audioSandboxEnabledChanged);
     connect(m_meterVisible,   &QCheckBox::toggled, this, &SettingsWindow::audioMeterVisibleChanged);
+    connect(m_exportEnabled,  &QCheckBox::toggled, this, &SettingsWindow::audioExportEnabledChanged);
     connect(m_resetAllSandbox,&QPushButton::clicked, this, &SettingsWindow::resetAllAudioSandboxRequested);
     connect(m_profileCombo,   QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx){ emit activeProfileChanged(idx); });
@@ -450,6 +456,7 @@ bool SettingsWindow::hideWaveform()           const { return m_hideWaveform->isC
 bool SettingsWindow::logsEnabled()            const { return m_logsEnabled->isChecked();     }
 bool SettingsWindow::audioSandboxEnabled()    const { return m_sandboxEnabled->isChecked();   }
 bool SettingsWindow::audioMeterVisible()      const { return m_meterVisible->isChecked();     }
+bool SettingsWindow::audioExportEnabled()     const { return m_exportEnabled->isChecked();    }
 int  SettingsWindow::activeProfile()          const { return m_profileCombo->currentIndex(); }
 bool   SettingsWindow::themeEnabled()         const { return m_themeGroup && m_themeGroup->isChecked(); }
 QColor SettingsWindow::themeAccent()          const { return m_themeAccent; }
@@ -475,6 +482,7 @@ void SettingsWindow::setHideWaveform(bool on)          { QSignalBlocker b(m_hide
 void SettingsWindow::setLogsEnabled(bool on)           { QSignalBlocker b(m_logsEnabled);     m_logsEnabled->setChecked(on);     }
 void SettingsWindow::setAudioSandboxEnabled(bool on)   { QSignalBlocker b(m_sandboxEnabled);  m_sandboxEnabled->setChecked(on);  }
 void SettingsWindow::setAudioMeterVisible(bool on)     { QSignalBlocker b(m_meterVisible);    m_meterVisible->setChecked(on);    }
+void SettingsWindow::setAudioExportEnabled(bool on)    { QSignalBlocker b(m_exportEnabled);   m_exportEnabled->setChecked(on);   }
 void SettingsWindow::setActiveProfile(int p)           { QSignalBlocker b(m_profileCombo);    if (p >= 0 && p < m_profileCombo->count()) m_profileCombo->setCurrentIndex(p); }
 
 void SettingsWindow::setTheme(bool enabled, const QColor &accent, const QColor &waveform, const QColor &background, int contrast, const QColor &text, const QColor &button)

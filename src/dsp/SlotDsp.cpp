@@ -48,9 +48,17 @@ void SlotDsp::setSampleRate(double sr) {
     m_fs = newFs;
     auto initPath = [this](PathState &p){
         p.eq.setSampleRate(m_fs);
+        p.comp.setSampleRate(m_fs);
+        p.sat.setSampleRate(m_fs);
         p.posL.setSampleRate(m_fs);
         p.posR.setSampleRate(m_fs);
+        p.chorus.setSampleRate(m_fs);
+        p.flanger.setSampleRate(m_fs);
+        p.flangus.setSampleRate(m_fs);
+        p.phaser.setSampleRate(m_fs);
+        p.delay.setSampleRate(m_fs);
         p.reverb.setSampleRate(m_fs);
+        p.limiter.setSampleRate(m_fs);
     };
     initPath(m_play);
     initPath(m_cap);
@@ -63,9 +71,17 @@ void SlotDsp::setSampleRate(double sr) {
 void SlotDsp::reset() {
     auto resetPath = [](PathState &p){
         p.eq.reset();
+        p.comp.reset();
+        p.sat.reset();
         p.posL.reset();
         p.posR.reset();
+        p.chorus.reset();
+        p.flanger.reset();
+        p.flangus.reset();
+        p.phaser.reset();
+        p.delay.reset();
         p.reverb.reset();
+        p.limiter.reset();
         p.rotPhase = 0.0;
         p.rotBlockCounter = 0;
     };
@@ -93,18 +109,38 @@ void SlotDsp::setFxReverbWet(float wet) {
     if (wet > 1.0f) wet = 1.0f;
     m_fxReverbWet = wet;
     refreshReverbWet();
+    recomputeActive();
 }
 
 void SlotDsp::refreshReverbWet() {
-    // Combined wet = sandbox Ambience + FxPanel reverb, clamped to 1.
-    // Both UI sliders feed the same end-of-pipeline Reverb stage so
-    // the room effect happens after spatial / EQ / softLimit no matter
-    // which knob the user touched.
     float combined = m_state.reverbWet + m_fxReverbWet;
     if (combined < 0.0f) combined = 0.0f;
     if (combined > 1.0f) combined = 1.0f;
     m_play.reverb.setWet(combined);
     m_cap.reverb.setWet(combined);
+}
+
+void SlotDsp::recomputeActive() {
+    const auto &s = m_state;
+    bool spatialActive =
+        s.spatialMode == SandboxState::Spatial_3DManual ||
+        s.spatialMode == SandboxState::Spatial_3DRotate ||
+        s.spatialMode == SandboxState::Spatial_8DPreset ||
+        (s.spatialMode == SandboxState::Spatial_LRPan && std::abs(s.panValue) > 0.001f);
+    bool eqActive = s.eqEnabled && std::any_of(std::begin(s.eqBandDb), std::end(s.eqBandDb),
+                                                 [](float v){ return std::abs(v) > 0.001f; });
+    bool reverbActive = (s.reverbWet + m_fxReverbWet) > 0.001f;
+    bool newFxActive = s.compEnabled ||
+                       (s.chorusEnabled && s.chorusMix > 0.001f) ||
+                       (s.flangerEnabled && s.flangerMix > 0.001f) ||
+                       (s.flangusEnabled && s.flangusMix > 0.001f) ||
+                       (s.phaserEnabled && s.phaserMix > 0.001f) ||
+                       (s.saturatorEnabled && s.saturatorMix > 0.001f) ||
+                       (s.delayEnabled && s.delayMix > 0.001f) ||
+                       s.limiterEnabled;
+    bool sandboxActive = s.enabled && (spatialActive || eqActive || reverbActive ||
+                                        s.headSway || s.stretchEnabled || newFxActive);
+    m_active = sandboxActive || m_fxReverbWet > 0.001f;
 }
 
 int SlotDsp::inputFramesNeededFor(int outputFrames) const {
@@ -159,28 +195,27 @@ void SlotDsp::applyState(const SandboxState &s) {
     // half-flushed filter.
     bool modeChanged = (oldMode != s.spatialMode) || (oldStretch != s.stretchEnabled);
     if (modeChanged) {
-        auto resetPath = [](PathState &p){
+        auto resetFull = [](PathState &p){
             p.eq.reset();
+            p.comp.reset();
+            p.sat.reset();
             p.posL.reset();
             p.posR.reset();
+            p.chorus.reset();
+            p.flanger.reset();
+            p.flangus.reset();
+            p.phaser.reset();
+            p.delay.reset();
             p.reverb.reset();
+            p.limiter.reset();
             p.rotPhase = 0.0;
             p.rotBlockCounter = 0;
         };
-        resetPath(m_play);
-        resetPath(m_cap);
+        resetFull(m_play);
+        resetFull(m_cap);
     }
 
-    bool spatialActive =
-        s.spatialMode == SandboxState::Spatial_3DManual ||
-        s.spatialMode == SandboxState::Spatial_3DRotate ||
-        s.spatialMode == SandboxState::Spatial_8DPreset ||
-        (s.spatialMode == SandboxState::Spatial_LRPan && std::abs(s.panValue) > 0.001f);
-    bool eqActive = s.eqEnabled && std::any_of(std::begin(s.eqBandDb), std::end(s.eqBandDb),
-                                                 [](float v){ return std::abs(v) > 0.001f; });
-    bool reverbActive = (s.reverbWet + m_fxReverbWet) > 0.001f;
-    m_active = s.enabled && (spatialActive || eqActive || reverbActive ||
-                              s.headSway || s.stretchEnabled);
+    recomputeActive();
 
     auto applyToPath = [&s](PathState &p){
         p.reverb.setRoomSize(0.5f);
@@ -190,6 +225,24 @@ void SlotDsp::applyState(const SandboxState &s) {
         float swayDeg = s.headSway ? 1.5f : 0.0f;
         p.posL.setHeadSwayAmount(swayDeg);
         p.posR.setHeadSwayAmount(swayDeg);
+
+        p.comp.setParams(s.compThresholdDb, s.compRatio, s.compAttackMs,
+                         s.compReleaseMs, s.compKneeDb, s.compMakeupDb);
+        p.sat.setParams(s.saturatorDrive, s.saturatorMix, s.saturatorTone,
+                        static_cast<Saturator::Mode>(s.saturatorMode));
+        p.chorus.setParams(s.chorusRate, s.chorusDepth, s.chorusBaseDelay,
+                           s.chorusVoices, s.chorusMix);
+        p.flanger.setParams(s.flangerRate, s.flangerDepth, s.flangerFeedback,
+                            s.flangerBaseDelay, s.flangerMix);
+        p.flangus.setParams(s.flangusRate, s.flangusDepth, s.flangusFeedback,
+                            s.flangusVoices, s.flangusSpread, s.flangusMix);
+        p.phaser.setParams(s.phaserRate, s.phaserDepth, s.phaserFeedback,
+                           s.phaserStages, s.phaserMix);
+        p.delay.setParams(s.delayTimeMs, s.delayFeedback, s.delayMix,
+                          s.delayDamping, s.delayPingPong);
+        p.limiter.setParams(s.limiterCeiling, s.limiterLookahead, s.limiterRelease,
+                            static_cast<Limiter::Mode>(s.limiterMode),
+                            s.limiterRatio, s.limiterGateThresh);
     };
     applyToPath(m_play);
     applyToPath(m_cap);
@@ -247,6 +300,70 @@ void SlotDsp::advanceRotationIfNeeded(PathState &p) {
     p.rotBlockCounter = kRotateUpdateBlock;
 }
 
+void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
+    switch (stage) {
+    case SandboxState::Stage_EQ:
+        if (m_state.eqEnabled) p.eq.processStereo(l, r);
+        break;
+    case SandboxState::Stage_Compressor:
+        if (m_state.compEnabled) p.comp.processStereo(l, r);
+        break;
+    case SandboxState::Stage_Saturator:
+        if (m_state.saturatorEnabled && m_state.saturatorMix > 0.001f) p.sat.processStereo(l, r);
+        break;
+    case SandboxState::Stage_Spatial:
+        switch (m_state.spatialMode) {
+            case SandboxState::Spatial_LRPan: {
+                float pan = m_state.panValue;
+                if (pan < -1.0f) pan = -1.0f;
+                if (pan >  1.0f) pan =  1.0f;
+                float theta = (pan + 1.0f) * 0.7853981634f;
+                float gL = std::cos(theta), gR = std::sin(theta);
+                l *= gL; r *= gR;
+                break;
+            }
+            case SandboxState::Spatial_3DManual:
+            case SandboxState::Spatial_3DRotate:
+            case SandboxState::Spatial_8DPreset: {
+                advanceRotationIfNeeded(p);
+                float ll, lr, rl, rr;
+                p.posL.process(l, ll, lr);
+                p.posR.process(r, rl, rr);
+                float wetL = ll + rl, wetR = lr + rr;
+                float w = m_state.spatialMix;
+                if (w < 0.0f) w = 0.0f; else if (w > 1.0f) w = 1.0f;
+                float d = 1.0f - w;
+                l = w * wetL + d * l;
+                r = w * wetR + d * r;
+                break;
+            }
+            default: break;
+        }
+        break;
+    case SandboxState::Stage_Chorus:
+        if (m_state.chorusEnabled && m_state.chorusMix > 0.001f) p.chorus.processStereo(l, r);
+        break;
+    case SandboxState::Stage_Flanger:
+        if (m_state.flangerEnabled && m_state.flangerMix > 0.001f) p.flanger.processStereo(l, r);
+        break;
+    case SandboxState::Stage_Flangus:
+        if (m_state.flangusEnabled && m_state.flangusMix > 0.001f) p.flangus.processStereo(l, r);
+        break;
+    case SandboxState::Stage_Phaser:
+        if (m_state.phaserEnabled && m_state.phaserMix > 0.001f) p.phaser.processStereo(l, r);
+        break;
+    case SandboxState::Stage_Delay:
+        if (m_state.delayEnabled && m_state.delayMix > 0.001f) p.delay.processStereo(l, r);
+        break;
+    case SandboxState::Stage_Reverb:
+        if ((m_state.reverbWet + m_fxReverbWet) > 0.001f) p.reverb.process(l, r);
+        break;
+    case SandboxState::Stage_Limiter:
+        if (m_state.limiterEnabled) p.limiter.processStereo(l, r);
+        break;
+    }
+}
+
 void SlotDsp::process(short *interleaved, int frames, int channels,
                       float &peakL, float &peakR, bool isCapture) {
     PathState &p = isCapture ? m_cap : m_play;
@@ -282,38 +399,11 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
         float dither = antiDenormDither(i);
         l += dither; r -= dither;
 
-        if (m_state.eqEnabled) p.eq.processStereo(l, r);
-
-        switch (m_state.spatialMode) {
-            case SandboxState::Spatial_LRPan: {
-                float pan = m_state.panValue;
-                if (pan < -1.0f) pan = -1.0f;
-                if (pan >  1.0f) pan =  1.0f;
-                float theta = (pan + 1.0f) * 0.7853981634f;
-                float gL = std::cos(theta), gR = std::sin(theta);
-                l *= gL;
-                r *= gR;
-                break;
-            }
-            case SandboxState::Spatial_3DManual:
-            case SandboxState::Spatial_3DRotate:
-            case SandboxState::Spatial_8DPreset: {
-                advanceRotationIfNeeded(p);
-                float ll, lr, rl, rr;
-                p.posL.process(l, ll, lr);
-                p.posR.process(r, rl, rr);
-                float wetL = ll + rl, wetR = lr + rr;
-                float w = m_state.spatialMix;
-                if (w < 0.0f) w = 0.0f; else if (w > 1.0f) w = 1.0f;
-                float d = 1.0f - w;
-                l = w * wetL + d * l;
-                r = w * wetR + d * r;
-                break;
-            }
-            default: break;
+        for (int si = 0; si < SandboxState::Stage_COUNT; ++si) {
+            int stage = m_state.pipelineOrder[si];
+            if (!m_state.enabled && stage != SandboxState::Stage_Reverb) continue;
+            applyStage(stage, p, l, r);
         }
-
-        if ((m_state.reverbWet + m_fxReverbWet) > 0.001f) p.reverb.process(l, r);
 
         l = softLimit(l);
         r = softLimit(r);
@@ -361,37 +451,11 @@ void SlotDsp::produceStretchedShort(short *out, int frames, int channels,
         float dither = antiDenormDither(i);
         l += dither; r -= dither;
 
-        if (m_state.eqEnabled) p.eq.processStereo(l, r);
-
-        switch (m_state.spatialMode) {
-            case SandboxState::Spatial_LRPan: {
-                float pan = m_state.panValue;
-                if (pan < -1.0f) pan = -1.0f;
-                if (pan >  1.0f) pan =  1.0f;
-                float theta = (pan + 1.0f) * 0.7853981634f;
-                float gL = std::cos(theta), gR = std::sin(theta);
-                l *= gL; r *= gR;
-                break;
-            }
-            case SandboxState::Spatial_3DManual:
-            case SandboxState::Spatial_3DRotate:
-            case SandboxState::Spatial_8DPreset: {
-                advanceRotationIfNeeded(p);
-                float ll, lr, rl, rr;
-                p.posL.process(l, ll, lr);
-                p.posR.process(r, rl, rr);
-                float wetL = ll + rl, wetR = lr + rr;
-                float w = m_state.spatialMix;
-                if (w < 0.0f) w = 0.0f; else if (w > 1.0f) w = 1.0f;
-                float d = 1.0f - w;
-                l = w * wetL + d * l;
-                r = w * wetR + d * r;
-                break;
-            }
-            default: break;
+        for (int si = 0; si < SandboxState::Stage_COUNT; ++si) {
+            int stage = m_state.pipelineOrder[si];
+            if (!m_state.enabled && stage != SandboxState::Stage_Reverb) continue;
+            applyStage(stage, p, l, r);
         }
-
-        if ((m_state.reverbWet + m_fxReverbWet) > 0.001f) p.reverb.process(l, r);
 
         l = softLimit(l);
         r = softLimit(r);

@@ -142,19 +142,6 @@ extern "C"
 
 /* Unique name identifying this plugin */
 const char* ts3plugin_name() {
-//#ifdef _WIN32
-//	/* TeamSpeak expects UTF-8 encoded characters. Following demonstrates a possibility how to convert UTF-16 wchar_t into UTF-8. */
-//	static char* result = NULL;  /* Static variable so it's allocated only once */
-//	if(!result) {
-//		const wchar_t* name = L"Test Plugin";
-//		if(wcharToUtf8(name, &result) == -1) {  /* Convert name into UTF-8 encoded result */
-//			result = "Test Plugin";  /* Conversion failed, fallback here */
-//		}
-//	}
-//	return result;
-//#else
-//	return PLUGIN_NAME;
-//#endif
 	return buildinfo_getPluginName();
 }
 
@@ -254,8 +241,7 @@ void ts3plugin_registerPluginID(const char* id)
 {
 	const size_t sz = strlen(id) + 1;
 	pluginID = (char*)malloc(sz * sizeof(char));
-	_strcpy(pluginID, sz, id);  /* The id buffer will invalidate after exiting this function */
-	printf("PLUGIN: registerPluginID: %s\n", pluginID);
+	_strcpy(pluginID, sz, id);
 }
 
 /* Plugin command keyword. Return NULL or "" if not used. */
@@ -543,8 +529,6 @@ void ts3plugin_initHotkeys(struct PluginHotkey*** hotkeys)
 std::map<uint64, int> clientInputHardwareStateMap;
 void ts3plugin_onUpdateClientEvent(uint64 serverConnectionHandlerID, anyID clientID, anyID invokerID, const char * invokerName, const char * invokerUniqueIdentifier)
 {
-	//logDebug("onUpdateClientEvent: serverId = %i, clientId = %i, invokerID = %i, invokerName = \"%s\", invokerUID = \"%s\"",
-	//	(int)serverConnectionHandlerID, (int)clientID, (int)invokerID, invokerName ? invokerName : "NULL", invokerUniqueIdentifier ? invokerUniqueIdentifier : "NULL");
 	anyID myId = 0;
 	if (checkError(ts3Functions.getClientID(serverConnectionHandlerID, &myId), "getClientID error"))
 		return;
@@ -564,18 +548,6 @@ void ts3plugin_onUpdateClientEvent(uint64 serverConnectionHandlerID, anyID clien
 		}
 	}
 	clientInputHardwareStateMap[serverConnectionHandlerID] = inputState;
-
-	//static int oldInputDeactivated = -1;
-	//int inputDeactivated = 0;
-	//if (!checkError(ts3Functions.getClientSelfVariableAsInt(serverConnectionHandlerID,
-	//	(size_t)CLIENT_FLAG_TALKING, &inputDeactivated), "getClientSelfVariableAsInt error"))
-	//{
-	//	if (inputDeactivated != oldInputDeactivated)
-	//	{
-	//		logDebug("CLIENT_FLAG_TALKING changed from %i to %i", oldInputDeactivated, inputDeactivated);
-	//		oldInputDeactivated = inputDeactivated;
-	//	}
-	//}
 }
 
 
@@ -585,11 +557,6 @@ void ts3plugin_onConnectStatusChangeEvent(uint64 serverConnectionHandlerID, int 
 		clientInputHardwareStateMap.erase(serverConnectionHandlerID);
 
     sb_onConnectStatusChange(serverConnectionHandlerID, newStatus, errorNumber);
-
-    //if(newStatus == STATUS_CONNECTION_ESTABLISHED) /* connection established and we have client and channels available */
-	//{
-	//	sb_onServerChange(serverConnectionHandlerID);
-    //}
 }
 
 void ts3plugin_onEditMixedPlaybackVoiceDataEvent(uint64 serverConnectionHandlerID, short* samples, int sampleCount,

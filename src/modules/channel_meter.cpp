@@ -70,14 +70,17 @@ void ChannelMeter::paintEvent(QPaintEvent *)
     };
 
     auto drawRow = [&](int y, float v, char label) {
-        // Channel label (L/R) drawn at the far left.
         p.setPen(QColor(0xaa, 0xaa, 0xaa));
         p.drawText(QRect(2, y, padX - 2, barH),
                    Qt::AlignVCenter | Qt::AlignLeft, QString(QChar(label)));
 
         bool clipping = v >= kClipThreshold;
-        float vClamp = std::min(v, 1.0f);
-        int litCount = static_cast<int>(std::round(vClamp * kSegmentCount));
+        constexpr float kFloorDb = -60.0f;
+        float dbVal = (v > 1e-6f) ? 20.0f * std::log10(v) : kFloorDb;
+        if (dbVal < kFloorDb) dbVal = kFloorDb;
+        if (dbVal > 0.0f) dbVal = 0.0f;
+        float normalized = (dbVal - kFloorDb) / (0.0f - kFloorDb);
+        int litCount = static_cast<int>(std::round(normalized * kSegmentCount));
         if (litCount < 0) litCount = 0;
         if (litCount > kSegmentCount) litCount = kSegmentCount;
 

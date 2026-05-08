@@ -23,7 +23,7 @@
 #include <math.h>
 
 // ===== FILE DEBUG LOGGING =====
-#define RPSB_FILE_DEBUG 1
+#define RPSB_FILE_DEBUG 0
 #if RPSB_FILE_DEBUG
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -78,6 +78,7 @@ extern "C" void rpsb_close_debug_log()
 }
 #else
 #define sdbgLog(...) ((void)0)
+extern "C" void rpsb_close_debug_log() {}
 #endif
 
 //#define USE_SSE2
@@ -125,6 +126,13 @@ Sampler::PlaybackSlot::PlaybackSlot() :
 
 // Out-of-line so unique_ptr<SlotDsp> sees the full type for its destructor.
 Sampler::PlaybackSlot::~PlaybackSlot() = default;
+
+void Sampler::setSlotLoop(int slot, bool on)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	m_slots[slot].loop = on;
+}
 
 void Sampler::setSlotSandboxState(int slot, const SandboxState &s)
 {
@@ -526,10 +534,19 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 			SampleBuffer::Lock sbl(slot.sbCapture.getMutex());
 			if (slot.sbCapture.avail() == 0)
 			{
-				slot.state = eSILENT;
-				slot.peakL.store(0.0f);
-				slot.peakR.store(0.0f);
-				emit onStopPlaying(s);
+				if (slot.loop) {
+					slot.inputFile->seek(0.0);
+					{
+						SampleBuffer::Lock sblp(slot.sbPlayback.getMutex());
+						slot.sbPlayback.clear();
+					}
+					slot.sbCapture.clear();
+				} else {
+					slot.state = eSILENT;
+					slot.peakL.store(0.0f);
+					slot.peakR.store(0.0f);
+					emit onStopPlaying(s);
+				}
 			}
 		}
 	}

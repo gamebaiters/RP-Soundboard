@@ -143,6 +143,7 @@ target_include_directories(rp_soundboard_fx PUBLIC "pluginsdk/include" "src" ${f
 # they include <cmath> on MSVC.
 target_compile_definitions(rp_soundboard_fx PRIVATE _USE_MATH_DEFINES NOMINMAX)
 set_target_properties(rp_soundboard_fx PROPERTIES
+	PREFIX ""
 	SUFFIX ${libSuffix}
 	RUNTIME_OUTPUT_DIRECTORY_DEBUG debug
 	RUNTIME_OUTPUT_DIRECTORY_RELEASE release

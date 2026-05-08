@@ -15,6 +15,7 @@
 #include "button_advanced_panel.h"
 #include "config_io.h"
 #include "channel_state_persistence.h"
+#include "audio_exporter.h"
 
 #include "../ConfigModel.h"
 #include "../samples.h"
@@ -29,6 +30,8 @@
 #include <QLineEdit>
 #include <QClipboard>
 #include <QApplication>
+#include <QButtonGroup>
+#include <QToolButton>
 #include <QRegularExpression>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -57,6 +60,10 @@ private:
 
 static MainPageModelObserver *s_observer = nullptr;
 
+static QVector<ChannelState> s_preMacroStates;
+static int s_preMacroChannelCount = 0;
+static bool s_macroActive = false;
+
 void pushSoundsToGrid(MainPage *page, ConfigModel *model);
 void pushSettingsToWindow(MainPage *page, ConfigModel *model);
 
@@ -71,8 +78,6 @@ void MainPageModelObserver::notify(ConfigModel &model,
 
         case ConfigModel::NOTIFY_SET_ROWS:
         case ConfigModel::NOTIFY_SET_COLS:
-            // Debounce dimension changes. A rapid spinbox sweep would
-            // otherwise trigger one full 210-cell rebuild per tick.
             if (!m_dimsDirty) {
                 m_dimsDirty = true;
                 MainPage *page = m_page;
@@ -82,6 +87,10 @@ void MainPageModelObserver::notify(ConfigModel &model,
                     *dirtyFlag = false;
                     page->buttonGrid()->setRowsCols(modelPtr->getRows(), modelPtr->getCols());
                     pushSoundsToGrid(page, modelPtr);
+                    // Re-apply search filter after grid rebuild (bug fix #4)
+                    QString currentFilter = page->searchBar()->filter();
+                    if (!currentFilter.isEmpty())
+                        page->buttonGrid()->setSearchFilter(currentFilter);
                 });
             }
             break;
@@ -430,7 +439,14 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
         };
 
         if (info->isMacro && !info->macroState.isEmpty()) {
-            // Macro state = JSON array of {state, name, pos} per channel.
+            // Save pre-macro state for restore (section 9B)
+            s_preMacroStates.clear();
+            for (auto *ch : page->channels())
+                s_preMacroStates.append(ch->state());
+            s_preMacroChannelCount = page->channels().size();
+            s_macroActive = true;
+            page->restoreMacroBtn()->setVisible(true);
+
             QJsonDocument doc = QJsonDocument::fromJson(info->macroState);
             if (doc.isArray()) {
                 QJsonArray arr = doc.array();
@@ -799,6 +815,10 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             double len = sampler->getLength(slot);
             if (len > 0.0) sampler->seek(frac * len, slot);
         });
+        QObject::connect(ch->waveform(), &WaveformPlayer::loopToggled,
+                         [sampler, slot](bool on){
+            if (sampler) sampler->setSlotLoop(slot, on);
+        });
         QObject::connect(ch, &Channel::stateChanged,
                          [ch](int id){
             if (ChannelStatePersistence::isEnabled())
@@ -806,8 +826,12 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         });
         if (ChannelStatePersistence::isEnabled()) {
             ChannelState st;
-            if (ChannelStatePersistence::loadState(ch->channelId(), st))
+            if (ChannelStatePersistence::loadState(ch->channelId(), st)) {
                 ch->applyState(st);
+                ch->waveform()->setFilename(QString());
+                ch->waveform()->clearPlayback();
+                ch->waveform()->setPlaying(false);
+            }
         }
     };
 
@@ -979,6 +1003,42 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         }
     });
 
+    // Profile switcher wiring
+    QObject::connect(page->profileGroup(), qOverload<int>(&QButtonGroup::idClicked),
+                     page, [model, page](int idx){
+        model->setConfiguration(idx);
+        pushSettingsToWindow(page, model);
+        pushSoundsToGrid(page, model);
+        // Re-apply search filter (bug fix #4)
+        QString currentFilter = page->searchBar()->filter();
+        if (!currentFilter.isEmpty())
+            page->buttonGrid()->setSearchFilter(currentFilter);
+    });
+    // Sync profile buttons when profile changes from any source
+    auto syncProfileBtns = [page](int idx) {
+        for (int i = 0; i < 4; ++i) {
+            auto *btn = page->profileButton(i);
+            if (btn) {
+                QSignalBlocker b(btn);
+                btn->setChecked(i == idx);
+            }
+        }
+    };
+    syncProfileBtns(model->getConfiguration());
+
+    QObject::connect(page->restoreMacroBtn(), &QPushButton::clicked, page,
+                     [page, sampler]{
+        if (!s_macroActive) return;
+        while (page->channels().size() > s_preMacroChannelCount && page->channels().size() > 1)
+            page->removeChannel(page->channels().size() - 1);
+        for (int i = 0; i < s_preMacroStates.size() && i < page->channels().size(); ++i) {
+            page->channels().at(i)->applyState(s_preMacroStates[i]);
+        }
+        s_macroActive = false;
+        page->restoreMacroBtn()->setVisible(false);
+        s_preMacroStates.clear();
+    });
+
     // Observe ConfigModel so external state changes (config switch,
     // import, late readConfig) propagate to grid + settings.
     if (!s_observer) {
@@ -1011,9 +1071,11 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     auto applyChannelSandboxFlags = [page, model](){
         bool sandbox = model->getAudioSandboxEnabled();
         bool meter   = model->getAudioMeterVisible();
+        bool exprt   = model->getAudioExportEnabled();
         for (auto *ch : page->channels()) {
             ch->setSandboxFeatureEnabled(sandbox);
             ch->setMeterVisible(meter);
+            ch->setExportVisible(exprt);
         }
     };
 
@@ -1027,6 +1089,10 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         model->setAudioMeterVisible(v);
         applyChannelSandboxFlags();
     });
+    QObject::connect(sw, &SettingsWindow::audioExportEnabledChanged, [model, applyChannelSandboxFlags](bool v){
+        model->setAudioExportEnabled(v);
+        applyChannelSandboxFlags();
+    });
     QObject::connect(sw, &SettingsWindow::resetAllAudioSandboxRequested, [page, sampler](){
         for (int i = 0; i < page->channels().size(); ++i) {
             auto *ch = page->channels().at(i);
@@ -1038,17 +1104,43 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     // Per-channel: forward sandbox state changes to Sampler. Wired on
     // every channel-add so dynamically created channels get the same
     // forwarding plumbing.
-    auto wireChannelSandbox = [sampler, applyChannelSandboxFlags, model](Channel *ch){
+    auto wireChannelSandbox = [sampler, applyChannelSandboxFlags, model, page](Channel *ch){
         QObject::connect(ch, &Channel::sandboxStateChanged, [sampler](int slot, const SandboxState &s){
             if (sampler) sampler->setSlotSandboxState(slot, s);
         });
         QObject::connect(ch, &Channel::sandboxResetRequested, [sampler](int slot){
             if (sampler) sampler->clearSlotSandbox(slot);
         });
+        QObject::connect(ch, &Channel::exportRequested, [page](int slot){
+            auto *ch = page->channelAt(slot);
+            if (!ch) return;
+            QString src = ch->waveform()->filename();
+            if (src.isEmpty()) {
+                QMessageBox::information(page, QObject::tr("Export"),
+                    QObject::tr("No audio file loaded on this channel."));
+                return;
+            }
+            QString dst = QFileDialog::getSaveFileName(page, QObject::tr("Export audio with DSP"),
+                QString(), QObject::tr("WAV files (*.wav)"));
+            if (dst.isEmpty()) return;
+            auto *exporter = new AudioExporter(src, dst, ch->sandboxState(), 48000.0, page);
+            QObject::connect(exporter, &AudioExporter::exportFinished,
+                             page, [page, exporter](bool ok, const QString &err){
+                if (ok)
+                    QMessageBox::information(page, QObject::tr("Export"),
+                        QObject::tr("Export completed successfully."));
+                else
+                    QMessageBox::warning(page, QObject::tr("Export"),
+                        QObject::tr("Export failed: %1").arg(err));
+                exporter->deleteLater();
+            });
+            exporter->start();
+        });
         // Apply current global flags so the new channel respects them
         // immediately.
         ch->setSandboxFeatureEnabled(model->getAudioSandboxEnabled());
         ch->setMeterVisible(model->getAudioMeterVisible());
+        ch->setExportVisible(model->getAudioExportEnabled());
     };
     for (auto *ch : page->channels()) wireChannelSandbox(ch);
     QObject::connect(page, &MainPage::channelAdded, [page, wireChannelSandbox](int idx){
@@ -1059,6 +1151,7 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     // Push initial settings + state on startup.
     sw->setAudioSandboxEnabled(model->getAudioSandboxEnabled());
     sw->setAudioMeterVisible(model->getAudioMeterVisible());
+    sw->setAudioExportEnabled(model->getAudioExportEnabled());
     applyChannelSandboxFlags();
 
     // 25 Hz meter poll: read atomic peak L/R from each slot, push to

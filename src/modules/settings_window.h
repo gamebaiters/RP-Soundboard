@@ -28,6 +28,7 @@ public:
     bool logsEnabled() const;
     bool audioSandboxEnabled() const;
     bool audioMeterVisible() const;
+    bool audioExportEnabled() const;
     int  activeProfile() const;
     bool themeEnabled() const;
     QColor themeAccent() const;
@@ -54,6 +55,7 @@ public slots:
     void setLogsEnabled(bool on);
     void setAudioSandboxEnabled(bool on);
     void setAudioMeterVisible(bool on);
+    void setAudioExportEnabled(bool on);
     void setActiveProfile(int profile);
     void setTheme(bool enabled, const QColor &accent, const QColor &waveform, const QColor &background, int contrast, const QColor &text, const QColor &button);
     void setMultiSoundboard(bool on);
@@ -74,6 +76,7 @@ signals:
     void logsEnabledChanged(bool);
     void audioSandboxEnabledChanged(bool);
     void audioMeterVisibleChanged(bool);
+    void audioExportEnabledChanged(bool);
     void resetAllAudioSandboxRequested();
     void activeProfileChanged(int profile);
     void exportProfileRequested(int profile);
@@ -103,6 +106,7 @@ private:
     QCheckBox   *m_logsEnabled;
     QCheckBox   *m_sandboxEnabled = nullptr;
     QCheckBox   *m_meterVisible   = nullptr;
+    QCheckBox   *m_exportEnabled  = nullptr;
     QPushButton *m_resetAllSandbox = nullptr;
     class QComboBox *m_profileCombo;
     QPushButton *m_profileExport;

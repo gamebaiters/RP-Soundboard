@@ -651,7 +651,7 @@ CAPI int sb_parseCommand(char** args, int argc)
 	else if (argc == 2)
 	{
 		long arg0 = strtol(args[0], NULL, 10);
-		int pconfig = configModel->getConfiguration(); //TODO ConfigModel::getConfiguration() { return m_activeConfig; }
+		int pconfig = configModel->getConfiguration();
 		if (arg0 < 1 || arg0 > 4)
 			ts3Functions.printMessageToCurrentTab("Invalid configuration number");
 		configModel->setConfiguration((int)arg0); //switch to specified configuration

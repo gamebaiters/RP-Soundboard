@@ -16,6 +16,7 @@ extern const QString &getButtonMime();
 #include <QStyle>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QCheckBox>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -127,12 +128,33 @@ Channel::Channel(int channelId, QWidget *parent)
         "  - Paulstretch (extreme phase-randomised time-stretch)\n"
         "Settings persist per channel and are bundled into macros."));
 
-    // Layout: [X][title.....stretch][sandboxBtn]
+    m_exportBtn = new QPushButton(QIcon(":/icon/img/stoparrow_32.png"), tr("Export"), this);
+    m_exportBtn->setFixedHeight(22);
+    m_exportBtn->setToolTip(tr("Export this channel's audio with all DSP effects applied to a WAV file"));
+    m_exportBtn->setVisible(false);
+    connect(m_exportBtn, &QPushButton::clicked, this, [this]{ emit exportRequested(m_id); });
+
+    m_sandboxEnableCheck = new QCheckBox(tr("FX"), this);
+    m_sandboxEnableCheck->setToolTip(tr("Enable audio sandbox on this channel (EQ, spatial, effects)"));
+    m_sandboxEnableCheck->setChecked(m_sandbox.enabled);
+    connect(m_sandboxEnableCheck, &QCheckBox::toggled, this, [this](bool on){
+        m_sandbox.enabled = on;
+        m_sandboxBtn->setEnabled(on);
+        if (m_sandboxDialog) {
+            m_sandboxDialog->setState(m_sandbox);
+        }
+        emit sandboxStateChanged(m_id, m_sandbox);
+        onAnyChange();
+    });
+
+    // Layout: [X][title.....][FX check][sandboxBtn]
     auto *titleRow = new QHBoxLayout;
     titleRow->setContentsMargins(0,0,0,0);
     titleRow->setSpacing(4);
     titleRow->addWidget(m_removeBtn, 0, Qt::AlignVCenter);
     titleRow->addWidget(m_titleEdit, 1);
+    titleRow->addWidget(m_exportBtn, 0, Qt::AlignVCenter);
+    titleRow->addWidget(m_sandboxEnableCheck, 0, Qt::AlignVCenter);
     titleRow->addWidget(m_sandboxBtn, 0, Qt::AlignVCenter);
 
     auto *frameLayout = new QVBoxLayout(m_frame);
@@ -166,6 +188,11 @@ Channel::Channel(int channelId, QWidget *parent)
 
 void Channel::setSandboxState(const SandboxState &s) {
     m_sandbox = s;
+    if (m_sandboxEnableCheck) {
+        QSignalBlocker b(m_sandboxEnableCheck);
+        m_sandboxEnableCheck->setChecked(s.enabled);
+    }
+    if (m_sandboxBtn) m_sandboxBtn->setEnabled(s.enabled);
     if (m_sandboxDialog) m_sandboxDialog->setState(m_sandbox);
 }
 
@@ -177,8 +204,12 @@ void Channel::openSandboxDialog() {
         connect(m_sandboxDialog, &ChannelSandboxDialog::stateChanged,
                 this, [this](const SandboxState &s){
             m_sandbox = s;
+            if (m_sandboxEnableCheck && m_sandboxEnableCheck->isChecked() != s.enabled) {
+                QSignalBlocker b(m_sandboxEnableCheck);
+                m_sandboxEnableCheck->setChecked(s.enabled);
+                m_sandboxBtn->setEnabled(s.enabled);
+            }
             emit sandboxStateChanged(m_id, s);
-            // Channel-state level change so the host persists it.
             onAnyChange();
         });
         connect(m_sandboxDialog, &ChannelSandboxDialog::resetRequested,
@@ -204,6 +235,10 @@ void Channel::setSandboxFeatureEnabled(bool on) {
     if (m_sandboxBtn) m_sandboxBtn->setVisible(on);
     if (!on && m_sandboxDialog && m_sandboxDialog->isVisible())
         m_sandboxDialog->close();
+}
+
+void Channel::setExportVisible(bool on) {
+    if (m_exportBtn) m_exportBtn->setVisible(on);
 }
 
 void Channel::pushTitleToSandboxDialog() {

@@ -5,6 +5,14 @@
 #include "EqRack.h"
 #include "Paulstretch.h"
 #include "Reverb.h"
+#include "Compressor.h"
+#include "Saturator.h"
+#include "Chorus.h"
+#include "Flanger.h"
+#include "Flangus.h"
+#include "Phaser.h"
+#include "Delay.h"
+#include "Limiter.h"
 
 #include <vector>
 
@@ -79,17 +87,26 @@ private:
     // advancement, producing the robotic transient the user heard.
     struct PathState {
         EqRack     eq;
+        Compressor comp;
+        Saturator  sat;
         Positional posL;
         Positional posR;
+        Chorus     chorus;
+        Flanger    flanger;
+        Flangus    flangus;
+        Phaser     phaser;
+        Delay      delay;
         Reverb     reverb;
+        Limiter    limiter;
         double     rotPhase = 0.0;
         int        rotBlockCounter = 0;
     };
 
     void pushSpeakerPair(PathState &p, float cx, float cy, float cz);
     void advanceRotationIfNeeded(PathState &p);
+    void applyStage(int stage, PathState &p, float &l, float &r);
 
-    double m_fs = 48000.0;
+    double m_fs = 0.0;
     bool   m_active = false;
     SandboxState m_state;
 
@@ -123,4 +140,5 @@ private:
 
     float  m_fxReverbWet = 0.0f;     // FxPanel reverb routed here
     void   refreshReverbWet();
+    void   recomputeActive();
 };

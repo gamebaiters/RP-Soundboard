@@ -20,6 +20,8 @@ public:
     bool    isPlaying()     const;
     bool    isPaused()      const;
 
+    bool    isLooping()     const;
+
 public slots:
     void setSound(const SoundInfo &info);
     void setFilename(const QString &name);
@@ -28,6 +30,7 @@ public slots:
     void clearPlayback();
     void setPlaying(bool on);
     void setPaused(bool on);
+    void setLooping(bool on);
     // Toggle ONLY the waveform visualisation (the SoundView). Filename,
     // time label and transport buttons stay so the user can still
     // play / pause / seek even in the compact "no waveform" mode.
@@ -39,6 +42,7 @@ signals:
     void stopClicked();
     void skip(int seconds);              // signed: -10, -5, +5, +10
     void seekRequested(double fraction); // 0..1 from waveform click
+    void loopToggled(bool on);
 
 private slots:
     void onPlayPause();
@@ -56,8 +60,10 @@ private:
     QPushButton *m_stop;
     QPushButton *m_playPause;
     QPushButton *m_fwd5;
+    QPushButton *m_loop;
     QPushButton *m_fwd10;
     bool         m_playing;
     bool         m_paused;
+    bool         m_looping;
     QString      m_fullPath;   // unstripped path, returned by filename()
 };

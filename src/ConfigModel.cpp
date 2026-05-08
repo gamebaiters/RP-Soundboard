@@ -62,6 +62,7 @@ ConfigModel::ConfigModel()
 	m_previewOnly = false;
 	m_audioSandboxEnabled = true;
 	m_audioMeterVisible = true;
+	m_audioExportEnabled = false;
 
     m_activeConfig = 0;
 	m_nextUpdateCheck = 0;
@@ -124,6 +125,7 @@ void ConfigModel::readConfig(const QString &file)
 	m_previewOnly = settings.value("preview_only", false).toBool();
 	m_audioSandboxEnabled = settings.value("audio_sandbox_enabled", true).toBool();
 	m_audioMeterVisible   = settings.value("audio_meter_visible", true).toBool();
+	m_audioExportEnabled  = settings.value("audio_export_enabled", false).toBool();
 	m_nextUpdateCheck = settings.value("next_update_check", 0).toUInt();
 
 	// Propagate the logging gate to the C-land writers immediately so
@@ -183,6 +185,7 @@ void ConfigModel::writeConfig(const QString &file)
 	settings.setValue("preview_only", m_previewOnly);
 	settings.setValue("audio_sandbox_enabled", m_audioSandboxEnabled);
 	settings.setValue("audio_meter_visible", m_audioMeterVisible);
+	settings.setValue("audio_export_enabled", m_audioExportEnabled);
 	settings.setValue("next_update_check", m_nextUpdateCheck);
 
 	for (int i = 0; i < NUM_CONFIGS; i++)
@@ -333,26 +336,6 @@ void ConfigModel::setRows( int n )
 //---------------------------------------------------------------
 void ConfigModel::setCols( int n )
 {
-    //if (n > m_cols)
-    //{
-    //    for (int i = m_rows - 1; i >= 1; i--)
-    //        for (int k = m_cols - 1; k >= 0; k--)
-    //            if (m_sounds->size() > (i * m_cols + k))
-    //            {
-    //                int index = i * n + k;
-    //                if (m_sounds->size() <= index)
-    //                    m_sounds->resize(index + 1);
-    //                (*m_sounds)[index] = (*m_sounds)[i * m_cols + k];
-    //            }
-    //}
-    //else if (n < m_cols)
-    //{
-    //    for (int i = 1; i < m_rows; i++)
-    //        for (int k = 0; k < m_cols; k++)
-    //            if (m_sounds->size() > (i * m_cols + k))
-    //                (*m_sounds)[i * n + k] = (*m_sounds)[i * m_cols + k];
-    //}
-
 	m_cols[m_activeConfig] = n;
 	writeConfig();
 	notify(NOTIFY_SET_COLS, n);
@@ -728,6 +711,12 @@ void ConfigModel::setAudioSandboxEnabled(bool on)
 void ConfigModel::setAudioMeterVisible(bool on)
 {
 	m_audioMeterVisible = on;
+	writeConfig();
+}
+
+void ConfigModel::setAudioExportEnabled(bool on)
+{
+	m_audioExportEnabled = on;
 	writeConfig();
 }
 

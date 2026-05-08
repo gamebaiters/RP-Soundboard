@@ -73,6 +73,7 @@ public:
     // Show / hide the sandbox button (driven by the global "Enable
     // audio sandbox feature" setting).
     void                setSandboxFeatureEnabled(bool on);
+    void                setExportVisible(bool on);
     // Notify the sandbox dialog (if open) that the channel title
     // changed, so the dialog window title stays in sync.
     void                pushTitleToSandboxDialog();
@@ -91,6 +92,7 @@ signals:
     // INI via ChannelStatePersistence.
     void sandboxStateChanged(int channelId, const SandboxState &s);
     void sandboxResetRequested(int channelId);
+    void exportRequested(int channelId);
 
 protected:
     void dragEnterEvent(class QDragEnterEvent *e) override;
@@ -115,7 +117,9 @@ private:
     // Sandbox per-channel
     SandboxState                  m_sandbox;
     QPushButton                  *m_sandboxBtn = nullptr;
+    class QCheckBox              *m_sandboxEnableCheck = nullptr;
     ChannelMeter                 *m_meter = nullptr;
     ChannelSandboxDialog         *m_sandboxDialog = nullptr;
+    QPushButton                  *m_exportBtn = nullptr;
     bool                          m_sandboxFeatureEnabled = true;
 };

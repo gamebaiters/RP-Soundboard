@@ -169,6 +169,9 @@ public:
 	inline bool getAudioMeterVisible() const { return m_audioMeterVisible; }
 	void setAudioMeterVisible(bool on);
 
+	inline bool getAudioExportEnabled() const { return m_audioExportEnabled; }
+	void setAudioExportEnabled(bool on);
+
 	void addObserver(Observer *obs);
 	void remObserver(Observer *obs);
 
@@ -230,6 +233,7 @@ private:
 	bool m_previewOnly;
 	bool m_audioSandboxEnabled;
 	bool m_audioMeterVisible;
+	bool m_audioExportEnabled = false;
 
 	uint m_nextUpdateCheck;
 };

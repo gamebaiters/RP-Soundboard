@@ -540,8 +540,24 @@ int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
     else if (m_codecCtx && m_codecCtx->ch_layout.nb_channels > 0 && m_codecCtx->ch_layout.nb_channels <= 64)
         srcLayout = &m_codecCtx->ch_layout;
 
-    if (srcLayout) {
-        av_channel_layout_describe(srcLayout, ch_layout_str, sizeof(ch_layout_str));
+    // Normalize AV_CHANNEL_ORDER_UNSPEC into a named layout. PCM/WAV
+    // containers populate codecpar with nb_channels=2 but leave the
+    // layout order UNSPEC; av_channel_layout_describe then emits
+    // "2 channels" which abuffer accepts but downstream filters like
+    // aformat=channel_layouts=stereo cannot match - the graph builds
+    // fine and then drops every frame at runtime, so playback never
+    // produces audible output. Resolve to a default mask layout based
+    // on nb_channels so the rest of the chain sees a real label.
+    AVChannelLayout normalized;
+    bool useNormalized = false;
+    if (srcLayout && srcLayout->order == AV_CHANNEL_ORDER_UNSPEC && srcLayout->nb_channels > 0) {
+        av_channel_layout_default(&normalized, srcLayout->nb_channels);
+        useNormalized = true;
+        dbgLog("  normalized UNSPEC layout (nb=%d) to default mask", srcLayout->nb_channels);
+    }
+    AVChannelLayout *describeLayout = useNormalized ? &normalized : srcLayout;
+    if (describeLayout) {
+        av_channel_layout_describe(describeLayout, ch_layout_str, sizeof(ch_layout_str));
     } else {
         // Last resort: pretend stereo. The aformat filter later in the
         // chain forces stereo so the WRONG label here gets corrected.

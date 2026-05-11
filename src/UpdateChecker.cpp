@@ -253,7 +253,20 @@ void UpdateChecker::askUserForUpdate()
 		msgBox0.setDetailedText(m_verInfo.features);
 	if(msgBox0.exec() == QMessageBox::Yes)
 	{
-		QUrl url(m_verInfo.latestDownload);
+		// version.xml ships a single Windows download URL; rewrite the
+		// file name to match the running platform so Linux + macOS pull
+		// their own .ts3_plugin instead of the Windows one (which would
+		// fail to load on every other OS). The release pipeline always
+		// uploads all three artefacts to the same tag URL.
+		QString dl = m_verInfo.latestDownload;
+#if defined(__APPLE__)
+		dl.replace(QStringLiteral("_win64.ts3_plugin"),
+		           QStringLiteral("_macos_x86_64.ts3_plugin"));
+#elif defined(__linux__)
+		dl.replace(QStringLiteral("_win64.ts3_plugin"),
+		           QStringLiteral("_linux_amd64.ts3_plugin"));
+#endif
+		QUrl url(dl);
 		QFileInfo info(QDir::temp(), url.fileName());
 		m_updater = new UpdaterWindow();
 		connect(m_updater, SIGNAL(finished()), this, SLOT(onFinishedUpdate()));

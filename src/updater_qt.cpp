@@ -276,14 +276,32 @@ bool UpdaterWindow::executeFile()
 	// `ditto -x -k` extracts a renamed-zip .ts3_plugin reliably.
 	out << "TMP=\"$(mktemp -d)\"\n";
 	out << "trap 'rm -rf \"$TMP\"' EXIT\n";
-	out << "/usr/bin/ditto -x -k \"$PACKAGE\" \"$TMP\"\n";
-	out << "if [ -d \"$TMP/plugins\" ]; then\n";
+	out << "DITTO_OK=1\n";
+	out << "/usr/bin/ditto -x -k \"$PACKAGE\" \"$TMP\" 2>/tmp/rpsb_update.err || DITTO_OK=0\n";
+	out << "if [ \"$DITTO_OK\" = \"1\" ] && [ -d \"$TMP/plugins\" ]; then\n";
 	out << "    cp -R \"$TMP/plugins/.\" \"$PLUGIN_DIR/\"\n";
 	// Clear every xattr recursively (quarantine + provenance). Whitelisting
 	// by filename misses bundled transitive deps like libssl/libcrypto/...
 	out << "    xattr -cr \"$PLUGIN_DIR\" 2>/dev/null || true\n";
 	// Re-sign ad-hoc each Mach-O so Gatekeeper accepts the fresh deps
 	out << "    find \"$PLUGIN_DIR\" -maxdepth 1 -name '*.dylib' -print0 2>/dev/null | xargs -0 -I {} codesign --force -s - {} 2>/dev/null || true\n";
+	out << "    INSTALL_OK=1\n";
+	out << "else\n";
+	out << "    INSTALL_OK=0\n";
+	out << "fi\n";
+	// Relaunch TS3 so the user does not have to reopen the client manually.
+	// `open -a` queues the launch even if the previous instance is still
+	// quitting - macOS serialises by bundle identifier.
+	out << "sleep 1\n";
+	out << "open -a 'TeamSpeak 3' 2>/dev/null || open -a 'TeamSpeak 3 Client' 2>/dev/null || true\n";
+	// Surface a native dialog so the user can confirm the install
+	// without having to dig through TS3 to check whether the plugin
+	// reloaded. Silent on success-then-relaunch was confusing.
+	out << "if [ \"$INSTALL_OK\" = \"1\" ]; then\n";
+	out << "    osascript -e 'display notification \"Soundboard updated. TeamSpeak is restarting.\" with title \"GameBaiters Soundboard\"' 2>/dev/null || true\n";
+	out << "else\n";
+	out << "    ERRMSG=\"$(cat /tmp/rpsb_update.err 2>/dev/null | head -c 200)\"\n";
+	out << "    osascript -e \"display dialog \\\"Soundboard auto-update failed: $ERRMSG. Please install $PACKAGE manually.\\\" buttons {\\\"OK\\\"}\" 2>/dev/null || true\n";
 	out << "fi\n";
 #else
 	out << "pkill -9 -x ts3client_linux_amd64 2>/dev/null || true\n";

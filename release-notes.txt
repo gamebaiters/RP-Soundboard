@@ -1,3 +1,34 @@
+GameBaiters Soundboard v2.1.2
+=============================
+
+Hotfix release on top of v2.1.1.
+
+---------------------------------------------------------------------
+WAV / PCM PLAYBACK FIX
+---------------------------------------------------------------------
+* WAV files (and other raw PCM-coded audio) now play correctly again.
+  The container leaves the channel layout marked as "unspecified" with
+  only the channel count populated; the v2.1.1 filter graph passed
+  that label through verbatim and downstream filters then dropped
+  every decoded frame, so playback ran silently. The layout is now
+  normalised to a real stereo / mono mask before the filter chain so
+  every audio path matches.
+
+---------------------------------------------------------------------
+MACOS AUTO-UPDATER
+---------------------------------------------------------------------
+* macOS auto-update was downloading the Windows .ts3_plugin and trying
+  to extract it - the install silently failed and the old plugin
+  stayed in place. The updater now picks the correct .ts3_plugin
+  artefact for the running OS (Windows / Linux / macOS) directly from
+  the version manifest.
+* macOS install helper now relaunches TeamSpeak 3 automatically after
+  the new plugin is in place, surfaces a native success notification,
+  and shows an actionable dialog with the download path if the
+  install fails.
+
+=====================================================================
+
 GameBaiters Soundboard v2.1.1
 =============================
 

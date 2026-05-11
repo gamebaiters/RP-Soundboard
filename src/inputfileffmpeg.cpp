@@ -45,8 +45,12 @@ extern "C"
 #define OUTPUT_FORMAT AV_SAMPLE_FMT_S16
 
 // ===== FILE DEBUG LOGGING =====
-// Set to 1 to enable debug log file, 0 to disable
-#define RPSB_FILE_DEBUG 0
+// Compile-time gate. Always 1 in shipping builds so the runtime
+// checkbox (model->setLogsEnabled -> g_rpsbLogsEnabled) actually
+// controls whether bytes hit the disk. With this at 0 every dbgLog
+// would compile to a no-op and the user's "Write debug log file"
+// checkbox would have nothing to switch on.
+#define RPSB_FILE_DEBUG 1
 
 #if RPSB_FILE_DEBUG
 #include <cstdio>
@@ -478,9 +482,24 @@ int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
 	if (pitch < 0.01) pitch = 1.0;
 	if (speed < 0.01) speed = 1.0;
 
-	dbgLog("buildFilterGraph(allowPitch=%d) pitch=%.4f speed=%.4f reverb=%.3f codecSR=%d outSR=%d",
+	// Source of truth for the source PCM parameters is AVCodecParameters
+	// on the stream, NOT m_codecCtx. For containers where the container
+	// holds the parameters (M4A / MP4 / AAC) `avcodec_parameters_to_context`
+	// has been observed to leave the destination codec context with
+	// sample_rate=1 and an uninitialised ch_layout. The codecpar struct
+	// is populated by avformat_find_stream_info and is correct - read
+	// from there.
+	AVCodecParameters *par = m_fmtCtx ? m_fmtCtx->streams[m_streamIndex]->codecpar : nullptr;
+	int srcSampleRate = par ? par->sample_rate : 0;
+	if (srcSampleRate <= 0 && m_codecCtx) srcSampleRate = m_codecCtx->sample_rate;
+	enum AVSampleFormat srcFmt = (par && par->format != AV_SAMPLE_FMT_NONE)
+	                           ? (enum AVSampleFormat)par->format
+	                           : (m_codecCtx ? m_codecCtx->sample_fmt : AV_SAMPLE_FMT_S16);
+
+	dbgLog("buildFilterGraph(allowPitch=%d) pitch=%.4f speed=%.4f reverb=%.3f codecSR=%d (par=%d) outSR=%d",
 	       allowPitch, pitch, speed, m_reverbMix,
-	       m_codecCtx ? m_codecCtx->sample_rate : 0, m_outputSamplerate);
+	       m_codecCtx ? m_codecCtx->sample_rate : 0,
+	       par ? par->sample_rate : 0, m_outputSamplerate);
 
 	if (m_filterGraph)
 		avfilter_graph_free(&m_filterGraph);
@@ -505,30 +524,48 @@ int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
 	// codecRate*pitch so the downstream aresample resamples from the
 	// "wrong" rate back to the real rate — identical to asetrate but
 	// works even when asetrate is not compiled in.
-	int declaredSR = m_codecCtx->sample_rate;
+	int declaredSR = srcSampleRate;
 	if (usePitch && !useAsetrate) {
-		declaredSR = (int)(m_codecCtx->sample_rate * pitch);
-		dbgLog("  pitch via abuffer rate lie: declared=%d real=%d", declaredSR, m_codecCtx->sample_rate);
+		declaredSR = (int)(srcSampleRate * pitch);
+		dbgLog("  pitch via abuffer rate lie: declared=%d real=%d", declaredSR, srcSampleRate);
 	}
 
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59, 37, 100)
     char ch_layout_str[128];
-    av_channel_layout_describe(&m_codecCtx->ch_layout, ch_layout_str, sizeof(ch_layout_str));
+    // Prefer codecpar's ch_layout - it's authoritative. Fall back to
+    // codec context only if codecpar's layout is uninitialised.
+    AVChannelLayout *srcLayout = nullptr;
+    if (par && par->ch_layout.nb_channels > 0 && par->ch_layout.nb_channels <= 64)
+        srcLayout = &par->ch_layout;
+    else if (m_codecCtx && m_codecCtx->ch_layout.nb_channels > 0 && m_codecCtx->ch_layout.nb_channels <= 64)
+        srcLayout = &m_codecCtx->ch_layout;
+
+    if (srcLayout) {
+        av_channel_layout_describe(srcLayout, ch_layout_str, sizeof(ch_layout_str));
+    } else {
+        // Last resort: pretend stereo. The aformat filter later in the
+        // chain forces stereo so the WRONG label here gets corrected.
+        snprintf(ch_layout_str, sizeof(ch_layout_str), "stereo");
+        dbgLog("  WARNING: no usable channel layout, defaulting to stereo");
+    }
     snprintf(args, sizeof(args),
 			"time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=%s",
 			m_fmtCtx->streams[m_streamIndex]->time_base.num,
 			m_fmtCtx->streams[m_streamIndex]->time_base.den,
 			declaredSR,
-			av_get_sample_fmt_name(m_codecCtx->sample_fmt),
+			av_get_sample_fmt_name(srcFmt),
 			ch_layout_str);
 #else
+	uint64_t srcMask = (m_codecCtx && m_codecCtx->channel_layout)
+	                 ? m_codecCtx->channel_layout
+	                 : (uint64_t)AV_CH_LAYOUT_STEREO;
 	snprintf(args, sizeof(args),
 			"time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%" PRIx64,
 			m_fmtCtx->streams[m_streamIndex]->time_base.num,
 			m_fmtCtx->streams[m_streamIndex]->time_base.den,
 			declaredSR,
-			av_get_sample_fmt_name(m_codecCtx->sample_fmt),
-			m_codecCtx->channel_layout);
+			av_get_sample_fmt_name(srcFmt),
+			srcMask);
 #endif
 
 	m_abufferDeclaredRate = declaredSR;
@@ -604,12 +641,12 @@ int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
 	std::string filters;
 
 	if (useAsetrate) {
-		int newRate = (int)(m_codecCtx->sample_rate * pitch);
-		dbgLog("  pitch via asetrate=%d, aresample=%d", newRate, m_codecCtx->sample_rate);
-		filters += "asetrate=" + std::to_string(newRate) + ",aresample=" + std::to_string(m_codecCtx->sample_rate) + ",";
+		int newRate = (int)(srcSampleRate * pitch);
+		dbgLog("  pitch via asetrate=%d, aresample=%d", newRate, srcSampleRate);
+		filters += "asetrate=" + std::to_string(newRate) + ",aresample=" + std::to_string(srcSampleRate) + ",";
 	} else if (usePitch) {
-		dbgLog("  pitch via abuffer rate lie + aresample=%d", m_codecCtx->sample_rate);
-		filters += "aresample=" + std::to_string(m_codecCtx->sample_rate) + ",";
+		dbgLog("  pitch via abuffer rate lie + aresample=%d", srcSampleRate);
+		filters += "aresample=" + std::to_string(srcSampleRate) + ",";
 	}
 
 	double t = usePitch ? (speed / pitch) : speed;
@@ -771,7 +808,62 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 	dbgLog("  codec found: %s (%s)", codec->name, codec->long_name ? codec->long_name : "?");
 
 	m_codecCtx = avcodec_alloc_context3(codec);
-	avcodec_parameters_to_context(m_codecCtx, m_fmtCtx->streams[m_streamIndex]->codecpar);
+	if (!m_codecCtx) {
+		logError("Cannot allocate codec context");
+		dbgLog("  FAILED: avcodec_alloc_context3 returned NULL");
+		_close();
+		return -1;
+	}
+	{
+		int parRet = avcodec_parameters_to_context(m_codecCtx, m_fmtCtx->streams[m_streamIndex]->codecpar);
+		dbgLog("  avcodec_parameters_to_context returned %d", parRet);
+		if (parRet < 0) {
+			char errbuf[128]; av_strerror(parRet, errbuf, sizeof(errbuf));
+			logError("avcodec_parameters_to_context: %s", errbuf);
+			_close();
+			return -1;
+		}
+	}
+
+	// Pull authoritative source PCM parameters from codecpar (populated
+	// by avformat_find_stream_info) rather than relying on m_codecCtx -
+	// for M4A/AAC inputs we have observed parameters_to_context leaving
+	// m_codecCtx->sample_rate / ch_layout uninitialised even though
+	// codecpar holds the correct values. Force-copy back into m_codecCtx
+	// before avcodec_open2 so the decoder sees sane state and reject the
+	// file cleanly if BOTH sides are garbage (prevents downstream
+	// avcodec_free_context segfaults inside the AAC decoder teardown).
+	{
+		AVCodecParameters *par = m_fmtCtx->streams[m_streamIndex]->codecpar;
+		int parRate = par ? par->sample_rate : 0;
+		if (parRate >= 1000 && parRate <= 384000)
+			m_codecCtx->sample_rate = parRate;
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59, 37, 100)
+		if (par && par->ch_layout.nb_channels >= 1 && par->ch_layout.nb_channels <= 64) {
+			av_channel_layout_uninit(&m_codecCtx->ch_layout);
+			av_channel_layout_copy(&m_codecCtx->ch_layout, &par->ch_layout);
+		}
+		int srcChannels = m_codecCtx->ch_layout.nb_channels;
+#else
+		if (par && par->channels >= 1 && par->channels <= 64)
+			m_codecCtx->channels = par->channels;
+		int srcChannels = m_codecCtx->channels;
+#endif
+		int srcRate = m_codecCtx->sample_rate;
+		if (srcRate < 1000 || srcRate > 384000 || srcChannels < 1 || srcChannels > 64) {
+			logError("Invalid codec parameters: rate=%d channels=%d", srcRate, srcChannels);
+			dbgLog("  FAILED: bogus codec parameters rate=%d channels=%d (parRate=%d parCh=%d)",
+			       srcRate, srcChannels, par ? par->sample_rate : 0,
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59, 37, 100)
+			       par ? par->ch_layout.nb_channels : 0
+#else
+			       par ? par->channels : 0
+#endif
+			);
+			_close();
+			return -1;
+		}
+	}
 
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59, 37, 100)
     av_channel_layout_default(&m_codecCtx->ch_layout, m_codecCtx->ch_layout.nb_channels);
@@ -786,6 +878,27 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 	if(LogFFmpegError(ret, "Cannot open codec") < 0)
 	{
 		dbgLog("  FAILED to open codec");
+		_close();
+		return -1;
+	}
+
+	// Post-open2 validation. open2 may pull parameters out of the codec's
+	// extradata so values that were garbage in codecpar can become correct
+	// here; conversely, if they STILL look wrong the decoder will fail
+	// catastrophically deeper in the pipeline. Bail cleanly so the host
+	// (TS3) never sees a libavcodec abort.
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59, 37, 100)
+	int postOpenChannels = m_codecCtx->ch_layout.nb_channels;
+#else
+	int postOpenChannels = m_codecCtx->channels;
+#endif
+	int postOpenRate = m_codecCtx->sample_rate;
+	if (postOpenRate < 1000 || postOpenRate > 384000 ||
+	    postOpenChannels < 1 || postOpenChannels > 64) {
+		logError("Codec produced invalid parameters: rate=%d channels=%d",
+		         postOpenRate, postOpenChannels);
+		dbgLog("  FAILED: post-open2 codec parameters still invalid (rate=%d channels=%d) - aborting before filter graph",
+		       postOpenRate, postOpenChannels);
 		_close();
 		return -1;
 	}

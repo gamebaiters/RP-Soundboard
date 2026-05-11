@@ -128,8 +128,14 @@ Channel::Channel(int channelId, QWidget *parent)
         "  - Paulstretch (extreme phase-randomised time-stretch)\n"
         "Settings persist per channel and are bundled into macros."));
 
-    m_exportBtn = new QPushButton(QIcon(":/icon/img/stoparrow_32.png"), tr("Export"), this);
+    // Text-only button (the previous stoparrow icon was the wrong art and
+    // forced the channel row taller). Same fixed height as the sandbox
+    // button so the title row stays compact.
+    m_exportBtn = new QPushButton(tr("Export"), this);
     m_exportBtn->setFixedHeight(22);
+    m_exportBtn->setMinimumWidth(70);
+    m_exportBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    m_exportBtn->setStyleSheet("QPushButton { padding: 2px 10px; }");
     m_exportBtn->setToolTip(tr("Export this channel's audio with all DSP effects applied to a WAV file"));
     m_exportBtn->setVisible(false);
     connect(m_exportBtn, &QPushButton::clicked, this, [this]{ emit exportRequested(m_id); });
@@ -232,7 +238,12 @@ void Channel::setMeterVisible(bool on) {
 
 void Channel::setSandboxFeatureEnabled(bool on) {
     m_sandboxFeatureEnabled = on;
+    // Master switch hides BOTH the per-channel FX checkbox and the
+    // sandbox button so the entire sandbox UI disappears from the row.
+    // The persisted m_sandbox value is left untouched so a later
+    // re-enable restores whatever each channel had before.
     if (m_sandboxBtn) m_sandboxBtn->setVisible(on);
+    if (m_sandboxEnableCheck) m_sandboxEnableCheck->setVisible(on);
     if (!on && m_sandboxDialog && m_sandboxDialog->isVisible())
         m_sandboxDialog->close();
 }

@@ -16,6 +16,7 @@
 #include "config_io.h"
 #include "channel_state_persistence.h"
 #include "audio_exporter.h"
+#include "export_progress_dialog.h"
 
 #include "../ConfigModel.h"
 #include "../samples.h"
@@ -26,6 +27,7 @@
 
 #include <QMessageBox>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QClipboard>
@@ -195,10 +197,29 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
     QObject::connect(w, &SettingsWindow::logsEnabledChanged, [model](bool v){
         model->setLogsEnabled(v);
     });
-    QObject::connect(w, &SettingsWindow::activeProfileChanged, [model, page](int idx){
+    QObject::connect(w, &SettingsWindow::activeProfileChanged, [model, page, sampler](int idx){
+        // Flush every channel's sandbox state to persistence BEFORE the
+        // profile switch so it survives any UI rebuild the new config
+        // triggers, then re-push the saved state to both widget + sampler
+        // afterwards. Without this, switching profiles wiped per-channel
+        // EQ / spatial / reverb without warning.
+        for (int i = 0; i < page->channels().size(); ++i)
+            ChannelStatePersistence::saveState(i, page->channels().at(i)->state());
         model->setConfiguration(idx);
         pushSettingsToWindow(page, model);
         pushSoundsToGrid(page, model);
+        for (int i = 0; i < page->channels().size(); ++i) {
+            auto *ch = page->channels().at(i);
+            ChannelState st;
+            if (ChannelStatePersistence::loadState(i, st))
+                ch->setSandboxState(st.sandbox);
+            if (sampler) {
+                if (ch->sandboxState().enabled)
+                    sampler->setSlotSandboxState(i, ch->sandboxState());
+                else
+                    sampler->clearSlotSandbox(i);
+            }
+        }
     });
     QObject::connect(w, &SettingsWindow::exportProfileRequested, [w, model](int idx){
         QString p = QFileDialog::getSaveFileName(w, QObject::tr("Export profile %1").arg(idx + 1),
@@ -439,10 +460,18 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
         };
 
         if (info->isMacro && !info->macroState.isEmpty()) {
-            // Save pre-macro state for restore (section 9B)
+            // Save pre-macro state for restore. Snapshot the LIVE playback
+            // position from the sampler (Channel::state() always reports
+            // 0.0 because the widget doesn't track elapsed time) so the
+            // restore can resume each channel at the exact second the user
+            // fired the macro.
             s_preMacroStates.clear();
-            for (auto *ch : page->channels())
-                s_preMacroStates.append(ch->state());
+            for (int chi = 0; chi < page->channels().size(); ++chi) {
+                auto *chSnap = page->channels().at(chi);
+                ChannelState snap = chSnap->state();
+                if (sampler) snap.playbackPos = sampler->getPosition(chi);
+                s_preMacroStates.append(snap);
+            }
             s_preMacroChannelCount = page->channels().size();
             s_macroActive = true;
             page->restoreMacroBtn()->setVisible(true);
@@ -957,10 +986,12 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     QObject::connect(page, &MainPage::channelAdded, [page, model](int){
         if (model->getRestoreSession())
             ChannelStatePersistence::saveChannelCount(page->channels().size());
+        page->updateChannelsAreaHeight(!model->getHideWaveform());
     });
     QObject::connect(page, &MainPage::channelRemoved, [page, model](int){
         if (model->getRestoreSession())
             ChannelStatePersistence::saveChannelCount(page->channels().size());
+        page->updateChannelsAreaHeight(!model->getHideWaveform());
     });
     page->updateChannelsAreaHeight(!model->getHideWaveform());
 
@@ -1005,10 +1036,26 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
 
     // Profile switcher wiring
     QObject::connect(page->profileGroup(), qOverload<int>(&QButtonGroup::idClicked),
-                     page, [model, page](int idx){
+                     page, [model, page, sampler](int idx){
+        // Same save/restore dance as the settings-window profile combo:
+        // persist per-channel sandbox state across the switch.
+        for (int i = 0; i < page->channels().size(); ++i)
+            ChannelStatePersistence::saveState(i, page->channels().at(i)->state());
         model->setConfiguration(idx);
         pushSettingsToWindow(page, model);
         pushSoundsToGrid(page, model);
+        for (int i = 0; i < page->channels().size(); ++i) {
+            auto *ch = page->channels().at(i);
+            ChannelState st;
+            if (ChannelStatePersistence::loadState(i, st))
+                ch->setSandboxState(st.sandbox);
+            if (sampler) {
+                if (ch->sandboxState().enabled)
+                    sampler->setSlotSandboxState(i, ch->sandboxState());
+                else
+                    sampler->clearSlotSandbox(i);
+            }
+        }
         // Re-apply search filter (bug fix #4)
         QString currentFilter = page->searchBar()->filter();
         if (!currentFilter.isEmpty())
@@ -1029,10 +1076,38 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     QObject::connect(page->restoreMacroBtn(), &QPushButton::clicked, page,
                      [page, sampler]{
         if (!s_macroActive) return;
+        // Stop everything the macro started before restoring - otherwise
+        // the previous slot keeps playing the macro file while we reload
+        // the original.
+        if (sampler) sampler->stopPlayback(-1);
+
         while (page->channels().size() > s_preMacroChannelCount && page->channels().size() > 1)
             page->removeChannel(page->channels().size() - 1);
+
         for (int i = 0; i < s_preMacroStates.size() && i < page->channels().size(); ++i) {
-            page->channels().at(i)->applyState(s_preMacroStates[i]);
+            const ChannelState &st = s_preMacroStates[i];
+            auto *ch = page->channels().at(i);
+            ch->applyState(st);
+            // Replay the audio that was loaded before the macro fired,
+            // seek to the captured live position, then pause so the
+            // restore is a quiet undo and the user can resume manually.
+            if (!st.filename.isEmpty() && sampler) {
+                SoundInfo info;
+                info.filename = st.filename;
+                if (sampler->playSoundInSlot(i, info, false)) {
+                    sampler->setSlotVolumeLocal (i, st.volumeLocal);
+                    sampler->setSlotVolumeRemote(i, st.volumeRemote);
+                    sampler->setSlotPitchFactor (i, static_cast<float>(std::pow(3.0, st.pitch / 100.0)));
+                    sampler->setSlotSpeedFactor (i, static_cast<float>(std::pow(3.0, st.speed / 100.0)));
+                    sampler->setSlotReverbMix   (i, st.reverb / 100.0f);
+                    sampler->setSlotSandboxState(i, st.sandbox);
+                    if (st.playbackPos > 0.0)
+                        sampler->seek(st.playbackPos, i);
+                    sampler->pausePlayback(i);
+                }
+            } else if (sampler) {
+                sampler->setSlotSandboxState(i, st.sandbox);
+            }
         }
         s_macroActive = false;
         page->restoreMacroBtn()->setVisible(false);
@@ -1068,14 +1143,27 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     }
 
     // ===== Audio sandbox wiring =====
-    auto applyChannelSandboxFlags = [page, model](){
+    auto applyChannelSandboxFlags = [page, model, sampler](){
         bool sandbox = model->getAudioSandboxEnabled();
         bool meter   = model->getAudioMeterVisible();
         bool exprt   = model->getAudioExportEnabled();
-        for (auto *ch : page->channels()) {
+        for (int i = 0; i < page->channels().size(); ++i) {
+            auto *ch = page->channels().at(i);
             ch->setSandboxFeatureEnabled(sandbox);
             ch->setMeterVisible(meter);
             ch->setExportVisible(exprt);
+            // Master switch gates the per-slot DSP. When OFF, drop every
+            // slot's DSP so audio fully bypasses the sandbox chain.
+            // When ON, only push state for channels whose per-channel
+            // FX checkbox is checked - leaving the other slots with no
+            // DSP at all (zero CPU + memory cost, matches pre-sandbox
+            // playback path exactly).
+            if (sampler) {
+                if (sandbox && ch->sandboxState().enabled)
+                    sampler->setSlotSandboxState(i, ch->sandboxState());
+                else
+                    sampler->clearSlotSandbox(i);
+            }
         }
     };
 
@@ -1111,29 +1199,71 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         QObject::connect(ch, &Channel::sandboxResetRequested, [sampler](int slot){
             if (sampler) sampler->clearSlotSandbox(slot);
         });
-        QObject::connect(ch, &Channel::exportRequested, [page](int slot){
-            auto *ch = page->channelAt(slot);
-            if (!ch) return;
-            QString src = ch->waveform()->filename();
+        QObject::connect(ch, &Channel::exportRequested, page, [page, model](int slot){
+            // slot here is Channel::m_id which equals the channel's
+            // index in MainPage::channels() so long as channels are
+            // appended (current behaviour). channelAt(slot) double-
+            // guards against the case where the channel was removed
+            // between click + slot-dispatch.
+            auto *src_ch = page->channelAt(slot);
+            if (!src_ch) return;
+            QString src = src_ch->waveform()->filename();
             if (src.isEmpty()) {
                 QMessageBox::information(page, QObject::tr("Export"),
                     QObject::tr("No audio file loaded on this channel."));
                 return;
             }
+            if (!QFileInfo::exists(src)) {
+                QMessageBox::warning(page, QObject::tr("Export"),
+                    QObject::tr("Source file no longer exists:\n%1").arg(src));
+                return;
+            }
             QString dst = QFileDialog::getSaveFileName(page, QObject::tr("Export audio with DSP"),
                 QString(), QObject::tr("WAV files (*.wav)"));
             if (dst.isEmpty()) return;
-            auto *exporter = new AudioExporter(src, dst, ch->sandboxState(), 48000.0, page);
-            QObject::connect(exporter, &AudioExporter::exportFinished,
-                             page, [page, exporter](bool ok, const QString &err){
-                if (ok)
-                    QMessageBox::information(page, QObject::tr("Export"),
-                        QObject::tr("Export completed successfully."));
-                else
-                    QMessageBox::warning(page, QObject::tr("Export"),
-                        QObject::tr("Export failed: %1").arg(err));
-                exporter->deleteLater();
-            });
+            if (!dst.endsWith(QStringLiteral(".wav"), Qt::CaseInsensitive))
+                dst += QStringLiteral(".wav");
+            // Snapshot the channel's LIVE settings - same factor scaling
+            // the sampler slot uses (3^(slider/100)) so the exported WAV
+            // matches the audible signal. Sandbox state is taken by
+            // value so subsequent slider tweaks during the export don't
+            // mutate the bake.
+            const float pitchFactor  = static_cast<float>(std::pow(3.0, src_ch->fx()->pitch()  / 100.0));
+            const float speedFactor  = static_cast<float>(std::pow(3.0, src_ch->fx()->speed()  / 100.0));
+            const float reverbMix    = src_ch->fx()->reverb() / 100.0f;
+            const bool  sandboxOn    = model->getAudioSandboxEnabled() && src_ch->sandboxState().enabled;
+            // No QObject parent: the thread owns its own lifetime and
+            // tears down via the QThread::finished -> deleteLater chain.
+            // Re-parenting onto `page` risked the parent dying mid-run
+            // and tearing the worker down while FFmpeg was still in
+            // libavformat.
+            auto *exporter = new AudioExporter(src, dst,
+                                               pitchFactor, speedFactor, reverbMix,
+                                               src_ch->sandboxState(), sandboxOn,
+                                               48000.0, nullptr);
+            // Floating themed progress card. Lives independently of
+            // the exporter (no parent on AudioExporter); the dialog is
+            // parented to `page` so it follows the soundboard window.
+            auto *progress = new ExportProgressDialog(dst, page);
+            progress->setAttribute(Qt::WA_DeleteOnClose);
+            QObject::connect(exporter, &AudioExporter::progress,
+                             progress, &ExportProgressDialog::setProgress,
+                             Qt::QueuedConnection);
+            QObject::connect(exporter, &AudioExporter::exportFinished, progress,
+                             [progress](bool ok, const QString &err){
+                progress->setFinished(ok, err);
+            }, Qt::QueuedConnection);
+            QObject::connect(progress, &ExportProgressDialog::cancelRequested,
+                             exporter, [exporter]{ exporter->requestInterruption(); });
+            QObject::connect(exporter, &QThread::finished, exporter, &QObject::deleteLater);
+            // If the user closes the dialog mid-encode (Esc / X), make
+            // sure the worker is told to stop so it doesn't keep
+            // writing to a file the user no longer cares about.
+            QObject::connect(progress, &QDialog::rejected, exporter,
+                             [exporter]{ exporter->requestInterruption(); });
+            progress->show();
+            progress->raise();
+            progress->activateWindow();
             exporter->start();
         });
         // Apply current global flags so the new channel respects them
@@ -1153,6 +1283,14 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     sw->setAudioMeterVisible(model->getAudioMeterVisible());
     sw->setAudioExportEnabled(model->getAudioExportEnabled());
     applyChannelSandboxFlags();
+
+    // applyChannelSandboxFlags() above already pushed every channel's
+    // saved sandbox state into its sampler slot (for channels whose
+    // per-channel FX checkbox is checked). connectChannels runs before
+    // wireChannelSandbox is hooked, so any applyState() emit during
+    // restore is lost - the explicit push here closes the gap and is
+    // the fix for "DSP doesn't apply until the user double-toggles
+    // the checkbox after a TS3 restart".
 
     // 25 Hz meter poll: read atomic peak L/R from each slot, push to
     // its channel's ChannelMeter widget.

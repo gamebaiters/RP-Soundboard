@@ -23,7 +23,9 @@
 #include <math.h>
 
 // ===== FILE DEBUG LOGGING =====
-#define RPSB_FILE_DEBUG 0
+// Compile-time gate. Always 1 in shipping builds; the runtime
+// checkbox flips g_rpsbLogsEnabled which is what gates each write.
+#define RPSB_FILE_DEBUG 1
 #if RPSB_FILE_DEBUG
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -158,9 +160,10 @@ void Sampler::setSlotSandboxState(int slot, const SandboxState &s)
 	// On stretch toggle ON, drain whatever the decoder has already
 	// queued in sbPlayback into paulstretch's feed buffer so it has
 	// at least one full window of source ready immediately. Without
-	// this, the user heard ~1-2 seconds of silence (the streaming
-	// buffer warmup) and reported "non funziona". Drain sbCapture
-	// too to avoid backlog while the capture path consumes slowly.
+	// this, ~1-2 seconds of silence leaked through (the streaming
+	// buffer warmup) before stretched output came out. Drain
+	// sbCapture too to avoid backlog while the capture path
+	// consumes slowly.
 	if (s.stretchEnabled && !wasStretchOn) {
 		// Toggle ON => reset stretch state first so the new session
 		// starts cleanly. Without this, the second time the user

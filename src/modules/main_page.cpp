@@ -14,6 +14,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QScrollArea>
+#include <algorithm>
 #include <QToolButton>
 #include <QPushButton>
 #include <QButtonGroup>
@@ -46,9 +47,14 @@ MainPage::MainPage(QWidget *parent)
     setProperty("isGBSoundboard", true);
     m_channelsHost->setObjectName("channelsHost");
     resize(1400, 900);
+    // Allow the user to shrink the window down to a compact dock-style
+    // strip without Qt blocking it on internal sub-widget min sizes.
+    setMinimumSize(480, 320);
 
     m_grid->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    m_grid->setMinimumHeight(300);
+    // Smaller min lets the user shrink the soundboard window down to a
+    // compact strip when they only need the channel row + transport.
+    m_grid->setMinimumHeight(120);
 
     m_channelsLayout->setContentsMargins(0,0,0,0);
     m_channelsLayout->setSpacing(4);
@@ -58,7 +64,11 @@ MainPage::MainPage(QWidget *parent)
     m_channelsScroll->setFrameShape(QFrame::NoFrame);
     m_channelsScroll->setWidget(m_channelsHost);
     m_channelsScroll->setMinimumHeight(130);
-    m_channelsScroll->setMaximumHeight(500);
+    // Max height is set dynamically by updateChannelsAreaHeight so a
+    // single channel always fits without triggering the vertical
+    // scrollbar (one channel + waveform + sandbox btn + meter still
+    // overflows a hard 500px cap). When more channels are added the
+    // area grows up to ~3 channels then starts scrolling.
     m_channelsScroll->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_channelsScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
@@ -181,7 +191,27 @@ void MainPage::refreshTheme() {
 }
 
 void MainPage::updateChannelsAreaHeight(bool waveformVisible) {
-    m_channelsScroll->setMinimumHeight(waveformVisible ? 170 : 100);
+    // Compute height that snugly fits N channels - we use sizeHint of
+    // the host so the scroll area never leaves dead grey space below
+    // the last channel. Falls back to empirical per-channel guesses
+    // before any channel widget has had a chance to lay out.
+    const int n = m_channels.size() > 0 ? m_channels.size() : 1;
+    int hostHint = 0;
+    if (m_channelsHost) {
+        m_channelsHost->adjustSize();
+        hostHint = m_channelsHost->sizeHint().height();
+    }
+    const int perChannelFallback = waveformVisible ? 195 : 110;
+    const int channelsFallback   = n * perChannelFallback + (n > 1 ? (n - 1) * 4 : 0);
+    int target = std::max(hostHint, channelsFallback);
+    // Cap so additional channels start to scroll rather than push the
+    // button grid off-screen.
+    const int hardCap = waveformVisible ? 600 : 340;
+    target = std::min(target, hardCap);
+    const int floor   = waveformVisible ? 150 : 90;
+    target = std::max(target, floor);
+    m_channelsScroll->setMinimumHeight(target);
+    m_channelsScroll->setMaximumHeight(target);
 }
 
 void MainPage::setConnected(bool connected) {

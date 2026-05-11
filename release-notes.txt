@@ -1,3 +1,93 @@
+GameBaiters Soundboard v2.1.1
+=============================
+
+Maintenance + polish release on top of v2.1.0. Fixes a batch of bugs
+reported around the sandbox / macro / profile / export flows and
+adds a brand new themed progress card for the audio exporter.
+
+---------------------------------------------------------------------
+SANDBOX FIXES
+---------------------------------------------------------------------
+* Audio sandbox settings now actually apply at TeamSpeak startup.
+  Previously the per-channel checkbox loaded checked but no DSP was
+  routed to the slot until the user toggled the checkbox twice.
+* "Enable audio sandbox" master switch now hides the per-channel FX
+  checkbox AND the sandbox button when off, and fully bypasses the
+  slot DSP. Re-enabling restores each channel's saved state.
+* Switching profiles no longer wipes per-channel sandbox state. The
+  state is flushed to persistence before the switch and re-applied
+  to both UI and sampler after.
+* Resetting the sandbox or switching channels now correctly re-pushes
+  the sandbox state to the sampler so DSP follows the UI live.
+
+---------------------------------------------------------------------
+MACRO RESTORE
+---------------------------------------------------------------------
+* "Restore pre-macro" button now actually reloads the channel state
+  that was active before the macro fired. The pre-macro snapshot
+  captures live playback position from the sampler so each channel
+  resumes at the exact second the macro was triggered. Audio reloads
+  paused so the user can resume manually.
+
+---------------------------------------------------------------------
+EXPORT FLOW
+---------------------------------------------------------------------
+* Export button now uses a text-only label with a fixed compact size
+  so it no longer stretches the channel row taller than the other
+  controls. The previous mismatched stop-arrow icon was removed.
+* Crash on Export click resolved. The exporter is hardened against
+  malformed inputs (heap-allocated DSP, file existence pre-check,
+  per-thread try/catch, clean QThread::finished teardown).
+* Export now bakes the FULL live signal chain into the WAV:
+  - pitch / speed / reverb from the channel FX panel,
+  - every active sandbox stage (EQ / spatial / compressor / chorus
+    / flanger / flangus / phaser / saturator / delay / room reverb
+    / limiter),
+  - Paulstretch time-stretch when enabled,
+  - in the exact pipeline order the user dragged in the sandbox
+    dialog.
+* New floating progress card. Themed glyph + bar + live percentage
+  while encoding; morphs into a success / failure card at the end
+  with a clean dismiss button. Cancel mid-encode is honoured.
+
+---------------------------------------------------------------------
+CHANNEL LAYOUT
+---------------------------------------------------------------------
+* Single channel with all features enabled (waveform + transport +
+  sandbox + export + meter) no longer triggers a vertical scrollbar.
+  The channel area now sizes itself to fit the actual content; the
+  scrollbar only appears once enough channels are stacked to justify
+  it. The grey dead space below the last channel is gone.
+* Soundboard window is now resizable down to a small docked strip
+  (480×320). Button grid + channel area both shrink gracefully.
+
+---------------------------------------------------------------------
+PLAYBACK ROBUSTNESS
+---------------------------------------------------------------------
+* Defensive validation against malformed codec parameters before
+  the decoder is fully opened, so a corrupt audio file no longer
+  has a chance to take down the TeamSpeak client.
+* Source PCM parameters (sample rate, channel layout) are now read
+  authoritatively from the container's codec parameters; this fixes
+  rare cases where playback silently failed with no audible output.
+
+---------------------------------------------------------------------
+LOGGING
+---------------------------------------------------------------------
+* Debug log file ("Write debug log file" in Settings > Logging) now
+  actually writes when enabled. The compile-time gate that silently
+  skipped every log line in release builds has been lifted; the
+  runtime checkbox is now the sole switch.
+
+---------------------------------------------------------------------
+INTERNAL CLEANUP
+---------------------------------------------------------------------
+* Misc consistency fixes around channel state persistence on
+  add / remove / profile switch.
+* Tightened lifetime management in the audio exporter worker thread.
+
+=====================================================================
+
 GameBaiters Soundboard v2.1.0
 =============================
 

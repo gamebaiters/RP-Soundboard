@@ -590,13 +590,28 @@ jobs:
           name: ts3plugin
           path: rp_soundboard_fx_*.ts3_plugin
 
-      - name: Read release notes file
+      - name: Extract release notes for this version only
         id: notes
         run: |
+          VER="${{ steps.ver.outputs.VERSION }}"
           if [ -f release-notes.txt ]; then
-              cp release-notes.txt /tmp/notes.txt
+              # Extract only the section for the current version:
+              # from "GameBaiters Soundboard vX.Y.Z" up to (but not including)
+              # the next "=====" separator that starts the previous version.
+              awk -v ver="$VER" '
+                BEGIN { found=0; done=0 }
+                /^GameBaiters Soundboard v/ {
+                    if (found) { done=1; exit }
+                    if (index($0, "v" ver)) found=1
+                }
+                found && !done { print }
+              ' release-notes.txt > /tmp/notes.txt
+              # If extraction failed (empty), fall back to full file
+              if [ ! -s /tmp/notes.txt ]; then
+                  echo "Release v${VER}" > /tmp/notes.txt
+              fi
           else
-              echo "Release ${{ steps.ver.outputs.VERSION }}" > /tmp/notes.txt
+              echo "Release v${VER}" > /tmp/notes.txt
           fi
           echo "NOTES_PATH=/tmp/notes.txt" >> "$GITHUB_OUTPUT"
 

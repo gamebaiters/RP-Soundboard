@@ -49,7 +49,6 @@ private:
 	void setTalkTransMode();
 	void setPlayTransMode();
 	talk_state_e previousTalkState;
-	talk_state_e defaultTalkState;
 	talk_state_e currentTalkState;
 	uint64 activeServerId;
 	uint64 playingServerId;

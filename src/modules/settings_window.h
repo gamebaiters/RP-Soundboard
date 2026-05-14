@@ -1,7 +1,5 @@
-// SettingsWindow - separate top-level window for global options. Replaces
-// the inline settingsWidget + configsWidget in config_qt. Each option is
-// kept as its own isolated child widget, grouped by section using the
-// existing ExpandableSection container.
+// SettingsWindow - separate top-level window for global options. Each category
+// is wrapped in an ExpandableSection that collapses with an arrow click.
 
 #pragma once
 
@@ -12,6 +10,7 @@ class QCheckBox;
 class QSpinBox;
 class QPushButton;
 class QGroupBox;
+class ExpandableSection;
 
 class SettingsWindow : public QDialog {
     Q_OBJECT
@@ -44,6 +43,18 @@ public:
     bool disableHotkeys() const;
     int  rows() const;
     int  cols() const;
+    bool adaptWaveformToFx() const;
+
+    // Reset behaviour flags
+    bool resetChVolume() const;
+    bool resetChFx() const;
+    bool resetChFile() const;
+    bool resetChSandbox() const;
+    bool resetAllRemoveExtra() const;
+    bool resetAllVolume() const;
+    bool resetAllFx() const;
+    bool resetAllFiles() const;
+    bool resetAllSandbox() const;
 
 public slots:
     void setEarrapeProtection(bool on);
@@ -65,6 +76,17 @@ public slots:
     void setDisableHotkeys(bool on);
     void setRows(int r);
     void setCols(int c);
+    void setAdaptWaveformToFx(bool on);
+
+    void setResetChVolume(bool on);
+    void setResetChFx(bool on);
+    void setResetChFile(bool on);
+    void setResetChSandbox(bool on);
+    void setResetAllRemoveExtra(bool on);
+    void setResetAllVolume(bool on);
+    void setResetAllFx(bool on);
+    void setResetAllFiles(bool on);
+    void setResetAllSandbox(bool on);
 
 signals:
     void earrapeProtectionChanged(bool);
@@ -95,6 +117,17 @@ signals:
     void exportRequested();
     void importRequested();
     void resetAllHotkeysRequested();
+    void adaptWaveformToFxChanged(bool);
+
+    void resetChVolumeChanged(bool);
+    void resetChFxChanged(bool);
+    void resetChFileChanged(bool);
+    void resetChSandboxChanged(bool);
+    void resetAllRemoveExtraChanged(bool);
+    void resetAllVolumeChanged(bool);
+    void resetAllFxChanged(bool);
+    void resetAllFilesChanged(bool);
+    void resetAllSandboxChanged(bool);
 
 private:
     QCheckBox   *m_earrape;
@@ -107,7 +140,7 @@ private:
     QCheckBox   *m_sandboxEnabled = nullptr;
     QCheckBox   *m_meterVisible   = nullptr;
     QCheckBox   *m_exportEnabled  = nullptr;
-    QPushButton *m_resetAllSandbox = nullptr;
+    QPushButton *m_resetAllSandboxBtn = nullptr;
     class QComboBox *m_profileCombo;
     QPushButton *m_profileExport;
     QPushButton *m_profileImport;
@@ -141,4 +174,16 @@ private:
     QPushButton *m_import;
     QPushButton *m_resetHotkeys;
     QPushButton *m_close;
+    QCheckBox   *m_adaptWaveform = nullptr;
+
+    // Reset behaviour
+    QCheckBox   *m_resetChVolume     = nullptr;
+    QCheckBox   *m_resetChFx         = nullptr;
+    QCheckBox   *m_resetChFile       = nullptr;
+    QCheckBox   *m_resetChSandbox    = nullptr;
+    QCheckBox   *m_resetAllRemoveExtra = nullptr;
+    QCheckBox   *m_resetAllVolume    = nullptr;
+    QCheckBox   *m_resetAllFx        = nullptr;
+    QCheckBox   *m_resetAllFiles     = nullptr;
+    QCheckBox   *m_resetAllSandbox   = nullptr;
 };

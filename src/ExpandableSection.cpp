@@ -1,7 +1,7 @@
-﻿
+
 // Code posted by StackOverflow user 'x squared' here: http://stackoverflow.com/a/37119983/2416499
 // Someone also put his code into a github repository: https://github.com/Elypson/qt-collapsible-section
-// Slightly modified.
+// Extended for GameBaiters Soundboard: instant expand, themed styling.
 
 
 #include "ExpandableSection.h"
@@ -11,7 +11,8 @@ ExpandableSection::ExpandableSection(const QString &title, int animationDuration
 	QWidget(parent),
 	animationDuration(animationDuration)
 {
-	toggleButton.setStyleSheet("QToolButton { border: none; }");
+	toggleButton.setStyleSheet(
+		"QToolButton { border: none; font-weight: bold; font-size: 12px; padding: 4px 2px; }");
 	toggleButton.setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
 	toggleButton.setArrowType(Qt::ArrowType::RightArrow);
 	toggleButton.setText(title);
@@ -47,19 +48,19 @@ void ExpandableSection::setContentLayout(QLayout & contentLayout)
 {
 	delete contentArea.layout();
 	contentArea.setLayout(&contentLayout);
-	const auto collapsedHeight = sizeHint().height() - contentArea.maximumHeight();
-	auto contentHeight = contentLayout.sizeHint().height();
-	for (int i = 0; i < toggleAnimation.animationCount() - 1; ++i) 
+	m_collapsedHeight = sizeHint().height() - contentArea.maximumHeight();
+	m_contentHeight = contentLayout.sizeHint().height();
+	for (int i = 0; i < toggleAnimation.animationCount() - 1; ++i)
 	{
 		QPropertyAnimation *anim = static_cast<QPropertyAnimation *>(toggleAnimation.animationAt(i));
 		anim->setDuration(animationDuration);
-		anim->setStartValue(collapsedHeight);
-		anim->setEndValue(collapsedHeight + contentHeight);
+		anim->setStartValue(m_collapsedHeight);
+		anim->setEndValue(m_collapsedHeight + m_contentHeight);
 	}
 	QPropertyAnimation * contentAnimation = static_cast<QPropertyAnimation *>(toggleAnimation.animationAt(toggleAnimation.animationCount() - 1));
 	contentAnimation->setDuration(animationDuration);
 	contentAnimation->setStartValue(0);
-	contentAnimation->setEndValue(contentHeight);
+	contentAnimation->setEndValue(m_contentHeight);
 }
 
 

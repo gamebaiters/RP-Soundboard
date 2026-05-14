@@ -187,6 +187,22 @@ private:
     QSlider *m_limiterRatio     = nullptr; QLabel *m_limiterRatioLabel     = nullptr;
     QSlider *m_limiterGate      = nullptr; QLabel *m_limiterGateLabel      = nullptr;
 
+    // Bitcrusher
+    QCheckBox *m_bitcrushEnable = nullptr;
+    QSlider   *m_bitcrushBits = nullptr; QLabel *m_bitcrushBitsLabel = nullptr;
+    QSlider   *m_bitcrushRate = nullptr; QLabel *m_bitcrushRateLabel = nullptr;
+
+    // Mono
+    QCheckBox *m_monoEnable = nullptr;
+
+    // Generation Loss
+    QCheckBox   *m_genLossEnable = nullptr;
+    QSlider     *m_genLossGens = nullptr; QLabel *m_genLossGensLabel = nullptr;
+    QPushButton *m_resetGenLoss = nullptr;
+
+    // Bitcrusher preset
+    QComboBox *m_bitcrushPreset = nullptr;
+
     // DSP modules container (master gating)
     QGroupBox *m_dspGroup = nullptr;
 
@@ -198,7 +214,8 @@ private:
     QPushButton *m_resetFlangus = nullptr;
     QPushButton *m_resetPhaser  = nullptr;
     QPushButton *m_resetDelay   = nullptr;
-    QPushButton *m_resetLimiter = nullptr;
+    QPushButton *m_resetLimiter    = nullptr;
+    QPushButton *m_resetBitcrush  = nullptr;
 
     // Pipeline widget
     class PipelineWidget *m_pipeline = nullptr;

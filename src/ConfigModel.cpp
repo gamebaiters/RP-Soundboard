@@ -63,6 +63,17 @@ ConfigModel::ConfigModel()
 	m_audioSandboxEnabled = true;
 	m_audioMeterVisible = true;
 	m_audioExportEnabled = false;
+	m_adaptWaveformToFx = false;
+
+	m_resetChVolume = true;
+	m_resetChFx = true;
+	m_resetChFile = true;
+	m_resetChSandbox = true;
+	m_resetAllRemoveExtra = true;
+	m_resetAllVolume = true;
+	m_resetAllFx = true;
+	m_resetAllFiles = true;
+	m_resetAllSandbox = true;
 
     m_activeConfig = 0;
 	m_nextUpdateCheck = 0;
@@ -126,6 +137,16 @@ void ConfigModel::readConfig(const QString &file)
 	m_audioSandboxEnabled = settings.value("audio_sandbox_enabled", true).toBool();
 	m_audioMeterVisible   = settings.value("audio_meter_visible", true).toBool();
 	m_audioExportEnabled  = settings.value("audio_export_enabled", false).toBool();
+	m_adaptWaveformToFx   = settings.value("adapt_waveform_to_fx", false).toBool();
+	m_resetChVolume       = settings.value("reset_ch_volume", true).toBool();
+	m_resetChFx           = settings.value("reset_ch_fx", true).toBool();
+	m_resetChFile         = settings.value("reset_ch_file", true).toBool();
+	m_resetChSandbox      = settings.value("reset_ch_sandbox", true).toBool();
+	m_resetAllRemoveExtra = settings.value("reset_all_remove_extra", true).toBool();
+	m_resetAllVolume      = settings.value("reset_all_volume", true).toBool();
+	m_resetAllFx          = settings.value("reset_all_fx", true).toBool();
+	m_resetAllFiles       = settings.value("reset_all_files", true).toBool();
+	m_resetAllSandbox     = settings.value("reset_all_sandbox", true).toBool();
 	m_nextUpdateCheck = settings.value("next_update_check", 0).toUInt();
 
 	// Propagate the logging gate to the C-land writers immediately so
@@ -186,6 +207,16 @@ void ConfigModel::writeConfig(const QString &file)
 	settings.setValue("audio_sandbox_enabled", m_audioSandboxEnabled);
 	settings.setValue("audio_meter_visible", m_audioMeterVisible);
 	settings.setValue("audio_export_enabled", m_audioExportEnabled);
+	settings.setValue("adapt_waveform_to_fx", m_adaptWaveformToFx);
+	settings.setValue("reset_ch_volume", m_resetChVolume);
+	settings.setValue("reset_ch_fx", m_resetChFx);
+	settings.setValue("reset_ch_file", m_resetChFile);
+	settings.setValue("reset_ch_sandbox", m_resetChSandbox);
+	settings.setValue("reset_all_remove_extra", m_resetAllRemoveExtra);
+	settings.setValue("reset_all_volume", m_resetAllVolume);
+	settings.setValue("reset_all_fx", m_resetAllFx);
+	settings.setValue("reset_all_files", m_resetAllFiles);
+	settings.setValue("reset_all_sandbox", m_resetAllSandbox);
 	settings.setValue("next_update_check", m_nextUpdateCheck);
 
 	for (int i = 0; i < NUM_CONFIGS; i++)
@@ -719,4 +750,20 @@ void ConfigModel::setAudioExportEnabled(bool on)
 	m_audioExportEnabled = on;
 	writeConfig();
 }
+
+void ConfigModel::setAdaptWaveformToFx(bool on)
+{
+	m_adaptWaveformToFx = on;
+	writeConfig();
+}
+
+void ConfigModel::setResetChVolume(bool on) { m_resetChVolume = on; writeConfig(); }
+void ConfigModel::setResetChFx(bool on) { m_resetChFx = on; writeConfig(); }
+void ConfigModel::setResetChFile(bool on) { m_resetChFile = on; writeConfig(); }
+void ConfigModel::setResetChSandbox(bool on) { m_resetChSandbox = on; writeConfig(); }
+void ConfigModel::setResetAllRemoveExtra(bool on) { m_resetAllRemoveExtra = on; writeConfig(); }
+void ConfigModel::setResetAllVolume(bool on) { m_resetAllVolume = on; writeConfig(); }
+void ConfigModel::setResetAllFx(bool on) { m_resetAllFx = on; writeConfig(); }
+void ConfigModel::setResetAllFiles(bool on) { m_resetAllFiles = on; writeConfig(); }
+void ConfigModel::setResetAllSandbox(bool on) { m_resetAllSandbox = on; writeConfig(); }
 

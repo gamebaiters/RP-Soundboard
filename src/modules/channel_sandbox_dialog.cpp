@@ -3,6 +3,7 @@
 #include "help_bubble.h"
 #include "preset_manager.h"
 #include "pipeline_widget.h"
+#include "../ExpandableSection.h"
 #include "../dsp/EqRack.h"
 
 #include <QVBoxLayout>
@@ -21,6 +22,7 @@
 #include <QClipboard>
 #include <QMessageBox>
 #include <QInputDialog>
+#include <QLineEdit>
 #include <QJsonDocument>
 #include <cmath>
 
@@ -42,6 +44,16 @@ QString fmtPan(int v) {
     if (v == 0) return ChannelSandboxDialog::tr("center");
     return v < 0 ? ChannelSandboxDialog::tr("L %1").arg(-v)
                  : ChannelSandboxDialog::tr("R %1").arg(v);
+}
+QString genLossDesc(int v) {
+    if (v <= 1)   return QStringLiteral("1 (pristine)");
+    if (v <= 5)   return QString::number(v) + " (barely touched)";
+    if (v <= 20)  return QString::number(v) + " (YouTube reupload)";
+    if (v <= 50)  return QString::number(v) + " (VHS copy)";
+    if (v <= 100) return QString::number(v) + " (deep fried)";
+    if (v <= 200) return QString::number(v) + " (underwater)";
+    if (v <= 500) return QString::number(v) + " (corrupted)";
+    return QString::number(v) + " (destroyed)";
 }
 
 // Map dropdown index <-> SandboxState::SpatialMode. The dropdown order
@@ -398,257 +410,341 @@ void ChannelSandboxDialog::buildUi()
     };
 
     // ---- Compressor ----
-    auto *compBox = new QGroupBox(tr("Compressor"), dspScrollContent);
+    auto *compSection = new ExpandableSection(tr("Compressor"), 200, dspScrollContent);
     {
-        auto *lay = new QVBoxLayout(compBox);
+        auto *lay = new QVBoxLayout;
         auto *hdr = new QHBoxLayout;
-        m_compEnable = new QCheckBox(tr("Enable Compressor"), compBox);
+        m_compEnable = new QCheckBox(tr("Enable Compressor"));
         hdr->addWidget(m_compEnable);
-        m_resetComp = makeResetBtn(compBox);
+        m_resetComp = makeResetBtn(compSection);
         hdr->addWidget(m_resetComp);
         hdr->addStretch(1);
         lay->addLayout(hdr);
         QSlider *s = nullptr; QLabel *lbl = nullptr;
-        auto *r1 = buildSliderRow(compBox, tr("Threshold"), -600, 0, -200, "", s, lbl);
+        auto *r1 = buildSliderRow(nullptr, tr("Threshold"), -600, 0, -200, "", s, lbl);
         m_compThreshold = s; m_compThresholdLabel = lbl; m_compThresholdLabel->setText("-20.0 dB");
         lay->addWidget(r1);
-        auto *r2 = buildSliderRow(compBox, tr("Ratio"), 10, 200, 40, "", s, lbl);
+        auto *r2 = buildSliderRow(nullptr, tr("Ratio"), 10, 200, 40, "", s, lbl);
         m_compRatio = s; m_compRatioLabel = lbl; m_compRatioLabel->setText("4.0:1");
         lay->addWidget(r2);
-        auto *r3 = buildSliderRow(compBox, tr("Attack"), 1, 1000, 100, "", s, lbl);
+        auto *r3 = buildSliderRow(nullptr, tr("Attack"), 1, 1000, 100, "", s, lbl);
         m_compAttack = s; m_compAttackLabel = lbl; m_compAttackLabel->setText("10.0 ms");
         lay->addWidget(r3);
-        auto *r4 = buildSliderRow(compBox, tr("Release"), 10, 1000, 100, " ms", s, lbl);
+        auto *r4 = buildSliderRow(nullptr, tr("Release"), 10, 1000, 100, " ms", s, lbl);
         m_compRelease = s; m_compReleaseLabel = lbl;
         lay->addWidget(r4);
-        auto *r5 = buildSliderRow(compBox, tr("Knee"), 0, 200, 60, "", s, lbl);
+        auto *r5 = buildSliderRow(nullptr, tr("Knee"), 0, 200, 60, "", s, lbl);
         m_compKnee = s; m_compKneeLabel = lbl; m_compKneeLabel->setText("6.0 dB");
         lay->addWidget(r5);
-        auto *r6 = buildSliderRow(compBox, tr("Makeup"), 0, 300, 0, "", s, lbl);
+        auto *r6 = buildSliderRow(nullptr, tr("Makeup"), 0, 300, 0, "", s, lbl);
         m_compMakeup = s; m_compMakeupLabel = lbl; m_compMakeupLabel->setText("0.0 dB");
         lay->addWidget(r6);
+        compSection->setContentLayout(*lay);
     }
-    dspScrollLay->addWidget(compBox);
+    dspScrollLay->addWidget(compSection);
 
     // ---- Saturator ----
-    auto *satBox = new QGroupBox(tr("Saturator"), dspScrollContent);
+    auto *satSection = new ExpandableSection(tr("Saturator"), 200, dspScrollContent);
     {
-        auto *lay = new QVBoxLayout(satBox);
+        auto *lay = new QVBoxLayout;
         auto *hdr = new QHBoxLayout;
-        m_satEnable = new QCheckBox(tr("Enable Saturator"), satBox);
+        m_satEnable = new QCheckBox(tr("Enable Saturator"));
         hdr->addWidget(m_satEnable);
-        m_resetSat = makeResetBtn(satBox);
+        m_resetSat = makeResetBtn(satSection);
         hdr->addWidget(m_resetSat);
         hdr->addStretch(1);
         lay->addLayout(hdr);
         auto *modeRow = new QHBoxLayout;
-        modeRow->addWidget(new QLabel(tr("Mode:"), satBox));
-        m_satMode = new QComboBox(satBox);
+        modeRow->addWidget(new QLabel(tr("Mode:")));
+        m_satMode = new QComboBox;
         m_satMode->addItems({tr("Soft (tanh)"), tr("Tube"), tr("Tape"), tr("Hard clip")});
         modeRow->addWidget(m_satMode);
         modeRow->addStretch(1);
         lay->addLayout(modeRow);
         QSlider *s = nullptr; QLabel *lbl = nullptr;
-        auto *r1 = buildSliderRow(satBox, tr("Drive"), 10, 200, 20, "", s, lbl);
+        auto *r1 = buildSliderRow(nullptr, tr("Drive"), 10, 200, 20, "", s, lbl);
         m_satDrive = s; m_satDriveLabel = lbl; m_satDriveLabel->setText("2.0x");
         lay->addWidget(r1);
-        auto *r2 = buildSliderRow(satBox, tr("Tone"), 1000, 20000, 8000, " Hz", s, lbl);
+        auto *r2 = buildSliderRow(nullptr, tr("Tone"), 1000, 20000, 8000, " Hz", s, lbl);
         m_satTone = s; m_satToneLabel = lbl;
         lay->addWidget(r2);
-        auto *r3 = buildSliderRow(satBox, tr("Mix"), 0, 100, 0, "%", s, lbl);
+        auto *r3 = buildSliderRow(nullptr, tr("Mix"), 0, 100, 0, "%", s, lbl);
         m_satMix = s; m_satMixLabel = lbl;
         lay->addWidget(r3);
+        satSection->setContentLayout(*lay);
     }
-    dspScrollLay->addWidget(satBox);
+    dspScrollLay->addWidget(satSection);
 
     // ---- Chorus ----
-    auto *chorusBox = new QGroupBox(tr("Chorus"), dspScrollContent);
+    auto *chorusSection = new ExpandableSection(tr("Chorus"), 200, dspScrollContent);
     {
-        auto *lay = new QVBoxLayout(chorusBox);
+        auto *lay = new QVBoxLayout;
         auto *hdr = new QHBoxLayout;
-        m_chorusEnable = new QCheckBox(tr("Enable Chorus"), chorusBox);
+        m_chorusEnable = new QCheckBox(tr("Enable Chorus"));
         hdr->addWidget(m_chorusEnable);
-        m_resetChorus = makeResetBtn(chorusBox);
+        m_resetChorus = makeResetBtn(chorusSection);
         hdr->addWidget(m_resetChorus);
         hdr->addStretch(1);
         lay->addLayout(hdr);
         QSlider *s = nullptr; QLabel *lbl = nullptr;
-        auto *c1 = buildSliderRow(chorusBox, tr("Rate"), 1, 50, 10, "", s, lbl);
+        auto *c1 = buildSliderRow(nullptr, tr("Rate"), 1, 50, 10, "", s, lbl);
         m_chorusRate = s; m_chorusRateLabel = lbl; m_chorusRateLabel->setText("1.0 Hz");
         lay->addWidget(c1);
-        auto *c2 = buildSliderRow(chorusBox, tr("Depth"), 0, 100, 30, "", s, lbl);
+        auto *c2 = buildSliderRow(nullptr, tr("Depth"), 0, 100, 30, "", s, lbl);
         m_chorusDepth = s; m_chorusDepthLabel = lbl; m_chorusDepthLabel->setText("3.0 ms");
         lay->addWidget(c2);
-        auto *c3 = buildSliderRow(chorusBox, tr("Delay"), 5, 30, 10, " ms", s, lbl);
+        auto *c3 = buildSliderRow(nullptr, tr("Delay"), 5, 30, 10, " ms", s, lbl);
         m_chorusDelay = s; m_chorusDelayLabel = lbl;
         lay->addWidget(c3);
-        auto *c4 = buildSliderRow(chorusBox, tr("Voices"), 1, 4, 2, "", s, lbl);
+        auto *c4 = buildSliderRow(nullptr, tr("Voices"), 1, 4, 2, "", s, lbl);
         m_chorusVoices = s; m_chorusVoicesLabel = lbl;
         lay->addWidget(c4);
-        auto *c5 = buildSliderRow(chorusBox, tr("Mix"), 0, 100, 0, "%", s, lbl);
+        auto *c5 = buildSliderRow(nullptr, tr("Mix"), 0, 100, 0, "%", s, lbl);
         m_chorusMix = s; m_chorusMixLabel = lbl;
         lay->addWidget(c5);
+        chorusSection->setContentLayout(*lay);
     }
-    dspScrollLay->addWidget(chorusBox);
+    dspScrollLay->addWidget(chorusSection);
 
     // ---- Flanger ----
-    auto *flangerBox = new QGroupBox(tr("Flanger"), dspScrollContent);
+    auto *flangerSection = new ExpandableSection(tr("Flanger"), 200, dspScrollContent);
     {
-        auto *lay = new QVBoxLayout(flangerBox);
+        auto *lay = new QVBoxLayout;
         auto *hdr = new QHBoxLayout;
-        m_flangerEnable = new QCheckBox(tr("Enable Flanger"), flangerBox);
+        m_flangerEnable = new QCheckBox(tr("Enable Flanger"));
         hdr->addWidget(m_flangerEnable);
-        m_resetFlanger = makeResetBtn(flangerBox);
+        m_resetFlanger = makeResetBtn(flangerSection);
         hdr->addWidget(m_resetFlanger);
         hdr->addStretch(1);
         lay->addLayout(hdr);
         QSlider *s = nullptr; QLabel *lbl = nullptr;
-        auto *f1 = buildSliderRow(flangerBox, tr("Rate"), 5, 1000, 50, "", s, lbl);
+        auto *f1 = buildSliderRow(nullptr, tr("Rate"), 5, 1000, 50, "", s, lbl);
         m_flangerRate = s; m_flangerRateLabel = lbl; m_flangerRateLabel->setText("0.50 Hz");
         lay->addWidget(f1);
-        auto *f2 = buildSliderRow(flangerBox, tr("Depth"), 0, 100, 70, "%", s, lbl);
+        auto *f2 = buildSliderRow(nullptr, tr("Depth"), 0, 100, 70, "%", s, lbl);
         m_flangerDepth = s; m_flangerDepthLabel = lbl;
         lay->addWidget(f2);
-        auto *f3 = buildSliderRow(flangerBox, tr("Feedback"), -95, 95, 50, "%", s, lbl);
+        auto *f3 = buildSliderRow(nullptr, tr("Feedback"), -95, 95, 50, "%", s, lbl);
         m_flangerFeedback = s; m_flangerFeedbackLabel = lbl;
         lay->addWidget(f3);
-        auto *f4 = buildSliderRow(flangerBox, tr("Delay"), 5, 50, 20, "", s, lbl);
+        auto *f4 = buildSliderRow(nullptr, tr("Delay"), 5, 50, 20, "", s, lbl);
         m_flangerDelay = s; m_flangerDelayLabel = lbl; m_flangerDelayLabel->setText("2.0 ms");
         lay->addWidget(f4);
-        auto *f5 = buildSliderRow(flangerBox, tr("Mix"), 0, 100, 0, "%", s, lbl);
+        auto *f5 = buildSliderRow(nullptr, tr("Mix"), 0, 100, 0, "%", s, lbl);
         m_flangerMix = s; m_flangerMixLabel = lbl;
         lay->addWidget(f5);
+        flangerSection->setContentLayout(*lay);
     }
-    dspScrollLay->addWidget(flangerBox);
+    dspScrollLay->addWidget(flangerSection);
 
     // ---- Flangus ----
-    auto *flangusBox = new QGroupBox(tr("Flangus"), dspScrollContent);
+    auto *flangusSection = new ExpandableSection(tr("Flangus"), 200, dspScrollContent);
     {
-        auto *lay = new QVBoxLayout(flangusBox);
+        auto *lay = new QVBoxLayout;
         auto *hdr = new QHBoxLayout;
-        m_flangusEnable = new QCheckBox(tr("Enable Flangus"), flangusBox);
+        m_flangusEnable = new QCheckBox(tr("Enable Flangus"));
         hdr->addWidget(m_flangusEnable);
-        m_resetFlangus = makeResetBtn(flangusBox);
+        m_resetFlangus = makeResetBtn(flangusSection);
         hdr->addWidget(m_resetFlangus);
         hdr->addStretch(1);
         lay->addLayout(hdr);
         QSlider *s = nullptr; QLabel *lbl = nullptr;
-        auto *g1 = buildSliderRow(flangusBox, tr("Rate"), 1, 50, 8, "", s, lbl);
+        auto *g1 = buildSliderRow(nullptr, tr("Rate"), 1, 50, 8, "", s, lbl);
         m_flangusRate = s; m_flangusRateLabel = lbl; m_flangusRateLabel->setText("0.8 Hz");
         lay->addWidget(g1);
-        auto *g2 = buildSliderRow(flangusBox, tr("Depth"), 0, 100, 50, "%", s, lbl);
+        auto *g2 = buildSliderRow(nullptr, tr("Depth"), 0, 100, 50, "%", s, lbl);
         m_flangusDepth = s; m_flangusDepthLabel = lbl;
         lay->addWidget(g2);
-        auto *g3 = buildSliderRow(flangusBox, tr("Feedback"), -95, 95, 30, "%", s, lbl);
+        auto *g3 = buildSliderRow(nullptr, tr("Feedback"), -95, 95, 30, "%", s, lbl);
         m_flangusFeedback = s; m_flangusFeedbackLabel = lbl;
         lay->addWidget(g3);
-        auto *g4 = buildSliderRow(flangusBox, tr("Voices"), 1, 4, 3, "", s, lbl);
+        auto *g4 = buildSliderRow(nullptr, tr("Voices"), 1, 4, 3, "", s, lbl);
         m_flangusVoices = s; m_flangusVoicesLabel = lbl;
         lay->addWidget(g4);
-        auto *g5 = buildSliderRow(flangusBox, tr("Spread"), 0, 100, 50, "%", s, lbl);
+        auto *g5 = buildSliderRow(nullptr, tr("Spread"), 0, 100, 50, "%", s, lbl);
         m_flangusSpread = s; m_flangusSpreadLabel = lbl;
         lay->addWidget(g5);
-        auto *g6 = buildSliderRow(flangusBox, tr("Mix"), 0, 100, 0, "%", s, lbl);
+        auto *g6 = buildSliderRow(nullptr, tr("Mix"), 0, 100, 0, "%", s, lbl);
         m_flangusMix = s; m_flangusMixLabel = lbl;
         lay->addWidget(g6);
+        flangusSection->setContentLayout(*lay);
     }
-    dspScrollLay->addWidget(flangusBox);
+    dspScrollLay->addWidget(flangusSection);
 
     // ---- Phaser ----
-    auto *phaserBox = new QGroupBox(tr("Phaser"), dspScrollContent);
+    auto *phaserSection = new ExpandableSection(tr("Phaser"), 200, dspScrollContent);
     {
-        auto *lay = new QVBoxLayout(phaserBox);
+        auto *lay = new QVBoxLayout;
         auto *hdr = new QHBoxLayout;
-        m_phaserEnable = new QCheckBox(tr("Enable Phaser"), phaserBox);
+        m_phaserEnable = new QCheckBox(tr("Enable Phaser"));
         hdr->addWidget(m_phaserEnable);
-        m_resetPhaser = makeResetBtn(phaserBox);
+        m_resetPhaser = makeResetBtn(phaserSection);
         hdr->addWidget(m_resetPhaser);
         hdr->addStretch(1);
         lay->addLayout(hdr);
         QSlider *s = nullptr; QLabel *lbl = nullptr;
-        auto *p1 = buildSliderRow(phaserBox, tr("Rate"), 5, 500, 50, "", s, lbl);
+        auto *p1 = buildSliderRow(nullptr, tr("Rate"), 5, 500, 50, "", s, lbl);
         m_phaserRate = s; m_phaserRateLabel = lbl; m_phaserRateLabel->setText("0.50 Hz");
         lay->addWidget(p1);
-        auto *p2 = buildSliderRow(phaserBox, tr("Depth"), 0, 100, 70, "%", s, lbl);
+        auto *p2 = buildSliderRow(nullptr, tr("Depth"), 0, 100, 70, "%", s, lbl);
         m_phaserDepth = s; m_phaserDepthLabel = lbl;
         lay->addWidget(p2);
-        auto *p3 = buildSliderRow(phaserBox, tr("Feedback"), 0, 95, 30, "%", s, lbl);
+        auto *p3 = buildSliderRow(nullptr, tr("Feedback"), 0, 95, 30, "%", s, lbl);
         m_phaserFeedback = s; m_phaserFeedbackLabel = lbl;
         lay->addWidget(p3);
-        auto *p4 = buildSliderRow(phaserBox, tr("Stages"), 1, 6, 3, "", s, lbl);
+        auto *p4 = buildSliderRow(nullptr, tr("Stages"), 1, 6, 3, "", s, lbl);
         m_phaserStages = s; m_phaserStagesLabel = lbl;
         lay->addWidget(p4);
-        auto *p5 = buildSliderRow(phaserBox, tr("Mix"), 0, 100, 0, "%", s, lbl);
+        auto *p5 = buildSliderRow(nullptr, tr("Mix"), 0, 100, 0, "%", s, lbl);
         m_phaserMix = s; m_phaserMixLabel = lbl;
         lay->addWidget(p5);
+        phaserSection->setContentLayout(*lay);
     }
-    dspScrollLay->addWidget(phaserBox);
+    dspScrollLay->addWidget(phaserSection);
 
     // ---- Delay / Echo ----
-    auto *timeBox = new QGroupBox(tr("Delay / Echo"), dspScrollContent);
+    auto *delaySection = new ExpandableSection(tr("Delay / Echo"), 200, dspScrollContent);
     {
-        auto *lay = new QVBoxLayout(timeBox);
+        auto *lay = new QVBoxLayout;
         auto *hdr = new QHBoxLayout;
-        m_delayEnable = new QCheckBox(tr("Enable Delay"), timeBox);
+        m_delayEnable = new QCheckBox(tr("Enable Delay"));
         hdr->addWidget(m_delayEnable);
-        m_resetDelay = makeResetBtn(timeBox);
+        m_resetDelay = makeResetBtn(delaySection);
         hdr->addWidget(m_resetDelay);
         hdr->addStretch(1);
         lay->addLayout(hdr);
         QSlider *s = nullptr; QLabel *lbl = nullptr;
-        auto *d1 = buildSliderRow(timeBox, tr("Time"), 10, 3000, 300, " ms", s, lbl);
+        auto *d1 = buildSliderRow(nullptr, tr("Time"), 10, 3000, 300, " ms", s, lbl);
         m_delayTime = s; m_delayTimeLabel = lbl;
         lay->addWidget(d1);
-        auto *d2 = buildSliderRow(timeBox, tr("Feedback"), 0, 95, 40, "%", s, lbl);
+        auto *d2 = buildSliderRow(nullptr, tr("Feedback"), 0, 95, 40, "%", s, lbl);
         m_delayFeedback = s; m_delayFeedbackLabel = lbl;
         lay->addWidget(d2);
-        auto *d3 = buildSliderRow(timeBox, tr("Damping"), 1000, 20000, 5000, " Hz", s, lbl);
+        auto *d3 = buildSliderRow(nullptr, tr("Damping"), 1000, 20000, 5000, " Hz", s, lbl);
         m_delayDamping = s; m_delayDampingLabel = lbl;
         lay->addWidget(d3);
-        m_delayPingPong = new QCheckBox(tr("Ping-pong (L/R bounce)"), timeBox);
+        m_delayPingPong = new QCheckBox(tr("Ping-pong (L/R bounce)"));
         lay->addWidget(m_delayPingPong);
-        auto *d4 = buildSliderRow(timeBox, tr("Mix"), 0, 100, 0, "%", s, lbl);
+        auto *d4 = buildSliderRow(nullptr, tr("Mix"), 0, 100, 0, "%", s, lbl);
         m_delayMix = s; m_delayMixLabel = lbl;
         lay->addWidget(d4);
+        delaySection->setContentLayout(*lay);
     }
-    dspScrollLay->addWidget(timeBox);
+    dspScrollLay->addWidget(delaySection);
 
     // ---- Limiter ----
-    auto *limiterBox = new QGroupBox(tr("Limiter"), dspScrollContent);
+    auto *limiterSection = new ExpandableSection(tr("Limiter"), 200, dspScrollContent);
     {
-        auto *lay = new QVBoxLayout(limiterBox);
+        auto *lay = new QVBoxLayout;
         auto *hdr = new QHBoxLayout;
-        m_limiterEnable = new QCheckBox(tr("Enable Limiter"), limiterBox);
+        m_limiterEnable = new QCheckBox(tr("Enable Limiter"));
         hdr->addWidget(m_limiterEnable);
-        m_resetLimiter = makeResetBtn(limiterBox);
+        m_resetLimiter = makeResetBtn(limiterSection);
         hdr->addWidget(m_resetLimiter);
         hdr->addStretch(1);
         lay->addLayout(hdr);
         auto *lmRow = new QHBoxLayout;
-        lmRow->addWidget(new QLabel(tr("Mode:"), limiterBox));
-        m_limiterModeBox = new QComboBox(limiterBox);
+        lmRow->addWidget(new QLabel(tr("Mode:")));
+        m_limiterModeBox = new QComboBox;
         m_limiterModeBox->addItems({tr("Limiter"), tr("Compressor"), tr("Gate")});
         lmRow->addWidget(m_limiterModeBox);
         lmRow->addStretch(1);
         lay->addLayout(lmRow);
         QSlider *s = nullptr; QLabel *lbl = nullptr;
-        auto *lr1 = buildSliderRow(limiterBox, tr("Ceiling"), -60, 0, -3, "", s, lbl);
+        auto *lr1 = buildSliderRow(nullptr, tr("Ceiling"), -60, 0, -3, "", s, lbl);
         m_limiterCeiling = s; m_limiterCeilingLabel = lbl; m_limiterCeilingLabel->setText("-0.3 dB");
         lay->addWidget(lr1);
-        auto *lr2 = buildSliderRow(limiterBox, tr("Lookahead"), 5, 100, 10, "", s, lbl);
+        auto *lr2 = buildSliderRow(nullptr, tr("Lookahead"), 5, 100, 10, "", s, lbl);
         m_limiterLookahead = s; m_limiterLookaheadLabel = lbl; m_limiterLookaheadLabel->setText("1.0 ms");
         lay->addWidget(lr2);
-        auto *lr3 = buildSliderRow(limiterBox, tr("Release"), 10, 500, 100, " ms", s, lbl);
+        auto *lr3 = buildSliderRow(nullptr, tr("Release"), 10, 500, 100, " ms", s, lbl);
         m_limiterRelease = s; m_limiterReleaseLabel = lbl;
         lay->addWidget(lr3);
-        auto *lr4 = buildSliderRow(limiterBox, tr("Ratio"), 10, 200, 40, "", s, lbl);
+        auto *lr4 = buildSliderRow(nullptr, tr("Ratio"), 10, 200, 40, "", s, lbl);
         m_limiterRatio = s; m_limiterRatioLabel = lbl; m_limiterRatioLabel->setText("4.0:1");
         lay->addWidget(lr4);
-        auto *lr5 = buildSliderRow(limiterBox, tr("Gate Thresh"), -800, -200, -600, "", s, lbl);
+        auto *lr5 = buildSliderRow(nullptr, tr("Gate Thresh"), -800, -200, -600, "", s, lbl);
         m_limiterGate = s; m_limiterGateLabel = lbl; m_limiterGateLabel->setText("-60.0 dB");
         lay->addWidget(lr5);
+        limiterSection->setContentLayout(*lay);
     }
-    dspScrollLay->addWidget(limiterBox);
+    dspScrollLay->addWidget(limiterSection);
+
+    // ---- Bitcrusher ----
+    auto *bitcrushSection = new ExpandableSection(tr("Bitcrusher (quality degradation)"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *hdr = new QHBoxLayout;
+        m_bitcrushEnable = new QCheckBox(tr("Enable Bitcrusher"));
+        m_bitcrushEnable->setToolTip(tr(
+            "Degrade audio quality by reducing bit depth and/or effective\n"
+            "sample rate. At maximum settings (16 bit, 48 kHz) the signal\n"
+            "is untouched. Lower values add grit and lo-fi character."));
+        hdr->addWidget(m_bitcrushEnable);
+        m_resetBitcrush = makeResetBtn(bitcrushSection);
+        hdr->addWidget(m_resetBitcrush);
+        hdr->addStretch(1);
+        lay->addLayout(hdr);
+        m_bitcrushPreset = new QComboBox;
+        m_bitcrushPreset->addItems({tr("Custom"), tr("HiFi (CD quality)"), tr("Radio"), tr("Telephone"), tr("Retro (8-bit)"), tr("Garbage")});
+        m_bitcrushPreset->setToolTip(tr("Quick quality presets - select one to set bit depth and sample rate automatically"));
+        lay->addWidget(m_bitcrushPreset);
+        QSlider *s = nullptr; QLabel *lbl = nullptr;
+        auto *b1 = buildSliderRow(nullptr, tr("Bit Depth"), 1, 16, 16, "", s, lbl);
+        m_bitcrushBits = s; m_bitcrushBitsLabel = lbl; m_bitcrushBitsLabel->setText("16 bit");
+        m_bitcrushBits->setToolTip(tr(
+            "Bit depth controls how many amplitude levels are available.\n"
+            "16 = CD quality, 12 = radio, 8 = telephone, 4 = retro, 1 = extreme."));
+        lay->addWidget(b1);
+        auto *b2 = buildSliderRow(nullptr, tr("Sample Rate"), 500, 48000, 48000, "", s, lbl);
+        m_bitcrushRate = s; m_bitcrushRateLabel = lbl; m_bitcrushRateLabel->setText("48000 Hz");
+        lay->addWidget(b2);
+        bitcrushSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(bitcrushSection);
+
+    // ---- Mono ----
+    auto *monoSection = new ExpandableSection(tr("Mono Converter"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        m_monoEnable = new QCheckBox(tr("Convert to Mono"));
+        m_monoEnable->setToolTip(tr(
+            "Sum left + right into a single mono signal, sent equally\n"
+            "to both channels. Useful for compatibility testing or\n"
+            "when the spatial stage should start from a mono source."));
+        lay->addWidget(m_monoEnable);
+        monoSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(monoSection);
+
+    // ---- Generation Loss ----
+    auto *genLossSection = new ExpandableSection(tr("Generation Loss"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *hdr = new QHBoxLayout;
+        m_genLossEnable = new QCheckBox(tr("Enable Generation Loss"));
+        m_genLossEnable->setToolTip(tr(
+            "Simulates the quality loss of re-encoding audio multiple\n"
+            "times (like a video re-uploaded to YouTube 20 times).\n"
+            "Adds cumulative low-pass filtering, quantization noise,\n"
+            "random noise injection, and soft compression."));
+        hdr->addWidget(m_genLossEnable);
+        m_resetGenLoss = makeResetBtn(genLossSection);
+        hdr->addWidget(m_resetGenLoss);
+        hdr->addStretch(1);
+        lay->addLayout(hdr);
+        QSlider *s = nullptr; QLabel *lbl = nullptr;
+        auto *g1 = buildSliderRow(nullptr, tr("Generations"), 1, 1000, 1, "", s, lbl);
+        m_genLossGens = s; m_genLossGensLabel = lbl; m_genLossGensLabel->setText("1 (pristine)");
+        m_genLossGens->setToolTip(tr(
+            "Number of simulated re-encoding passes.\n"
+            "Like re-rendering a video over and over:\n"
+            "1 = clean, 20 = YouTube reupload, 100 = deep fried,\n"
+            "500 = corrupted, 1000 = completely destroyed."));
+        lay->addWidget(g1);
+        genLossSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(genLossSection);
 
     dspScrollLay->addStretch(1);
     dspScrollArea->setWidget(dspScrollContent);
@@ -668,6 +764,75 @@ void ChannelSandboxDialog::buildUi()
     scrollArea->setFrameShape(QFrame::NoFrame);
     scrollArea->setWidget(scrollContent);
     root->addWidget(scrollArea, 1);
+
+    // ===== Preset row =====
+    auto *presetRow = new QHBoxLayout;
+    presetRow->addWidget(new QLabel(tr("Preset:"), this));
+    m_sandboxPresetBox = new QComboBox(this);
+    m_sandboxPresetBox->setMinimumWidth(180);
+    m_sandboxPresetBox->setToolTip(tr("Load a saved sandbox preset"));
+    presetRow->addWidget(m_sandboxPresetBox, 1);
+    auto *presetSaveBtn = new QPushButton(tr("Save"), this);
+    presetSaveBtn->setToolTip(tr("Save current sandbox settings as a named preset"));
+    auto *presetDeleteBtn = new QPushButton(tr("Delete"), this);
+    presetDeleteBtn->setToolTip(tr("Delete the selected preset"));
+    presetRow->addWidget(presetSaveBtn);
+    presetRow->addWidget(presetDeleteBtn);
+    root->addLayout(presetRow);
+
+    auto refreshPresetCombo = [this]{
+        QSignalBlocker blk(m_sandboxPresetBox);
+        m_sandboxPresetBox->clear();
+        m_sandboxPresetBox->addItem(tr("(none)"));
+        auto presets = PresetManager::loadSandboxPresets();
+        for (const auto &p : presets)
+            m_sandboxPresetBox->addItem(p.name, p.data);
+    };
+    refreshPresetCombo();
+
+    connect(m_sandboxPresetBox, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, [this](int idx){
+        if (idx <= 0 || m_loading) return;
+        QString data = m_sandboxPresetBox->itemData(idx).toString();
+        QByteArray decoded = QByteArray::fromBase64(data.toUtf8());
+        QJsonParseError err;
+        QJsonDocument doc = QJsonDocument::fromJson(decoded, &err);
+        if (err.error != QJsonParseError::NoError || !doc.isObject()) return;
+        m_state = SandboxState::fromJson(doc.object());
+        pushStateToWidgets();
+        applyModeVisibility();
+        pushChange();
+    });
+
+    connect(presetSaveBtn, &QPushButton::clicked, this, [this, refreshPresetCombo]{
+        bool ok = false;
+        QString name = QInputDialog::getText(this, tr("Save Sandbox Preset"),
+            tr("Preset name:"), QLineEdit::Normal, QString(), &ok);
+        if (!ok || name.trimmed().isEmpty()) return;
+        name = name.trimmed();
+        QJsonDocument doc(m_state.toJson());
+        QString encoded = QString::fromUtf8(doc.toJson(QJsonDocument::Compact).toBase64());
+        PresetManager::saveSandboxPreset(name, encoded);
+        refreshPresetCombo();
+        for (int i = 0; i < m_sandboxPresetBox->count(); ++i) {
+            if (m_sandboxPresetBox->itemText(i) == name) {
+                m_sandboxPresetBox->setCurrentIndex(i);
+                break;
+            }
+        }
+    });
+
+    connect(presetDeleteBtn, &QPushButton::clicked, this, [this, refreshPresetCombo]{
+        int idx = m_sandboxPresetBox->currentIndex();
+        if (idx <= 0) return;
+        QString name = m_sandboxPresetBox->itemText(idx);
+        auto choice = QMessageBox::question(this, tr("Delete Preset"),
+            tr("Delete preset \"%1\"?").arg(name),
+            QMessageBox::Yes | QMessageBox::No);
+        if (choice != QMessageBox::Yes) return;
+        PresetManager::deleteSandboxPreset(name);
+        refreshPresetCombo();
+    });
 
     // ===== Bottom: reset + copy/paste sandbox + close =====
     auto *btnRow = new QHBoxLayout;
@@ -989,6 +1154,54 @@ void ChannelSandboxDialog::buildUi()
         pushChange();
     });
 
+    // Bitcrusher
+    connect(m_bitcrushEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.bitcrusherEnabled = on; pushChange();
+    });
+    connect(m_bitcrushBits, &QSlider::valueChanged, this, [this](int v){
+        m_state.bitcrusherBitDepth = v;
+        m_bitcrushBitsLabel->setText(QString::number(v) + " bit");
+        pushChange();
+    });
+    connect(m_bitcrushRate, &QSlider::valueChanged, this, [this](int v){
+        m_state.bitcrusherRate = static_cast<float>(v);
+        m_bitcrushRateLabel->setText(QString::number(v) + " Hz");
+        pushChange();
+    });
+    connect(m_bitcrushPreset, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int idx){
+        if (m_loading) return;
+        struct Preset { int bits; int rate; };
+        const Preset presets[] = {
+            {16, 48000},  // Custom (no change)
+            {16, 48000},  // HiFi
+            {12, 22050},  // Radio
+            {8,  8000},   // Telephone
+            {4,  11025},  // Retro
+            {1,  500},    // Garbage
+        };
+        if (idx <= 0 || idx >= 6) return;
+        m_state.bitcrusherBitDepth = presets[idx].bits;
+        m_state.bitcrusherRate = static_cast<float>(presets[idx].rate);
+        m_state.bitcrusherEnabled = true;
+        pushStateToWidgets();
+        pushChange();
+    });
+
+    // Mono
+    connect(m_monoEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.monoEnabled = on; pushChange();
+    });
+
+    // Generation Loss
+    connect(m_genLossEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.genLossEnabled = on; pushChange();
+    });
+    connect(m_genLossGens, &QSlider::valueChanged, this, [this](int v){
+        m_state.genLossGenerations = v;
+        m_genLossGensLabel->setText(genLossDesc(v));
+        pushChange();
+    });
+
     // Per-module reset buttons
     connect(m_resetComp, &QPushButton::clicked, this, [this]{
         SandboxState d;
@@ -1047,6 +1260,19 @@ void ChannelSandboxDialog::buildUi()
         m_state.limiterCeiling = d.limiterCeiling; m_state.limiterLookahead = d.limiterLookahead;
         m_state.limiterRelease = d.limiterRelease; m_state.limiterRatio = d.limiterRatio;
         m_state.limiterGateThresh = d.limiterGateThresh;
+        pushStateToWidgets(); pushChange();
+    });
+    connect(m_resetBitcrush, &QPushButton::clicked, this, [this]{
+        SandboxState d;
+        m_state.bitcrusherEnabled = d.bitcrusherEnabled;
+        m_state.bitcrusherBitDepth = d.bitcrusherBitDepth;
+        m_state.bitcrusherRate = d.bitcrusherRate;
+        pushStateToWidgets(); pushChange();
+    });
+    connect(m_resetGenLoss, &QPushButton::clicked, this, [this]{
+        SandboxState d;
+        m_state.genLossEnabled = d.genLossEnabled;
+        m_state.genLossGenerations = d.genLossGenerations;
         pushStateToWidgets(); pushChange();
     });
 
@@ -1153,6 +1379,20 @@ void ChannelSandboxDialog::pushStateToWidgets()
     if (m_limiterRelease) { m_limiterRelease->setValue(static_cast<int>(m_state.limiterRelease)); m_limiterReleaseLabel->setText(QString::number(static_cast<int>(m_state.limiterRelease)) + " ms"); }
     if (m_limiterRatio) { m_limiterRatio->setValue(static_cast<int>(m_state.limiterRatio * 10)); m_limiterRatioLabel->setText(QString::number(m_state.limiterRatio, 'f', 1) + ":1"); }
     if (m_limiterGate) { m_limiterGate->setValue(static_cast<int>(m_state.limiterGateThresh * 10)); m_limiterGateLabel->setText(QString::number(m_state.limiterGateThresh, 'f', 1) + " dB"); }
+
+    if (m_bitcrushEnable) m_bitcrushEnable->setChecked(m_state.bitcrusherEnabled);
+    if (m_bitcrushBits) { m_bitcrushBits->setValue(m_state.bitcrusherBitDepth); m_bitcrushBitsLabel->setText(QString::number(m_state.bitcrusherBitDepth) + " bit"); }
+    if (m_bitcrushRate) { m_bitcrushRate->setValue(static_cast<int>(m_state.bitcrusherRate)); m_bitcrushRateLabel->setText(QString::number(static_cast<int>(m_state.bitcrusherRate)) + " Hz"); }
+
+    if (m_monoEnable) m_monoEnable->setChecked(m_state.monoEnabled);
+
+    if (m_genLossEnable) m_genLossEnable->setChecked(m_state.genLossEnabled);
+    if (m_genLossGens) {
+        m_genLossGens->setValue(m_state.genLossGenerations);
+        m_genLossGensLabel->setText(genLossDesc(m_state.genLossGenerations));
+    }
+
+    if (m_bitcrushPreset) { QSignalBlocker blk(m_bitcrushPreset); m_bitcrushPreset->setCurrentIndex(0); }
 
     if (m_pipeline) m_pipeline->setOrder(m_state.pipelineOrder);
 

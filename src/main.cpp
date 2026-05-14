@@ -450,7 +450,7 @@ CAPI int sb_playButtonEx(const char* button)
 	{
 		if (arg1 <= 0)
 		{
-			//TODO search by name, too lazy right now
+			// name-based lookup not implemented
 		}
 		else
 		{

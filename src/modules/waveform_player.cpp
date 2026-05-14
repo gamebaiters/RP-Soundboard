@@ -17,6 +17,19 @@ void WaveformPlayer::setWavePaintVisible(bool on) {
     updateGeometry();
 }
 
+void WaveformPlayer::setAdaptToFx(bool on) {
+    m_wave->setAdaptToFx(on);
+}
+
+void WaveformPlayer::setSandboxState(const SandboxState &s) {
+    m_wave->setSandboxState(s);
+}
+
+void WaveformPlayer::notifySeek() {
+    m_wave->notifySeek();
+}
+
+
 WaveformPlayer::WaveformPlayer(QWidget *parent)
     : QWidget(parent)
     , m_wave(new SoundView(this))

@@ -59,6 +59,8 @@ void SlotDsp::setSampleRate(double sr) {
         p.delay.setSampleRate(m_fs);
         p.reverb.setSampleRate(m_fs);
         p.limiter.setSampleRate(m_fs);
+        p.bitcrusher.setSampleRate(m_fs);
+        p.genLoss.setSampleRate(m_fs);
     };
     initPath(m_play);
     initPath(m_cap);
@@ -82,6 +84,8 @@ void SlotDsp::reset() {
         p.delay.reset();
         p.reverb.reset();
         p.limiter.reset();
+        p.bitcrusher.reset();
+        p.genLoss.reset();
         p.rotPhase = 0.0;
         p.rotBlockCounter = 0;
     };
@@ -137,7 +141,10 @@ void SlotDsp::recomputeActive() {
                        (s.phaserEnabled && s.phaserMix > 0.001f) ||
                        (s.saturatorEnabled && s.saturatorMix > 0.001f) ||
                        (s.delayEnabled && s.delayMix > 0.001f) ||
-                       s.limiterEnabled;
+                       s.limiterEnabled ||
+                       s.bitcrusherEnabled ||
+                       s.monoEnabled ||
+                       s.genLossEnabled;
     bool sandboxActive = s.enabled && (spatialActive || eqActive || reverbActive ||
                                         s.headSway || s.stretchEnabled || newFxActive);
     m_active = sandboxActive || m_fxReverbWet > 0.001f;
@@ -148,7 +155,20 @@ int SlotDsp::inputFramesNeededFor(int outputFrames) const {
     float f = m_state.stretchFactor;
     if (f < 1.0f) f = 1.0f;
     int n = static_cast<int>(std::ceil(outputFrames / f));
-    return std::max(1, n);
+    n = std::max(1, n);
+    if (m_stretchPlay.inited && m_stretchPlay.ps.isPriming())
+        n = std::max(n, outputFrames);
+    return n;
+}
+
+double SlotDsp::stretchPlaybackPosition() const {
+    if (!m_stretchPlay.inited || m_fs < 1.0) return 0.0;
+    return m_stretchPlay.ps.currentFrame() / m_fs;
+}
+
+bool SlotDsp::stretchCaptureDone() const {
+    if (!m_stretchCap.inited) return true;
+    return m_stretchCap.ps.hasProcessedAllSource();
 }
 
 void SlotDsp::initStretchStateIfNeeded(StretchState &s) {
@@ -208,6 +228,7 @@ void SlotDsp::applyState(const SandboxState &s) {
             p.delay.reset();
             p.reverb.reset();
             p.limiter.reset();
+            p.bitcrusher.reset();
             p.rotPhase = 0.0;
             p.rotBlockCounter = 0;
         };
@@ -243,6 +264,8 @@ void SlotDsp::applyState(const SandboxState &s) {
         p.limiter.setParams(s.limiterCeiling, s.limiterLookahead, s.limiterRelease,
                             static_cast<Limiter::Mode>(s.limiterMode),
                             s.limiterRatio, s.limiterGateThresh);
+        p.bitcrusher.setParams(s.bitcrusherBitDepth, s.bitcrusherRate);
+        p.genLoss.setGenerations(s.genLossGenerations);
     };
     applyToPath(m_play);
     applyToPath(m_cap);
@@ -360,6 +383,15 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
         break;
     case SandboxState::Stage_Limiter:
         if (m_state.limiterEnabled) p.limiter.processStereo(l, r);
+        break;
+    case SandboxState::Stage_Bitcrusher:
+        if (m_state.bitcrusherEnabled) p.bitcrusher.processStereo(l, r);
+        break;
+    case SandboxState::Stage_Mono:
+        if (m_state.monoEnabled) { float m = (l + r) * 0.5f; l = m; r = m; }
+        break;
+    case SandboxState::Stage_GenLoss:
+        if (m_state.genLossEnabled) p.genLoss.processStereo(l, r);
         break;
     }
 }

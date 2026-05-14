@@ -858,24 +858,28 @@ void ConfigQt::onSkipBack10()
 {
 	Sampler *sampler = sb_getSampler();
 	if (sampler) sampler->seek((std::max)(0.0, sampler->getPosition() - 10.0));
+	if (ui->waveformView) ui->waveformView->notifySeek();
 }
 
 void ConfigQt::onSkipBack5()
 {
 	Sampler *sampler = sb_getSampler();
 	if (sampler) sampler->seek((std::max)(0.0, sampler->getPosition() - 5.0));
+	if (ui->waveformView) ui->waveformView->notifySeek();
 }
 
 void ConfigQt::onSkipFwd5()
 {
 	Sampler *sampler = sb_getSampler();
 	if (sampler) sampler->seek((std::min)(sampler->getLength(), sampler->getPosition() + 5.0));
+	if (ui->waveformView) ui->waveformView->notifySeek();
 }
 
 void ConfigQt::onSkipFwd10()
 {
 	Sampler *sampler = sb_getSampler();
 	if (sampler) sampler->seek((std::min)(sampler->getLength(), sampler->getPosition() + 10.0));
+	if (ui->waveformView) ui->waveformView->notifySeek();
 }
 
 void ConfigQt::onProgressSliderMoved(int value)
@@ -901,6 +905,8 @@ void ConfigQt::onWaveformSeek(double fraction)
 		if (len > 0.0)
 			sampler->seek(fraction * len);
 	}
+	if (ui->waveformView)
+		ui->waveformView->notifySeek();
 }
 
 

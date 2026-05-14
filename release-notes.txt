@@ -1,3 +1,49 @@
+GameBaiters Soundboard v2.2.0
+=============================
+
+Feature + stability release on top of v2.1.2.
+
+---------------------------------------------------------------------
+PAULSTRETCH FIXES
+---------------------------------------------------------------------
+* Seeking near the end of a file with high stretch factor + large
+  window no longer freezes playback. The synthesis threshold was
+  lowered so partial windows near EOF still produce output.
+* Paulstretch now continues producing audio even when the decoder
+  ring buffer is fully drained. Previously the mixer would return
+  silence once the ring was empty, even though paulstretch had
+  buffered source data internally.
+* Priming is now significantly faster: the feed rate is boosted
+  during the initial fill so the first stretched output arrives
+  within ~1-2 seconds instead of potentially 60+ seconds at high
+  stretch factors.
+* Position tracking now correctly follows the stretched playback
+  position on the waveform display.
+
+---------------------------------------------------------------------
+LOOP BUG FIX
+---------------------------------------------------------------------
+* After audio finishes and loops back, seeking on the waveform now
+  works correctly. The decoder's done-flag was not being reset on
+  seek, which caused every audio callback to re-trigger the loop
+  and overwrite user seeks.
+
+---------------------------------------------------------------------
+ABOUT DIALOG
+---------------------------------------------------------------------
+* Redesigned About dialog with proper dark theme support, plugin
+  icon, and corrected project links.
+* Easter egg: progressive sun animation (yellow -> orange -> red)
+  leading into a blue supernova explosion with smooth reset.
+
+---------------------------------------------------------------------
+CODE CLEANUP
+---------------------------------------------------------------------
+* Removed verbose and outdated comments across the codebase.
+* Cleaned up debug annotations and internal references.
+
+=====================================================================
+
 GameBaiters Soundboard v2.1.2
 =============================
 

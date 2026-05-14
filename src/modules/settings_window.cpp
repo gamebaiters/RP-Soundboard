@@ -1,6 +1,7 @@
 #include "settings_window.h"
 #include "help_bubble.h"
 #include "../style_helper.h"
+#include "../ExpandableSection.h"
 #include "theme.h"
 
 #include <QVBoxLayout>
@@ -14,11 +15,10 @@
 #include <QComboBox>
 #include <QColorDialog>
 #include <QSlider>
+#include <QScrollArea>
 #include "../common.h"
 
 namespace {
-// Helper: build a row with [checkbox][?][stretch] so the help bubble sits
-// next to the checkbox label instead of below it.
 QHBoxLayout *checkRow(QCheckBox *cb, const QString &help, QWidget *owner) {
     auto *row = new QHBoxLayout;
     row->setContentsMargins(0, 0, 0, 0);
@@ -27,6 +27,13 @@ QHBoxLayout *checkRow(QCheckBox *cb, const QString &help, QWidget *owner) {
     if (!help.isEmpty()) row->addWidget(new HelpBubble(help, owner));
     row->addStretch(1);
     return row;
+}
+
+ExpandableSection *makeSection(const QString &title, QLayout *content, QWidget *parent, bool expanded = true) {
+    auto *sec = new ExpandableSection(title, 200, parent);
+    sec->setContentLayout(*content);
+    sec->setExpanded(expanded);
+    return sec;
 }
 }
 
@@ -42,7 +49,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     , m_sandboxEnabled(new QCheckBox(tr("Enable audio sandbox (per-channel HRTF / EQ / reverb)"), this))
     , m_meterVisible(new QCheckBox(tr("Show audio meter on each channel"), this))
     , m_exportEnabled(new QCheckBox(tr("Show export button on each channel"), this))
-    , m_resetAllSandbox(new QPushButton(tr("Reset all audio sandbox settings"), this))
+    , m_resetAllSandboxBtn(new QPushButton(tr("Reset all audio sandbox settings"), this))
     , m_profileCombo(new QComboBox(this))
     , m_profileExport(new QPushButton(tr("Export profile..."), this))
     , m_profileImport(new QPushButton(tr("Import profile..."), this))
@@ -76,18 +83,27 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     , m_import(new QPushButton(tr("Import configuration..."), this))
     , m_resetHotkeys(new QPushButton(tr("Reset all hotkeys"), this))
     , m_close(new QPushButton(tr("Close"), this))
+    , m_adaptWaveform(new QCheckBox(tr("Adapt waveform display to audio effects"), this))
+    , m_resetChVolume(new QCheckBox(tr("Volume"), this))
+    , m_resetChFx(new QCheckBox(tr("Pitch / speed / reverb"), this))
+    , m_resetChFile(new QCheckBox(tr("Loaded file / playback position"), this))
+    , m_resetChSandbox(new QCheckBox(tr("Audio sandbox settings"), this))
+    , m_resetAllRemoveExtra(new QCheckBox(tr("Remove extra channels"), this))
+    , m_resetAllVolume(new QCheckBox(tr("Volume"), this))
+    , m_resetAllFx(new QCheckBox(tr("Pitch / speed / reverb"), this))
+    , m_resetAllFiles(new QCheckBox(tr("Loaded files"), this))
+    , m_resetAllSandbox(new QCheckBox(tr("Audio sandbox settings"), this))
 {
     setWindowTitle(tr("Soundboard Settings"));
     setModal(false);
     setProperty("isGBSoundboard", true);
-    resize(620, 560);
+    resize(620, 600);
 
     m_rows->setRange(1, 50);
     m_cols->setRange(1, 50);
     m_rows->setValue(4);
     m_cols->setValue(8);
 
-    // Tooltip stays for hover; help bubble renders the long-form text.
     m_earrape->setToolTip(tr("Limits local output so a too-loud sample cannot blow your ears."));
     m_linkVolumes->setToolTip(tr(
         "When ON, every new Channel created via \"+ Add channel\" copies "
@@ -96,150 +112,105 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     m_rememberFx->setToolTip(tr("Persist pitch/speed/reverb per channel between sessions."));
     m_restoreSession->setToolTip(tr(
         "Remember channel count, what was loaded in each channel and the "
-        "pitch / speed / reverb / volume on every channel. The next time "
-        "you open the soundboard the same layout is rebuilt and channels "
-        "that had a file loaded come back paused."));
-    // Mute on my client + Mute myself moved to the main page bottom bar.
+        "pitch / speed / reverb / volume on every channel."));
     m_muteLocally->setVisible(false);
     m_muteMyself->setVisible(false);
-    // Multi-soundboard is implied by the channels mechanism in the new
-    // UI - hide its checkbox to remove the duplicate concept.
     m_multi->setVisible(false);
 
     m_globalFx->setToolTip(tr(
         "Master switch for the pitch / speed / reverb effects.\n"
-        "Off = the controls disappear from every channel and from the\n"
-        "advanced options dialog. Per-button custom FX are also ignored\n"
-        "even if they were previously set up."));
+        "Off = the controls disappear from every channel."));
 
-    // Audio group: master DSP switches only - earrape + global FX. Channel-
-    // behaviour toggles moved to a dedicated "Channels" group below so each
-    // group lines up with one mental model.
-    auto *audioBox = new QGroupBox(tr("Audio"), this);
-    auto *audioLay = new QVBoxLayout(audioBox);
+    // Reset behaviour defaults
+    m_resetChVolume->setChecked(true);
+    m_resetChFx->setChecked(true);
+    m_resetChFile->setChecked(true);
+    m_resetChSandbox->setChecked(true);
+    m_resetAllRemoveExtra->setChecked(true);
+    m_resetAllVolume->setChecked(true);
+    m_resetAllFx->setChecked(true);
+    m_resetAllFiles->setChecked(true);
+    m_resetAllSandbox->setChecked(true);
+
+    // ============== Audio section ==============
+    auto *audioLay = new QVBoxLayout;
     audioLay->addLayout(checkRow(m_globalFx, tr(
         "Master switch for the pitch / speed / reverb effects. When OFF\n"
         "every channel hides its FX panel and per-button custom FX are\n"
-        "skipped at playback time, even if a button had its custom FX\n"
-        "checkbox enabled."), this));
+        "skipped at playback time."), this));
     audioLay->addLayout(checkRow(m_earrape, tr(
-        "Limits local audio output so a too-loud sample (or a sample\n"
-        "with extreme pitch + speed) cannot deafen you."), this));
+        "Limits local audio output so a too-loud sample cannot deafen you."), this));
     audioLay->addWidget(m_multi);
 
-    // Channels group: how new channels behave + how many you see.
-    auto *channelsBox = new QGroupBox(tr("Channels"), this);
-    auto *channelsLay = new QVBoxLayout(channelsBox);
+    // ============== Channels section ==============
+    auto *channelsLay = new QVBoxLayout;
     channelsLay->addLayout(checkRow(m_linkVolumes, tr(
-        "When ON, each new Channel created with \"+ Add channel\" copies\n"
-        "every setting (local + remote volume, pitch, speed, reverb,\n"
-        "sync) from the first channel. When OFF, new channels start\n"
-        "from neutral defaults."), this));
+        "When ON, each new Channel copies settings from the first channel."), this));
     channelsLay->addLayout(checkRow(m_rememberFx, tr(
-        "When ON, each channel remembers its pitch / speed / reverb\n"
-        "between sessions. When OFF, channels reset to zero on next\n"
-        "session. Independent of \"Restore last session\"."), this));
+        "When ON, each channel remembers its pitch / speed / reverb between sessions."), this));
     channelsLay->addLayout(checkRow(m_hideWaveform, tr(
-        "Compact channel view: removes the waveform display + transport\n"
-        "buttons (play / pause / stop / skip) from every channel,\n"
-        "keeping only the volume + FX sliders. Useful for tight UIs\n"
-        "or when you only need the audio knobs."), this));
+        "Compact channel view: removes the waveform display from every channel."), this));
     channelsLay->addLayout(checkRow(m_restoreSession, tr(
-        "Remember channel count, the file loaded in each channel and\n"
-        "every channel's volume / pitch / speed / reverb. On the next\n"
-        "soundboard open the same layout is rebuilt and channels that\n"
-        "had a file loaded come back paused at the previous position."), this));
+        "Remember channel count, loaded files and all settings on the next open."), this));
+    channelsLay->addLayout(checkRow(m_adaptWaveform, tr(
+        "When ON, the waveform display adapts to show the visual effect of\n"
+        "active audio sandbox effects (especially Paulstretch stretching).\n"
+        "When OFF, the raw audio waveform is always shown."), this));
 
-    auto *gridBox = new QGroupBox(tr("Button grid"), this);
-    auto *gridForm = new QFormLayout(gridBox);
-    gridForm->addRow(tr("Rows"), m_rows);
-    gridForm->addRow(tr("Columns"), m_cols);
+    // ============== Button grid section ==============
+    auto *gridLay = new QFormLayout;
+    gridLay->addRow(tr("Rows"), m_rows);
+    gridLay->addRow(tr("Columns"), m_cols);
 
-    auto *hotkeyBox = new QGroupBox(tr("Hotkeys"), this);
-    auto *hotkeyLay = new QVBoxLayout(hotkeyBox);
+    // ============== Hotkeys section ==============
+    auto *hotkeyLay = new QVBoxLayout;
     hotkeyLay->addLayout(checkRow(m_showHotkeys, tr(
-        "Render the bound hotkey on top of each button so you can see\n"
-        "which key triggers what without opening the advanced dialog."), this));
+        "Render the bound hotkey on top of each button."), this));
     hotkeyLay->addLayout(checkRow(m_disableHotkeys, tr(
-        "Globally suppress the soundboard plugin's hotkey handling. The\n"
-        "TeamSpeak bindings stay in your hotkey profile but pressing\n"
-        "them does nothing while this is on."), this));
+        "Globally suppress hotkey handling."), this));
     m_resetHotkeys->setStyleSheet(
         "QPushButton { background-color: #c63131; color: white;"
         " border: 1px solid #7c1c1c; border-radius: 5px; padding: 4px 12px; }"
         "QPushButton:hover { background-color: #e04141; }");
-    m_resetHotkeys->setToolTip(tr(
-        "Clears every saved hotkey from the soundboard so spamming a key\n"
-        "no longer triggers a button. To also wipe the binding from\n"
-        "TeamSpeak's hotkey profile, open TeamSpeak's hotkey settings."));
-    auto *resetRow = new QHBoxLayout;
-    resetRow->addWidget(m_resetHotkeys);
-    resetRow->addWidget(new HelpBubble(tr(
-        "Permanently disables every previously bound hotkey for this\n"
-        "soundboard - even after a TS3 client restart. Re-arming a\n"
-        "specific button via Set Hotkey lifts the block for that one."), this));
-    resetRow->addStretch(1);
-    hotkeyLay->addLayout(resetRow);
+    auto *resetHkRow = new QHBoxLayout;
+    resetHkRow->addWidget(m_resetHotkeys);
+    resetHkRow->addStretch(1);
+    hotkeyLay->addLayout(resetHkRow);
 
-    // Logging: opt-in. Default off so a fresh install never writes
-    // rpsb_debug.log. Toggling here flips the in-process gate immediately
-    // (see ConfigModel::setLogsEnabled).
-    auto *logBox = new QGroupBox(tr("Logging"), this);
-    auto *logLay = new QVBoxLayout(logBox);
+    // ============== Logging section ==============
+    auto *logLay = new QVBoxLayout;
     logLay->addLayout(checkRow(m_logsEnabled, tr(
-        "Writes a debug log file (rpsb_debug.log) inside your TeamSpeak\n"
-        "config folder. Useful when reporting bugs - leave OFF otherwise\n"
-        "to save disk space and skip every disk write."), this));
+        "Writes a debug log file (rpsb_debug.log) inside your TeamSpeak config folder."), this));
 
-    // Audio sandbox: gates the new per-channel DSP feature plus the
-    // dual-channel cyan meter on each Channel widget.
-    auto *sandboxBox = new QGroupBox(tr("Audio sandbox"), this);
-    auto *sandboxLay = new QVBoxLayout(sandboxBox);
+    // ============== Audio sandbox section ==============
+    auto *sandboxLay = new QVBoxLayout;
     sandboxLay->addLayout(checkRow(m_sandboxEnabled, tr(
-        "Master switch for the per-channel Audio Sandbox button. When OFF\n"
-        "the sandbox button is hidden on every channel and the DSP chain\n"
-        "is fully bypassed (zero CPU cost). Saved per-channel settings\n"
-        "are preserved so you can re-enable later."), this));
+        "Master switch for the per-channel Audio Sandbox button."), this));
     sandboxLay->addLayout(checkRow(m_meterVisible, tr(
-        "Render the dual L/R peak meter (cyan; turns red on clipping)\n"
-        "directly on each channel. Pure visual - turn off if you don't\n"
-        "want the meter eating header space."), this));
+        "Render the dual L/R peak meter on each channel."), this));
     sandboxLay->addLayout(checkRow(m_exportEnabled, tr(
-        "Show an Export button on each channel. Exports the loaded audio\n"
-        "file as a WAV with all current DSP effects (EQ, spatial,\n"
-        "reverb, chorus, etc.) baked in."), this));
-    m_resetAllSandbox->setStyleSheet(
+        "Show an Export button on each channel."), this));
+    m_resetAllSandboxBtn->setStyleSheet(
         "QPushButton { background-color: #c63131; color: white;"
         " border: 1px solid #7c1c1c; border-radius: 5px; padding: 4px 12px; }"
         "QPushButton:hover { background-color: #e04141; }");
-    m_resetAllSandbox->setToolTip(tr(
-        "Wipe every per-channel sandbox setting on every profile. The\n"
-        "spatial / EQ / reverb dialogs go back to factory defaults."));
-    auto *resetSandboxRow = new QHBoxLayout;
-    resetSandboxRow->addWidget(m_resetAllSandbox);
-    resetSandboxRow->addStretch(1);
-    sandboxLay->addLayout(resetSandboxRow);
+    auto *resetSbRow = new QHBoxLayout;
+    resetSbRow->addWidget(m_resetAllSandboxBtn);
+    resetSbRow->addStretch(1);
+    sandboxLay->addLayout(resetSbRow);
 
-    // Profiles - 4 separate, switchable button-grid configurations.
+    // ============== Profiles section ==============
     for (int i = 0; i < NUM_CONFIGS; ++i)
         m_profileCombo->addItem(tr("Profile %1").arg(i + 1), i);
-    auto *profileBox = new QGroupBox(tr("Profiles"), this);
-    auto *profileLay = new QHBoxLayout(profileBox);
+    auto *profileLay = new QHBoxLayout;
     profileLay->addWidget(new QLabel(tr("Active:")));
     profileLay->addWidget(m_profileCombo, 1);
     profileLay->addWidget(m_profileExport);
     profileLay->addWidget(m_profileImport);
-    profileLay->addWidget(new HelpBubble(tr(
-        "Each soundboard ships 4 independent profiles - separate sets of\n"
-        "buttons / hotkeys / grid sizes. Switch via the dropdown.\n"
-        "Export Profile saves only the active profile (legacy .ini\n"
-        "format compatible with old builds). Import Profile loads such\n"
-        "a file into the active slot, leaving the other 3 untouched."), this));
 
-    // Custom theme - checkable group with two color pickers. Toggling
-    // the group or picking a color emits themeChanged immediately so the
-    // wiring layer can refresh stylesheets across every open dialog.
-    m_themeGroup = new QGroupBox(tr("Custom theme"), this);
+    // ============== Custom theme section ==============
+    // Theme remains a QGroupBox (checkable) wrapped inside an ExpandableSection.
+    m_themeGroup = new QGroupBox(tr("Enable custom theme"), this);
     m_themeGroup->setCheckable(true);
     m_themeGroup->setChecked(false);
     auto *themeOuter = new QVBoxLayout(m_themeGroup);
@@ -247,59 +218,30 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     themeOuter->addLayout(themeLay);
     themeLay->addWidget(new QLabel(tr("Background:")));
     m_themeBgBtn->setFixedSize(28, 22);
-    m_themeBgBtn->setToolTip(tr(
-        "Window background. Drives all neutral surfaces (buttons, inputs,\n"
-        "borders, hovers) plus auto-contrasted text. Pick any color and\n"
-        "the entire UI retints around it in real time."));
     themeLay->addWidget(m_themeBgBtn);
     themeLay->addSpacing(12);
     themeLay->addWidget(new QLabel(tr("Accent:")));
     m_themeAccentBtn->setFixedSize(28, 22);
-    m_themeAccentBtn->setToolTip(tr(
-        "Accent color: applied to slider fill, focus rings, button-checked\n"
-        "highlights, help-bubble background, etc."));
     themeLay->addWidget(m_themeAccentBtn);
     themeLay->addSpacing(12);
     themeLay->addWidget(new QLabel(tr("Waveform:")));
     m_themeWaveBtn->setFixedSize(28, 22);
-    m_themeWaveBtn->setToolTip(tr(
-        "Inner color of the channel waveform paint."));
     themeLay->addWidget(m_themeWaveBtn);
     themeLay->addSpacing(12);
     themeLay->addWidget(new QLabel(tr("Text:")));
     m_themeTextBtn->setFixedSize(28, 22);
-    m_themeTextBtn->setToolTip(tr(
-        "Override the text color. By default the soundboard auto-picks\n"
-        "light or dark text against your background; pick a color here\n"
-        "to force a specific shade. Click Auto to revert to the\n"
-        "automatic contrast."));
     themeLay->addWidget(m_themeTextBtn);
-    m_themeTextAuto->setToolTip(tr("Revert text color to auto-contrast."));
     m_themeTextAuto->setMaximumWidth(56);
     m_themeTextAuto->setFixedHeight(22);
     themeLay->addWidget(m_themeTextAuto);
     themeLay->addSpacing(12);
     themeLay->addWidget(new QLabel(tr("Buttons:")));
     m_themeButtonBtn->setFixedSize(28, 22);
-    m_themeButtonBtn->setToolTip(tr(
-        "Override the default button background color (soundboard cells,\n"
-        "FX panel buttons, slider grooves). Click Auto to revert to the\n"
-        "auto-derived shade."));
     themeLay->addWidget(m_themeButtonBtn);
-    m_themeButtonAuto->setToolTip(tr("Revert button color to auto-derived."));
     m_themeButtonAuto->setMaximumWidth(56);
     m_themeButtonAuto->setFixedHeight(22);
     themeLay->addWidget(m_themeButtonAuto);
     themeLay->addStretch(1);
-    themeLay->addWidget(new HelpBubble(tr(
-        "Override the soundboard's default colors. Background drives all\n"
-        "greys (buttons, inputs, borders) and contrast-flips the text\n"
-        "automatically. Accent retints sliders / focus rings / checked\n"
-        "buttons. Waveform sets the channel waveform fill. Every change\n"
-        "applies live across the whole UI - no reopen needed."), this));
-    // Contrast slider: scales how strongly the auto-derived surfaces /
-    // borders / hovers depart from the background. 0 = barely visible,
-    // 100 = maximum separation.
     m_themeContrastSlider->setRange(0, 100);
     m_themeContrastSlider->setValue(50);
     m_themeContrastLabel->setMinimumWidth(40);
@@ -308,26 +250,17 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     contrastRow->addWidget(new QLabel(tr("Contrast:")));
     contrastRow->addWidget(m_themeContrastSlider, 1);
     contrastRow->addWidget(m_themeContrastLabel);
-    contrastRow->addWidget(new HelpBubble(tr(
-        "Scales every auto-derived shade (button bg, hover, borders).\n"
-        "Slide left for a subtle look (almost monochrome around your\n"
-        "background), slide right for buttons that pop. Saved with\n"
-        "the rest of the theme and included in the share string."), this));
     themeOuter->addLayout(contrastRow);
     auto *themeBtnRow = new QHBoxLayout;
     themeBtnRow->addWidget(m_themeResetBtn);
     themeBtnRow->addWidget(m_themeCopyBtn);
     themeBtnRow->addWidget(m_themePasteBtn);
     themeBtnRow->addStretch(1);
-    themeBtnRow->addWidget(new HelpBubble(tr(
-        "Reset: restore the default dark palette.\n"
-        "Copy theme: write the current 3 colors + contrast to the\n"
-        "clipboard as a single share string. Send it to a friend -\n"
-        "they paste it via Paste theme to load the exact same look."), this));
-    m_themeResetBtn->setToolTip(tr("Restore default colors (dark grey + blue accent)."));
-    m_themeCopyBtn->setToolTip(tr("Copy a share string with the 3 current colors + contrast."));
-    m_themePasteBtn->setToolTip(tr("Load a share string someone sent you and apply its theme."));
     themeOuter->addLayout(themeBtnRow);
+    auto *themeWrapLay = new QVBoxLayout;
+    themeWrapLay->addWidget(m_themeGroup);
+
+    // Theme signal connections
     connect(m_themeContrastSlider, &QSlider::valueChanged, this, [this](int v){
         m_themeContrast = v;
         m_themeContrastLabel->setText(QString::number(v) + "%");
@@ -361,9 +294,6 @@ SettingsWindow::SettingsWindow(QWidget *parent)
             [this, pickColor]{ auto fn = pickColor; fn(m_themeButton,     m_themeButtonBtn); });
     connect(m_themeTextAuto,  &QPushButton::clicked, this, [this, repaintColorButton]{
         m_themeText = QColor();
-        // Show the actual auto-derived color in the preview square so
-        // the user sees what "Auto" resolved to instead of a misleading
-        // grey placeholder.
         QColor preview = m_themeBackground.lightnessF() < 0.5
             ? QColor(0xec, 0xec, 0xec) : QColor(0x10, 0x10, 0x10);
         repaintColorButton(m_themeTextBtn, preview);
@@ -371,8 +301,6 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     });
     connect(m_themeButtonAuto, &QPushButton::clicked, this, [this, repaintColorButton]{
         m_themeButton = QColor();
-        // Preview the actual auto-derived button colour from the active
-        // theme so the swatch reflects what the user will see live.
         Theme::Colors c = Theme::colors();
         c.background = m_themeBackground;
         c.contrast = m_themeContrast;
@@ -387,34 +315,59 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_themeCopyBtn,   &QPushButton::clicked, this, &SettingsWindow::themeCopyRequested);
     connect(m_themePasteBtn,  &QPushButton::clicked, this, &SettingsWindow::themePasteRequested);
 
-    auto *ioBox = new QGroupBox(tr("Full configuration import / export"), this);
-    auto *ioLay = new QHBoxLayout(ioBox);
+    // ============== Reset behaviour section ==============
+    auto *resetBehLay = new QVBoxLayout;
+    resetBehLay->addWidget(new QLabel(tr("Per-channel reset button resets:")));
+    resetBehLay->addWidget(m_resetChVolume);
+    resetBehLay->addWidget(m_resetChFx);
+    resetBehLay->addWidget(m_resetChFile);
+    resetBehLay->addWidget(m_resetChSandbox);
+    resetBehLay->addSpacing(8);
+    resetBehLay->addWidget(new QLabel(tr("\"Reset channels\" button resets:")));
+    resetBehLay->addWidget(m_resetAllRemoveExtra);
+    resetBehLay->addWidget(m_resetAllVolume);
+    resetBehLay->addWidget(m_resetAllFx);
+    resetBehLay->addWidget(m_resetAllFiles);
+    resetBehLay->addWidget(m_resetAllSandbox);
+
+    // ============== Import/Export section ==============
+    auto *ioLay = new QHBoxLayout;
     ioLay->addWidget(m_export);
     ioLay->addWidget(m_import);
     ioLay->addStretch(1);
-    ioLay->addWidget(new HelpBubble(tr(
-        "Export the entire configuration (every profile, every macro,\n"
-        "every setting). Pick a .json file for the wrapped format or a\n"
-        ".ini file for the legacy soundboard layout. Import auto-detects\n"
-        "either kind from the file extension."), this));
 
+    // ============== Close button ==============
     auto *btnRow = new QHBoxLayout;
     btnRow->addStretch(1);
     btnRow->addWidget(m_close);
 
+    // Build the scrollable body with ExpandableSection for each category
+    auto *body = new QVBoxLayout;
+    body->setSpacing(2);
+    body->addWidget(makeSection(tr("Audio"),          audioLay,    this));
+    body->addWidget(makeSection(tr("Channels"),       channelsLay, this));
+    body->addWidget(makeSection(tr("Button grid"),    gridLay,     this));
+    body->addWidget(makeSection(tr("Hotkeys"),        hotkeyLay,   this));
+    body->addWidget(makeSection(tr("Logging"),        logLay,      this));
+    body->addWidget(makeSection(tr("Audio sandbox"),  sandboxLay,  this));
+    body->addWidget(makeSection(tr("Profiles"),       profileLay,  this));
+    body->addWidget(makeSection(tr("Custom theme"),   themeWrapLay,this));
+    body->addWidget(makeSection(tr("Reset behaviour"),resetBehLay, this, false));
+    body->addWidget(makeSection(tr("Import / Export"),ioLay,       this, false));
+    body->addStretch(1);
+
+    auto *scrollWidget = new QWidget(this);
+    scrollWidget->setLayout(body);
+    auto *scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+    scroll->setWidget(scrollWidget);
+    scroll->setFrameShape(QFrame::NoFrame);
+
     auto *root = new QVBoxLayout(this);
-    root->addWidget(audioBox);
-    root->addWidget(channelsBox);
-    root->addWidget(gridBox);
-    root->addWidget(hotkeyBox);
-    root->addWidget(logBox);
-    root->addWidget(sandboxBox);
-    root->addWidget(profileBox);
-    root->addWidget(m_themeGroup);
-    root->addWidget(ioBox);
-    root->addStretch(1);
+    root->addWidget(scroll, 1);
     root->addLayout(btnRow);
 
+    // Signal connections
     connect(m_earrape,        &QCheckBox::toggled, this, &SettingsWindow::earrapeProtectionChanged);
     connect(m_linkVolumes,    &QCheckBox::toggled, this, &SettingsWindow::linkVolumesChanged);
     connect(m_rememberFx,     &QCheckBox::toggled, this, &SettingsWindow::rememberPitchSpeedChanged);
@@ -425,7 +378,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_sandboxEnabled, &QCheckBox::toggled, this, &SettingsWindow::audioSandboxEnabledChanged);
     connect(m_meterVisible,   &QCheckBox::toggled, this, &SettingsWindow::audioMeterVisibleChanged);
     connect(m_exportEnabled,  &QCheckBox::toggled, this, &SettingsWindow::audioExportEnabledChanged);
-    connect(m_resetAllSandbox,&QPushButton::clicked, this, &SettingsWindow::resetAllAudioSandboxRequested);
+    connect(m_resetAllSandboxBtn,&QPushButton::clicked, this, &SettingsWindow::resetAllAudioSandboxRequested);
     connect(m_profileCombo,   QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx){ emit activeProfileChanged(idx); });
     connect(m_profileExport,  &QPushButton::clicked, this, [this]{
@@ -445,8 +398,20 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_import, &QPushButton::clicked, this, &SettingsWindow::importRequested);
     connect(m_resetHotkeys, &QPushButton::clicked, this, &SettingsWindow::resetAllHotkeysRequested);
     connect(m_close,  &QPushButton::clicked, this, &QDialog::accept);
+    connect(m_adaptWaveform, &QCheckBox::toggled, this, &SettingsWindow::adaptWaveformToFxChanged);
+
+    connect(m_resetChVolume,      &QCheckBox::toggled, this, &SettingsWindow::resetChVolumeChanged);
+    connect(m_resetChFx,          &QCheckBox::toggled, this, &SettingsWindow::resetChFxChanged);
+    connect(m_resetChFile,        &QCheckBox::toggled, this, &SettingsWindow::resetChFileChanged);
+    connect(m_resetChSandbox,     &QCheckBox::toggled, this, &SettingsWindow::resetChSandboxChanged);
+    connect(m_resetAllRemoveExtra,&QCheckBox::toggled, this, &SettingsWindow::resetAllRemoveExtraChanged);
+    connect(m_resetAllVolume,     &QCheckBox::toggled, this, &SettingsWindow::resetAllVolumeChanged);
+    connect(m_resetAllFx,         &QCheckBox::toggled, this, &SettingsWindow::resetAllFxChanged);
+    connect(m_resetAllFiles,      &QCheckBox::toggled, this, &SettingsWindow::resetAllFilesChanged);
+    connect(m_resetAllSandbox,    &QCheckBox::toggled, this, &SettingsWindow::resetAllSandboxChanged);
 }
 
+// ---- Getters ----
 bool SettingsWindow::earrapeProtection()      const { return m_earrape->isChecked();        }
 bool SettingsWindow::linkVolumes()            const { return m_linkVolumes->isChecked();    }
 bool SettingsWindow::rememberPitchSpeed()     const { return m_rememberFx->isChecked();     }
@@ -472,7 +437,19 @@ bool SettingsWindow::showHotkeysOnButtons()   const { return m_showHotkeys->isCh
 bool SettingsWindow::disableHotkeys()         const { return m_disableHotkeys->isChecked(); }
 int  SettingsWindow::rows()                   const { return m_rows->value();               }
 int  SettingsWindow::cols()                   const { return m_cols->value();               }
+bool SettingsWindow::adaptWaveformToFx()      const { return m_adaptWaveform->isChecked();  }
 
+bool SettingsWindow::resetChVolume()          const { return m_resetChVolume->isChecked();      }
+bool SettingsWindow::resetChFx()              const { return m_resetChFx->isChecked();          }
+bool SettingsWindow::resetChFile()            const { return m_resetChFile->isChecked();         }
+bool SettingsWindow::resetChSandbox()         const { return m_resetChSandbox->isChecked();     }
+bool SettingsWindow::resetAllRemoveExtra()    const { return m_resetAllRemoveExtra->isChecked(); }
+bool SettingsWindow::resetAllVolume()         const { return m_resetAllVolume->isChecked();      }
+bool SettingsWindow::resetAllFx()             const { return m_resetAllFx->isChecked();          }
+bool SettingsWindow::resetAllFiles()          const { return m_resetAllFiles->isChecked();       }
+bool SettingsWindow::resetAllSandbox()        const { return m_resetAllSandbox->isChecked();     }
+
+// ---- Setters ----
 void SettingsWindow::setEarrapeProtection(bool on)     { QSignalBlocker b(m_earrape);        m_earrape->setChecked(on);        }
 void SettingsWindow::setLinkVolumes(bool on)           { QSignalBlocker b(m_linkVolumes);    m_linkVolumes->setChecked(on);    }
 void SettingsWindow::setRememberPitchSpeed(bool on)    { QSignalBlocker b(m_rememberFx);     m_rememberFx->setChecked(on);     }
@@ -484,6 +461,24 @@ void SettingsWindow::setAudioSandboxEnabled(bool on)   { QSignalBlocker b(m_sand
 void SettingsWindow::setAudioMeterVisible(bool on)     { QSignalBlocker b(m_meterVisible);    m_meterVisible->setChecked(on);    }
 void SettingsWindow::setAudioExportEnabled(bool on)    { QSignalBlocker b(m_exportEnabled);   m_exportEnabled->setChecked(on);   }
 void SettingsWindow::setActiveProfile(int p)           { QSignalBlocker b(m_profileCombo);    if (p >= 0 && p < m_profileCombo->count()) m_profileCombo->setCurrentIndex(p); }
+void SettingsWindow::setMultiSoundboard(bool on)       { QSignalBlocker b(m_multi);          m_multi->setChecked(on);          }
+void SettingsWindow::setMuteLocally(bool on)           { QSignalBlocker b(m_muteLocally);    m_muteLocally->setChecked(on);    }
+void SettingsWindow::setMuteMyself(bool on)            { QSignalBlocker b(m_muteMyself);     m_muteMyself->setChecked(on);     }
+void SettingsWindow::setShowHotkeysOnButtons(bool on)  { QSignalBlocker b(m_showHotkeys);    m_showHotkeys->setChecked(on);    }
+void SettingsWindow::setDisableHotkeys(bool on)        { QSignalBlocker b(m_disableHotkeys); m_disableHotkeys->setChecked(on); }
+void SettingsWindow::setRows(int r)                    { QSignalBlocker b(m_rows);           m_rows->setValue(r);              }
+void SettingsWindow::setCols(int c)                    { QSignalBlocker b(m_cols);           m_cols->setValue(c);              }
+void SettingsWindow::setAdaptWaveformToFx(bool on)     { QSignalBlocker b(m_adaptWaveform);  m_adaptWaveform->setChecked(on);  }
+
+void SettingsWindow::setResetChVolume(bool on)         { QSignalBlocker b(m_resetChVolume);      m_resetChVolume->setChecked(on);      }
+void SettingsWindow::setResetChFx(bool on)             { QSignalBlocker b(m_resetChFx);          m_resetChFx->setChecked(on);          }
+void SettingsWindow::setResetChFile(bool on)           { QSignalBlocker b(m_resetChFile);        m_resetChFile->setChecked(on);        }
+void SettingsWindow::setResetChSandbox(bool on)        { QSignalBlocker b(m_resetChSandbox);     m_resetChSandbox->setChecked(on);     }
+void SettingsWindow::setResetAllRemoveExtra(bool on)   { QSignalBlocker b(m_resetAllRemoveExtra);m_resetAllRemoveExtra->setChecked(on); }
+void SettingsWindow::setResetAllVolume(bool on)        { QSignalBlocker b(m_resetAllVolume);     m_resetAllVolume->setChecked(on);      }
+void SettingsWindow::setResetAllFx(bool on)            { QSignalBlocker b(m_resetAllFx);         m_resetAllFx->setChecked(on);          }
+void SettingsWindow::setResetAllFiles(bool on)         { QSignalBlocker b(m_resetAllFiles);      m_resetAllFiles->setChecked(on);       }
+void SettingsWindow::setResetAllSandbox(bool on)       { QSignalBlocker b(m_resetAllSandbox);    m_resetAllSandbox->setChecked(on);     }
 
 void SettingsWindow::setTheme(bool enabled, const QColor &accent, const QColor &waveform, const QColor &background, int contrast, const QColor &text, const QColor &button)
 {
@@ -520,10 +515,3 @@ void SettingsWindow::setTheme(bool enabled, const QColor &accent, const QColor &
     }
     m_themeButtonBtn->setStyleSheet(QString("QPushButton { background-color: %1; border: 1px solid #555; }").arg(buttonPreview.name()));
 }
-void SettingsWindow::setMultiSoundboard(bool on)       { QSignalBlocker b(m_multi);          m_multi->setChecked(on);          }
-void SettingsWindow::setMuteLocally(bool on)           { QSignalBlocker b(m_muteLocally);    m_muteLocally->setChecked(on);    }
-void SettingsWindow::setMuteMyself(bool on)            { QSignalBlocker b(m_muteMyself);     m_muteMyself->setChecked(on);     }
-void SettingsWindow::setShowHotkeysOnButtons(bool on)  { QSignalBlocker b(m_showHotkeys);    m_showHotkeys->setChecked(on);    }
-void SettingsWindow::setDisableHotkeys(bool on)        { QSignalBlocker b(m_disableHotkeys); m_disableHotkeys->setChecked(on); }
-void SettingsWindow::setRows(int r)                    { QSignalBlocker b(m_rows);           m_rows->setValue(r);              }
-void SettingsWindow::setCols(int c)                    { QSignalBlocker b(m_cols);           m_cols->setValue(c);              }

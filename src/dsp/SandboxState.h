@@ -26,6 +26,9 @@ struct SandboxState
         Stage_Delay,
         Stage_Reverb,
         Stage_Limiter,
+        Stage_Bitcrusher,
+        Stage_Mono,
+        Stage_GenLoss,
         Stage_COUNT
     };
 
@@ -148,13 +151,26 @@ struct SandboxState
     float limiterRatio     = 4.0f;
     float limiterGateThresh = -60.0f;
 
+    // ---- Bitcrusher (quality degradation) ----
+    bool  bitcrusherEnabled   = false;
+    int   bitcrusherBitDepth  = 16;    // 1..16 (16 = lossless)
+    float bitcrusherRate      = 48000.0f; // 500..48000 (48000 = lossless)
+
+    // ---- Mono ----
+    bool  monoEnabled = false;
+
+    // ---- Generation Loss (re-encoding degradation) ----
+    bool  genLossEnabled     = false;
+    int   genLossGenerations = 1;          // 1..1000
+
     // DSP pipeline order (user-draggable). Default matches the
     // hardcoded chain: EQ→Comp→Sat→Spatial→Chorus→Flanger→Flangus→
     // Phaser→Delay→Reverb→Limiter.
     int pipelineOrder[Stage_COUNT] = {
         Stage_EQ, Stage_Compressor, Stage_Saturator, Stage_Spatial,
         Stage_Chorus, Stage_Flanger, Stage_Flangus, Stage_Phaser,
-        Stage_Delay, Stage_Reverb, Stage_Limiter
+        Stage_Delay, Stage_Reverb, Stage_Bitcrusher, Stage_Mono,
+        Stage_GenLoss, Stage_Limiter
     };
 
     QJsonObject toJson() const;

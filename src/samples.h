@@ -159,6 +159,7 @@ private:
 		// re-applied whenever the slot's dsp is created/cleared.
 		float fxReverbWet = 0.0f;
 		bool loop = false;
+		double stretchBaseTime = 0.0;
 
 		PlaybackSlot();
 		~PlaybackSlot();

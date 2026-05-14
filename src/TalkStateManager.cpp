@@ -31,7 +31,6 @@ const char * TalkStateManager::toString(talk_state_e ts)
 //---------------------------------------------------------------
 TalkStateManager::TalkStateManager() :
 	previousTalkState(TS_INVALID),
-	defaultTalkState(TS_INVALID),
 	currentTalkState(TS_INVALID),
 	activeServerId(0),
 	playingServerId(0),
@@ -129,31 +128,33 @@ void TalkStateManager::setTalkTransMode()
 		return;
 	talk_state_e ts = previousTalkState;
 	previousTalkState = TS_INVALID;
-	setTalkState(activeServerId, ts);
+	// Skip the TS3 API call if the client is already in the target
+	// state. Avoids an unnecessary flushClientSelfUpdates round-trip
+	// that can briefly glitch VAD / continuous-transmission.
+	uint64 srv = playingServerId ? playingServerId : activeServerId;
+	talk_state_e current = getTalkState(srv);
+	if (current != TS_INVALID && current == ts) {
+		currentTalkState = ts;
+		return;
+	}
+	setTalkState(srv, ts);
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 void TalkStateManager::setPlayTransMode()
 {
-	talk_state_e s = getTalkState(activeServerId);
-	if (defaultTalkState == TS_INVALID)
-		defaultTalkState = s; // Set once at first played file
-							  // Don't accept a sudden change to TS_CONT_TRANS except when defaultTalkState is also TS_CONT_TRANS
-	if (s == TS_CONT_TRANS)
-		s = defaultTalkState;
-
-	// When s is invalid, use defaultTalkState (could also be invalid, care)
-	if (s == TS_INVALID)
-		s = defaultTalkState;
-
-	// If state is still invalid it's bad luck :/
-	if (s == TS_INVALID)
-		return;
-
-	previousTalkState = s;
+	// Only snapshot the user's real talk state the FIRST time we
+	// override it. On subsequent calls (re-arm after PTT release,
+	// unpause, etc.) we already know the original state.
+	if (previousTalkState == TS_INVALID) {
+		talk_state_e s = getTalkState(activeServerId);
+		if (s == TS_INVALID)
+			return;
+		previousTalkState = s;
+	}
 	setContinuousTransmission(activeServerId);
 }
 
@@ -169,14 +170,11 @@ void TalkStateManager::setActiveServerId(uint64 id)
 	talk_state_e oldCurrentTS = currentTalkState;
 	if (activeServerId != 0 && previousTalkState != TS_INVALID)
 		setTalkState(activeServerId, previousTalkState);
+	previousTalkState = TS_INVALID;
 	activeServerId = id;
-	if (oldCurrentTS == TS_CONT_TRANS)
+	if (oldCurrentTS == TS_CONT_TRANS && anySlotStillPlaying())
 	{
-		previousTalkState = id != 0 ? getTalkState(id) : TS_INVALID;
-		if (previousTalkState != TS_INVALID)
-			setContinuousTransmission(id);
-		else
-			sb_stopPlayback();
+		setPlayTransMode();
 	}
 }
 

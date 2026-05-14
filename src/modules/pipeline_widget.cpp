@@ -18,6 +18,9 @@ const QColor kStageColors[] = {
     QColor(0x7F, 0x8C, 0x8D),  // Delay - grey
     QColor(0x29, 0x80, 0xB9),  // Reverb - dark blue
     QColor(0x95, 0x5B, 0xA5),  // Limiter - mauve
+    QColor(0xD3, 0x54, 0x00),  // Bitcrusher - burnt orange
+    QColor(0x56, 0x6D, 0x7E),  // Mono - steel blue
+    QColor(0x8B, 0x00, 0x00),  // GenLoss - dark red
 };
 }
 

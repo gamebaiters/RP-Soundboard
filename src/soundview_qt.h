@@ -12,9 +12,12 @@
 
 #include <QWidget>
 #include <QPainterPath>
+#include <QElapsedTimer>
 #include <memory>
+#include <vector>
 
 #include "SoundInfo.h"
+#include "dsp/SandboxState.h"
 
 class QTimer;
 
@@ -27,6 +30,9 @@ public:
 	void setSound(const SoundInfo &sound);
 	void setPlaybackPosition(double fraction);
 	void clearPlayback();
+	void setAdaptToFx(bool on);
+	void setSandboxState(const SandboxState &s);
+	void notifySeek();
 
 signals:
 	void seekRequested(double fraction);
@@ -40,20 +46,30 @@ protected:
 
 private slots:
 	void onTimer();
+	void onLoadTick();
 
 private:
 	void drawWaves(QPainter *painter);
 	void preparePaths();
+	void applyFxToBins(std::vector<float> &binsL, std::vector<float> &binsR, size_t count) const;
 	double fractionFromMouseX(int x) const;
+	void startStretchLoadAnimation(int durationMs);
 
 private:
 	SoundInfo m_soundInfo;
 	QTimer *m_timer;
 	size_t m_drawnBins;
 	QPainterPath m_path[2];
-	double m_playbackPosition; // 0.0 to 1.0
+	double m_playbackPosition;
 	bool m_dragging;
-	bool m_active; // true when a sound is loaded/playing
+	bool m_active;
+	bool m_adaptToFx = false;
+	SandboxState m_sandbox;
+
+	QTimer        *m_loadTimer = nullptr;
+	QElapsedTimer  m_loadElapsed;
+	int            m_loadDurationMs = 0;
+	bool           m_loadActive = false;
 };
 
 #endif // rpsbsrc__soundview_qt_H__

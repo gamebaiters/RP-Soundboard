@@ -132,6 +132,8 @@ set(sources
 	src/dsp/Delay.cpp
 	src/dsp/Limiter.h
 	src/dsp/Limiter.cpp
+	src/dsp/Bitcrusher.h
+	src/dsp/GenerationLoss.h
 
 	# --- Sandbox per-channel UI ---
 	src/modules/channel_meter.h

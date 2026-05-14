@@ -13,6 +13,8 @@
 #include "Phaser.h"
 #include "Delay.h"
 #include "Limiter.h"
+#include "Bitcrusher.h"
+#include "GenerationLoss.h"
 
 #include <vector>
 
@@ -52,11 +54,17 @@ public:
                  float &peakL, float &peakR, bool isCapture);
 
     // ---- Paulstretch (streaming, dual-path) ----
-    bool isStretchEnabled() const { return m_state.stretchEnabled; }
+    bool isStretchEnabled() const { return m_state.enabled && m_state.stretchEnabled; }
     // Frames the host should consume from the source ring per output
     // window. = framesOut when stretch is off, ceil(framesOut/factor)
-    // otherwise.
+    // otherwise. During priming, returns outputFrames to fill the
+    // source buffer at real-time rate.
     int  inputFramesNeededFor(int outputFrames) const;
+    // Current paulstretch read position in seconds (playback path).
+    double stretchPlaybackPosition() const;
+    // True when the capture-side paulstretch has read through all
+    // fed source frames at least once.
+    bool stretchCaptureDone() const;
     // Push N decoded short stereo frames into one of the paulstretch
     // feed rings. isCapture selects which side: false = playback ring
     // (local), true = capture ring (server).
@@ -98,6 +106,8 @@ private:
         Delay      delay;
         Reverb     reverb;
         Limiter    limiter;
+        Bitcrusher     bitcrusher;
+        GenerationLoss genLoss;
         double     rotPhase = 0.0;
         int        rotBlockCounter = 0;
     };

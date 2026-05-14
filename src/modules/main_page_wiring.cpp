@@ -89,7 +89,6 @@ void MainPageModelObserver::notify(ConfigModel &model,
                     *dirtyFlag = false;
                     page->buttonGrid()->setRowsCols(modelPtr->getRows(), modelPtr->getCols());
                     pushSoundsToGrid(page, modelPtr);
-                    // Re-apply search filter after grid rebuild (bug fix #4)
                     QString currentFilter = page->searchBar()->filter();
                     if (!currentFilter.isEmpty())
                         page->buttonGrid()->setSearchFilter(currentFilter);
@@ -148,6 +147,16 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     w->setMultiSoundboard(model->getMultiSoundboard());
     w->setShowHotkeysOnButtons(model->getShowHotkeysOnButtons());
     w->setDisableHotkeys(!model->getHotkeysEnabled());
+    w->setAdaptWaveformToFx(model->getAdaptWaveformToFx());
+    w->setResetChVolume(model->getResetChVolume());
+    w->setResetChFx(model->getResetChFx());
+    w->setResetChFile(model->getResetChFile());
+    w->setResetChSandbox(model->getResetChSandbox());
+    w->setResetAllRemoveExtra(model->getResetAllRemoveExtra());
+    w->setResetAllVolume(model->getResetAllVolume());
+    w->setResetAllFx(model->getResetAllFx());
+    w->setResetAllFiles(model->getResetAllFiles());
+    w->setResetAllSandbox(model->getResetAllSandbox());
     // Mute checkboxes live on the main page bottom bar (not in Settings).
     QSignalBlocker bml(page->muteLocallyBox());
     QSignalBlocker bmm(page->muteMyselfBox());
@@ -414,6 +423,20 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         HotkeyBlock::blockAll(model->numSounds());
         page->buttonGrid()->clearAllHotkeyOverlays();
     });
+
+    QObject::connect(w, &SettingsWindow::adaptWaveformToFxChanged, [model, page](bool v){
+        model->setAdaptWaveformToFx(v);
+        for (auto *ch : page->channels()) ch->waveform()->setAdaptToFx(v);
+    });
+    QObject::connect(w, &SettingsWindow::resetChVolumeChanged, [model](bool v){ model->setResetChVolume(v); });
+    QObject::connect(w, &SettingsWindow::resetChFxChanged, [model](bool v){ model->setResetChFx(v); });
+    QObject::connect(w, &SettingsWindow::resetChFileChanged, [model](bool v){ model->setResetChFile(v); });
+    QObject::connect(w, &SettingsWindow::resetChSandboxChanged, [model](bool v){ model->setResetChSandbox(v); });
+    QObject::connect(w, &SettingsWindow::resetAllRemoveExtraChanged, [model](bool v){ model->setResetAllRemoveExtra(v); });
+    QObject::connect(w, &SettingsWindow::resetAllVolumeChanged, [model](bool v){ model->setResetAllVolume(v); });
+    QObject::connect(w, &SettingsWindow::resetAllFxChanged, [model](bool v){ model->setResetAllFx(v); });
+    QObject::connect(w, &SettingsWindow::resetAllFilesChanged, [model](bool v){ model->setResetAllFiles(v); });
+    QObject::connect(w, &SettingsWindow::resetAllSandboxChanged, [model](bool v){ model->setResetAllSandbox(v); });
 }
 
 void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
@@ -833,16 +856,18 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         QObject::connect(ch->waveform(), &WaveformPlayer::pauseClicked,
                          [sampler, slot]{ if (sampler) sampler->pausePlayback(slot); });
         QObject::connect(ch->waveform(), &WaveformPlayer::skip,
-                         [sampler, slot](int sec){
+                         [sampler, slot, ch](int sec){
             if (!sampler) return;
             double cur = sampler->getPosition(slot);
             sampler->seek(cur + sec, slot);
+            ch->waveform()->notifySeek();
         });
         QObject::connect(ch->waveform(), &WaveformPlayer::seekRequested,
-                         [sampler, slot](double frac){
+                         [sampler, slot, ch](double frac){
             if (!sampler) return;
             double len = sampler->getLength(slot);
             if (len > 0.0) sampler->seek(frac * len, slot);
+            ch->waveform()->notifySeek();
         });
         QObject::connect(ch->waveform(), &WaveformPlayer::loopToggled,
                          [sampler, slot](bool on){
@@ -881,14 +906,33 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
     });
 
     QObject::connect(page->resetButton(), &ResetChannelsBtn::resetRequested,
-                     [page, sampler]{
+                     [page, sampler, model]{
         if (sampler) sampler->stopPlayback(-1);
-        while (page->channels().size() > 1)
-            page->removeChannel(page->channels().size() - 1);
-        if (auto *primary = page->channels().value(0)) {
-            primary->setTitle(QObject::tr("Channel 1"));
-            primary->applyState(ChannelState{});
-            ChannelStatePersistence::saveName(0, primary->title());
+        bool rmExtra  = model->getResetAllRemoveExtra();
+        bool rstVol   = model->getResetAllVolume();
+        bool rstFx    = model->getResetAllFx();
+        bool rstFiles = model->getResetAllFiles();
+        bool rstSbx   = model->getResetAllSandbox();
+
+        if (rmExtra) {
+            while (page->channels().size() > 1)
+                page->removeChannel(page->channels().size() - 1);
+        }
+
+        ChannelState def;
+        for (int i = 0; i < page->channels().size(); ++i) {
+            auto *ch = page->channels().at(i);
+            ChannelState cur = ch->state();
+            if (rstVol)   { cur.volumeLocal = def.volumeLocal; cur.volumeRemote = def.volumeRemote; }
+            if (rstFx)    { cur.pitch = def.pitch; cur.speed = def.speed; cur.reverb = def.reverb; cur.fxSync = def.fxSync; }
+            if (rstFiles) { cur.filename.clear(); }
+            if (rstSbx)   { cur.sandbox = SandboxState(); }
+            ch->applyState(cur);
+            if (i == 0) {
+                ch->setTitle(QObject::tr("Channel 1"));
+                ChannelStatePersistence::saveName(0, ch->title());
+            }
+            if (sampler && rstSbx) sampler->clearSlotSandbox(i);
         }
     });
 }
@@ -1056,7 +1100,6 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                     sampler->clearSlotSandbox(i);
             }
         }
-        // Re-apply search filter (bug fix #4)
         QString currentFilter = page->searchBar()->filter();
         if (!currentFilter.isEmpty())
             page->buttonGrid()->setSearchFilter(currentFilter);
@@ -1193,11 +1236,23 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     // every channel-add so dynamically created channels get the same
     // forwarding plumbing.
     auto wireChannelSandbox = [sampler, applyChannelSandboxFlags, model, page](Channel *ch){
-        QObject::connect(ch, &Channel::sandboxStateChanged, [sampler](int slot, const SandboxState &s){
+        QObject::connect(ch, &Channel::sandboxStateChanged, [sampler, page, model](int slot, const SandboxState &s){
             if (sampler) sampler->setSlotSandboxState(slot, s);
+            if (model->getAdaptWaveformToFx() && slot >= 0 && slot < page->channels().size())
+                page->channels().at(slot)->waveform()->setSandboxState(s);
         });
-        QObject::connect(ch, &Channel::sandboxResetRequested, [sampler](int slot){
+        QObject::connect(ch, &Channel::sandboxResetRequested, [sampler, model, page](int slot){
             if (sampler) sampler->clearSlotSandbox(slot);
+            if (slot >= 0 && slot < page->channels().size()) {
+                auto *rch = page->channels().at(slot);
+                ChannelState cur = rch->state();
+                ChannelState def;
+                if (model->getResetChVolume()) { cur.volumeLocal = def.volumeLocal; cur.volumeRemote = def.volumeRemote; }
+                if (model->getResetChFx())     { cur.pitch = def.pitch; cur.speed = def.speed; cur.reverb = def.reverb; cur.fxSync = def.fxSync; }
+                if (model->getResetChFile())    { cur.filename.clear(); }
+                cur.sandbox = SandboxState();
+                rch->applyState(cur);
+            }
         });
         QObject::connect(ch, &Channel::exportRequested, page, [page, model](int slot){
             // slot here is Channel::m_id which equals the channel's
@@ -1271,6 +1326,9 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         ch->setSandboxFeatureEnabled(model->getAudioSandboxEnabled());
         ch->setMeterVisible(model->getAudioMeterVisible());
         ch->setExportVisible(model->getAudioExportEnabled());
+        ch->waveform()->setAdaptToFx(model->getAdaptWaveformToFx());
+        if (model->getAdaptWaveformToFx())
+            ch->waveform()->setSandboxState(ch->sandboxState());
     };
     for (auto *ch : page->channels()) wireChannelSandbox(ch);
     QObject::connect(page, &MainPage::channelAdded, [page, wireChannelSandbox](int idx){

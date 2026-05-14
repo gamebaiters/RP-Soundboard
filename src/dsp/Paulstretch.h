@@ -42,6 +42,7 @@ public:
 
     void setEnabled(bool on)              { m_enabled.store(on); }
     bool isEnabled() const                { return m_enabled.load(); }
+    bool hasOutput() const                { return m_outFill > 0 || !m_enabled.load(); }
 
     // 1.0 = no stretch (just phase-scrambled), grows from there.
     void setStretchFactor(float s);
@@ -60,6 +61,15 @@ public:
     void seekToFrame(int frame);
     // Current input frame (floor of inputPos, modulo source length).
     int  currentFrame() const;
+
+    // True while the source buffer has less data than one FFT window.
+    // During priming, synthOneWindow outputs silence.
+    bool isPriming() const { return m_srcFrames < m_size; }
+
+    // True once the cumulative source consumption >= source frames.
+    // Used to detect end-of-file with paulstretch enabled (the ring
+    // drains long before paulstretch finishes reading the source).
+    bool hasProcessedAllSource() const;
 
     // Fill `frames` of stereo output (de-interleaved into outL / outR).
     // Caller has already zeroed the buffers.
@@ -82,10 +92,7 @@ private:
     static constexpr int kMaxSize = 65536;
 
     double m_fs = 48000.0;
-    // Atomics on the parameters that the GUI thread mutates while the
-    // audio thread reads them. Without this the optimiser can hoist the
-    // float load out of the synth loop and pin the value forever - which
-    // is the "factor change has no effect until I toggle enable" bug.
+    // Atomic: GUI thread mutates, audio thread reads.
     std::atomic<bool>  m_enabled{false};
     int    m_size = 8192;            // FFT size (power of two), <= kMaxSize
     int    m_hop  = 4096;            // = m_size / 2
@@ -113,6 +120,8 @@ private:
     int   m_outWriteIdx = 0;
     int   m_outReadIdx  = 0;
     int   m_outFill     = 0;
+
+    double m_totalConsumed = 0.0;
 
     std::mt19937 m_rng;
 };

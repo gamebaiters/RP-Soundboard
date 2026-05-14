@@ -993,6 +993,7 @@ int InputFileFFmpeg::_seek( double seconds )
 	m_skipSamples = 0;
 	m_convertedSamples = (int64_t)(seconds * (double)m_outputSamplerate);
 	m_filePosition = seconds;
+	m_done = false;
 	return 0;
 }
 

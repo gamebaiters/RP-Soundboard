@@ -6,6 +6,7 @@
 
 #include <QWidget>
 #include "../SoundInfo.h"
+#include "../dsp/SandboxState.h"
 
 class QLabel;
 class QPushButton;
@@ -35,6 +36,9 @@ public slots:
     // time label and transport buttons stay so the user can still
     // play / pause / seek even in the compact "no waveform" mode.
     void setWavePaintVisible(bool on);
+    void setAdaptToFx(bool on);
+    void setSandboxState(const SandboxState &s);
+    void notifySeek();
 
 signals:
     void playClicked();

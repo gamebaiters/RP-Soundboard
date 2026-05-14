@@ -8,7 +8,7 @@ const char *SandboxState::stageName(int stage)
     static const char *names[Stage_COUNT] = {
         "EQ", "Compressor", "Saturator", "Spatial",
         "Chorus", "Flanger", "Flangus", "Phaser",
-        "Delay", "Reverb", "Limiter"
+        "Delay", "Reverb", "Limiter", "Bitcrush", "Mono", "GenLoss"
     };
     if (stage < 0 || stage >= Stage_COUNT) return "?";
     return names[stage];
@@ -103,6 +103,15 @@ QJsonObject SandboxState::toJson() const
     o["limiterRatio"]     = static_cast<double>(limiterRatio);
     o["limiterGateThresh"]= static_cast<double>(limiterGateThresh);
 
+    o["bitcrusherEnabled"]  = bitcrusherEnabled;
+    o["bitcrusherBitDepth"] = bitcrusherBitDepth;
+    o["bitcrusherRate"]     = static_cast<double>(bitcrusherRate);
+
+    o["monoEnabled"]        = monoEnabled;
+
+    o["genLossEnabled"]     = genLossEnabled;
+    o["genLossGenerations"] = genLossGenerations;
+
     QJsonArray pipe;
     for (int i = 0; i < Stage_COUNT; ++i) pipe.append(pipelineOrder[i]);
     o["pipelineOrder"] = pipe;
@@ -194,14 +203,30 @@ SandboxState SandboxState::fromJson(const QJsonObject &o)
     s.limiterRatio     = static_cast<float>(o.value("limiterRatio").toDouble(4.0));
     s.limiterGateThresh= static_cast<float>(o.value("limiterGateThresh").toDouble(-60.0));
 
+    s.bitcrusherEnabled  = o.value("bitcrusherEnabled").toBool(false);
+    s.bitcrusherBitDepth = o.value("bitcrusherBitDepth").toInt(16);
+    s.bitcrusherRate     = static_cast<float>(o.value("bitcrusherRate").toDouble(48000.0));
+
+    s.monoEnabled        = o.value("monoEnabled").toBool(false);
+
+    s.genLossEnabled     = o.value("genLossEnabled").toBool(false);
+    s.genLossGenerations = o.value("genLossGenerations").toInt(1);
+
     QJsonArray pipe = o.value("pipelineOrder").toArray();
-    if (pipe.size() == Stage_COUNT) {
+    if (pipe.size() >= 1 && pipe.size() <= Stage_COUNT) {
         std::set<int> seen;
         bool valid = true;
-        for (int i = 0; i < Stage_COUNT; ++i) {
+        int count = pipe.size();
+        for (int i = 0; i < count; ++i) {
             int v = pipe[i].toInt(-1);
             if (v < 0 || v >= Stage_COUNT || !seen.insert(v).second) { valid = false; break; }
             s.pipelineOrder[i] = v;
+        }
+        if (valid && count < Stage_COUNT) {
+            for (int st = 0; st < Stage_COUNT; ++st) {
+                if (seen.find(st) == seen.end())
+                    s.pipelineOrder[count++] = st;
+            }
         }
         if (!valid) defaultPipelineOrder(s.pipelineOrder);
     }
@@ -230,5 +255,8 @@ bool SandboxState::isModified() const
     if (saturatorEnabled) return true;
     if (delayEnabled) return true;
     if (limiterEnabled) return true;
+    if (bitcrusherEnabled) return true;
+    if (monoEnabled) return true;
+    if (genLossEnabled) return true;
     return false;
 }

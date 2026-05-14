@@ -172,6 +172,28 @@ public:
 	inline bool getAudioExportEnabled() const { return m_audioExportEnabled; }
 	void setAudioExportEnabled(bool on);
 
+	inline bool getAdaptWaveformToFx() const { return m_adaptWaveformToFx; }
+	void setAdaptWaveformToFx(bool on);
+
+	inline bool getResetChVolume() const { return m_resetChVolume; }
+	void setResetChVolume(bool on);
+	inline bool getResetChFx() const { return m_resetChFx; }
+	void setResetChFx(bool on);
+	inline bool getResetChFile() const { return m_resetChFile; }
+	void setResetChFile(bool on);
+	inline bool getResetChSandbox() const { return m_resetChSandbox; }
+	void setResetChSandbox(bool on);
+	inline bool getResetAllRemoveExtra() const { return m_resetAllRemoveExtra; }
+	void setResetAllRemoveExtra(bool on);
+	inline bool getResetAllVolume() const { return m_resetAllVolume; }
+	void setResetAllVolume(bool on);
+	inline bool getResetAllFx() const { return m_resetAllFx; }
+	void setResetAllFx(bool on);
+	inline bool getResetAllFiles() const { return m_resetAllFiles; }
+	void setResetAllFiles(bool on);
+	inline bool getResetAllSandbox() const { return m_resetAllSandbox; }
+	void setResetAllSandbox(bool on);
+
 	void addObserver(Observer *obs);
 	void remObserver(Observer *obs);
 
@@ -234,6 +256,17 @@ private:
 	bool m_audioSandboxEnabled;
 	bool m_audioMeterVisible;
 	bool m_audioExportEnabled = false;
+	bool m_adaptWaveformToFx = false;
+
+	bool m_resetChVolume     = true;
+	bool m_resetChFx         = true;
+	bool m_resetChFile       = true;
+	bool m_resetChSandbox    = true;
+	bool m_resetAllRemoveExtra = true;
+	bool m_resetAllVolume    = true;
+	bool m_resetAllFx        = true;
+	bool m_resetAllFiles     = true;
+	bool m_resetAllSandbox   = true;
 
 	uint m_nextUpdateCheck;
 };

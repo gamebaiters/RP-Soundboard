@@ -16,6 +16,7 @@
 #include <QColorDialog>
 #include <QSlider>
 #include <QScrollArea>
+#include <QSettings>
 #include "../common.h"
 
 namespace {
@@ -341,9 +342,42 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     btnRow->addStretch(1);
     btnRow->addWidget(m_close);
 
+    // ============== Language section ==============
+    // Self-contained: persisted directly to QSettings and read back at
+    // plugin init. Applied on the next plugin load (no live switch).
+    auto *langLay = new QVBoxLayout;
+    {
+        auto *row = new QHBoxLayout;
+        row->addWidget(new QLabel(tr("Interface language:")));
+        auto *langCombo = new QComboBox(this);
+        langCombo->addItem(tr("Automatic (system language)"), QStringLiteral("auto"));
+        langCombo->addItem(QStringLiteral("English"),  QStringLiteral("en"));
+        langCombo->addItem(QStringLiteral("Italiano"), QStringLiteral("it"));
+        QSettings ls(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        int ci = langCombo->findData(ls.value(QStringLiteral("language"),
+                                              QStringLiteral("auto")).toString());
+        langCombo->setCurrentIndex(ci >= 0 ? ci : 0);
+        row->addWidget(langCombo, 1);
+        langLay->addLayout(row);
+        auto *note = new QLabel(tr(
+            "Italian is selected automatically when the system language "
+            "is Italian. A change here is applied the next time the "
+            "plugin loads (reload the plugin or restart TeamSpeak)."), this);
+        note->setWordWrap(true);
+        note->setStyleSheet("color: #999; font-size: 11px;");
+        langLay->addWidget(note);
+        connect(langCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [langCombo](int){
+            QSettings s(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+            s.setValue(QStringLiteral("language"), langCombo->currentData().toString());
+            s.sync();
+        });
+    }
+
     // Build the scrollable body with ExpandableSection for each category
     auto *body = new QVBoxLayout;
     body->setSpacing(2);
+    body->addWidget(makeSection(tr("Language"),       langLay,     this));
     body->addWidget(makeSection(tr("Audio"),          audioLay,    this));
     body->addWidget(makeSection(tr("Channels"),       channelsLay, this));
     body->addWidget(makeSection(tr("Button grid"),    gridLay,     this));

@@ -27,6 +27,9 @@
 #include <QEventLoop>
 #include <QEvent>
 #include <QThread>
+#include <QTranslator>
+#include <QLocale>
+#include <QSettings>
 
 #include "main.h"
 #include "plugin.h"
@@ -36,6 +39,7 @@
 #include "SampleVisualizerThread.h"
 #include "config_qt.h"
 #include "about_qt.h"
+#include "howto_qt.h"
 #include "ConfigModel.h"
 #include "UpdateChecker.h"
 #include "SoundInfo.h"
@@ -64,6 +68,7 @@ SpeechBubble *notConnectedBubble = NULL;
 ConfigQt *configDialog = NULL;          // legacy window, kept for fallback
 MainPage *mainPage = NULL;              // active modular UI
 AboutQt *aboutDialog = NULL;
+HowToDialog *howToDialog = NULL;
 Sampler *sampler = NULL;
 TalkStateManager *tsMgr = NULL;
 
@@ -233,6 +238,30 @@ void sb_enableInterface(bool enabled)
 	}
 }
 
+// UI translation. Installed on qApp at plugin init - QTranslator
+// lookups are context-scoped, so it only ever supplies strings for the
+// soundboard's own classes and never re-translates the TS3 host UI.
+static QTranslator *uiTranslator = NULL;
+
+static void sb_installTranslation()
+{
+	QSettings s(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+	QString lang = s.value(QStringLiteral("language"), QStringLiteral("auto")).toString();
+	if (lang == QLatin1String("auto"))
+		lang = (QLocale::system().language() == QLocale::Italian)
+		           ? QStringLiteral("it") : QStringLiteral("en");
+	if (lang == QLatin1String("en"))
+		return;   // source strings are already English
+
+	QTranslator *t = new QTranslator();
+	if (t->load(QStringLiteral(":/i18n/soundboard_") + lang + QStringLiteral(".qm"))) {
+		qApp->installTranslator(t);
+		uiTranslator = t;
+	} else {
+		delete t;
+	}
+}
+
 CAPI void sb_init()
 {
 #ifdef _DEBUG
@@ -244,6 +273,9 @@ CAPI void sb_init()
 	QTimer::singleShot(10, []{
 		configModel = new ConfigModel();
 		configModel->readConfig();
+		// Install the UI translation before any soundboard window is
+		// built - tr() resolves at widget-construction time.
+		sb_installTranslation();
 		// Persistent state: hotkey block list survives TS3 restarts so
 		// a Reset Hotkeys click is permanent until the user re-arms.
 		HotkeyBlock::load();
@@ -296,6 +328,13 @@ CAPI void sb_kill()
 	// TS3's plugin uninstall leaves the file locked.
 	SampleVisualizerThread::GetInstance().stop(true);
 
+	if (uiTranslator)
+	{
+		qApp->removeTranslator(uiTranslator);
+		delete uiTranslator;
+		uiTranslator = NULL;
+	}
+
 	if (configModel)
 	{
 		configModel->remObserver(modelObserver);
@@ -347,6 +386,17 @@ CAPI void sb_kill()
 		aboutDialog->setParent(nullptr);
 		delete aboutDialog;
 		aboutDialog = NULL;
+	}
+
+	// Must be destroyed before TS3 unloads the plugin DLL: a leaked
+	// top-level QWidget keeps a vtable into freed DLL code and crashes
+	// the client on exit.
+	if(howToDialog)
+	{
+		howToDialog->hide();
+		howToDialog->setParent(nullptr);
+		delete howToDialog;
+		howToDialog = NULL;
 	}
 
 	if (updateChecker)
@@ -511,6 +561,17 @@ CAPI void sb_openAbout()
 	if(!aboutDialog)
 		aboutDialog = new AboutQt();
 	aboutDialog->show();
+	aboutDialog->raise();
+	aboutDialog->activateWindow();
+}
+
+CAPI void sb_openHowTo()
+{
+	if(!howToDialog)
+		howToDialog = new HowToDialog();
+	howToDialog->show();
+	howToDialog->raise();
+	howToDialog->activateWindow();
 }
 
 

@@ -1,15 +1,21 @@
 #include "channel_meter.h"
 #include <QPainter>
-#include <QLinearGradient>
 #include <algorithm>
 #include <cmath>
 
 namespace {
-constexpr float kClipThreshold = 0.99f;
-constexpr float kHotThreshold  = 0.85f;
-// 96 segments = 4x previous resolution. Each segment = ~0.4 dB worth
-// of level so the user can read fine differences in playback level.
-constexpr int   kSegmentCount  = 96;
+constexpr float kFloorDb   = -60.0f;
+// Peak-hold marker jumps up instantly, decays slowly so the user can
+// read transient peaks after they have passed.
+constexpr float kPeakDecay = 0.93f;
+
+// Level (0..1.5 linear) -> 0..1 normalised position on a -60..0 dB scale.
+float toNorm(float v) {
+    float db = (v > 1e-6f) ? 20.0f * std::log10(v) : kFloorDb;
+    if (db < kFloorDb) db = kFloorDb;
+    if (db > 0.0f)     db = 0.0f;
+    return (db - kFloorDb) / (0.0f - kFloorDb);
+}
 }
 
 ChannelMeter::ChannelMeter(QWidget *parent) : QWidget(parent)
@@ -24,7 +30,9 @@ void ChannelMeter::setPeak(float l, float r)
     if (l > 1.5f) l = 1.5f;
     if (r < 0.0f) r = 0.0f;
     if (r > 1.5f) r = 1.5f;
-    if (l == m_l && r == m_r) return;
+    // Peak-hold tracks the maximum then decays toward the live level.
+    m_peakHoldL = (l > m_peakHoldL) ? l : std::max(l, m_peakHoldL * kPeakDecay);
+    m_peakHoldR = (r > m_peakHoldR) ? r : std::max(r, m_peakHoldR * kPeakDecay);
     m_l = l;
     m_r = r;
     update();
@@ -33,77 +41,84 @@ void ChannelMeter::setPeak(float l, float r)
 void ChannelMeter::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
-    QRect bg = rect();
-    p.fillRect(bg, QColor(0x14, 0x14, 0x14));
-    p.setRenderHint(QPainter::Antialiasing, false);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const QRect bg = rect();
 
-    // Two stacked LED-style bars. Each bar is a row of small unlit
-    // rectangles; lit segments show cyan -> amber -> red as the
-    // signal climbs. A 1px outer frame keeps the meter readable on
-    // top of the channel theme.
-    p.setPen(QColor(0x33, 0x33, 0x33));
-    p.drawRect(bg.adjusted(0, 0, -1, -1));
+    // The widget is opaque (WA_OpaquePaintEvent) so EVERY pixel must be
+    // painted. Fill the whole rect with a channel-grey first: the four
+    // corners left outside the rounded panel keep this color, so the
+    // recessed panel reads as resting on the channel - never as garbage
+    // and never as a detached box.
+    p.fillRect(bg, QColor(0x33, 0x34, 0x37));
 
-    int padX = 12;
-    int barLeft = padX;
-    int barRight = bg.width() - 4;
-    int barW = barRight - barLeft;
-    if (barW <= 0) return;
-    // 96 segments need a thinner gap to fit the same widget width.
-    // Compute everything off the available pixel budget so the meter
-    // scales with the channel's panel size.
-    int segGap = (barW > kSegmentCount * 2) ? 1 : 0;
-    int segW = std::max(1, (barW - (kSegmentCount - 1) * segGap) / kSegmentCount);
-    int actualBarW = segW * kSegmentCount + segGap * (kSegmentCount - 1);
-    barLeft = padX + (barW - actualBarW) / 2;
+    // Rounded recessed LED panel.
+    const qreal radius = 6.0;
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0x15, 0x17, 0x1a));
+    p.drawRoundedRect(bg, radius, radius);
+    p.setPen(QColor(0x3c, 0x3e, 0x42));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(QRectF(bg).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
 
-    int barH = std::max(4, (bg.height() - 6) / 2);
-    int gapY = 2;
-    int top  = (bg.height() - (barH * 2 + gapY)) / 2;
-    if (top < 1) top = 1;
+    const int padL = 13;   // room for the L / R label
+    const int padR = 6;
+    int barW = bg.width() - padL - padR;
+    if (barW < 6) return;
 
-    auto colorForSeg = [](float frac) {
-        // 0.00..0.70 cyan, 0.70..0.90 amber, 0.90..1.00 red
-        if (frac >= 0.90f) return QColor(0xe0, 0x41, 0x41);
-        if (frac >= 0.70f) return QColor(0xe0, 0xa0, 0x20);
-        return QColor(0x4a, 0xa0, 0xe2);
+    int barH = std::max(4, (bg.height() - 8) / 2);
+    const int gapY = 3;
+    int top = (bg.height() - (barH * 2 + gapY)) / 2;
+    if (top < 2) top = 2;
+
+    // Adaptive segment count: ~6 px per segment, clamped so the meter
+    // still reads as discrete LEDs at any channel width.
+    int segCount = barW / 6;
+    if (segCount < 6)  segCount = 6;
+    if (segCount > 46) segCount = 46;
+    int segGap = (barW > segCount * 3) ? 1 : 0;
+    int segW   = (barW - (segCount - 1) * segGap) / segCount;
+    if (segW < 1) segW = 1;
+    int usedW   = segW * segCount + segGap * (segCount - 1);
+    int barLeft = padL + (barW - usedW) / 2;   // always >= padL
+
+    auto segColor = [](float frac, bool lit) -> QColor {
+        QColor c;
+        if      (frac >= 0.90f) c = QColor(0xe2, 0x4b, 0x4b);   // red
+        else if (frac >= 0.78f) c = QColor(0xe0, 0xa0, 0x22);   // amber
+        else if (frac >= 0.55f) c = QColor(0x49, 0xc0, 0x55);   // green
+        else                    c = QColor(0x3f, 0xb0, 0xe0);   // cyan
+        if (lit) return c;
+        // Unlit: a faint trace of the zone color so the scale is visible.
+        return QColor(c.red() / 6 + 0x18, c.green() / 6 + 0x1a,
+                      c.blue() / 6 + 0x1e);
     };
 
-    auto drawRow = [&](int y, float v, char label) {
-        p.setPen(QColor(0xaa, 0xaa, 0xaa));
-        p.drawText(QRect(2, y, padX - 2, barH),
+    QFont lf = p.font();
+    lf.setPixelSize(9);
+    p.setFont(lf);
+
+    auto drawRow = [&](int y, float v, float hold, char label) {
+        p.setPen(QColor(0x9a, 0x9a, 0x9a));
+        p.drawText(QRect(2, y, padL - 4, barH),
                    Qt::AlignVCenter | Qt::AlignLeft, QString(QChar(label)));
 
-        bool clipping = v >= kClipThreshold;
-        constexpr float kFloorDb = -60.0f;
-        float dbVal = (v > 1e-6f) ? 20.0f * std::log10(v) : kFloorDb;
-        if (dbVal < kFloorDb) dbVal = kFloorDb;
-        if (dbVal > 0.0f) dbVal = 0.0f;
-        float normalized = (dbVal - kFloorDb) / (0.0f - kFloorDb);
-        int litCount = static_cast<int>(std::round(normalized * kSegmentCount));
-        if (litCount < 0) litCount = 0;
-        if (litCount > kSegmentCount) litCount = kSegmentCount;
+        int lit  = static_cast<int>(std::round(toNorm(v)    * segCount));
+        int peak = static_cast<int>(std::round(toNorm(hold) * segCount));
+        lit  = std::min(std::max(lit, 0), segCount);
+        peak = std::min(std::max(peak, 0), segCount);
 
-        // Outline: red flash bar around the meter when clipping.
-        if (clipping) {
-            p.setPen(QColor(0xe0, 0x41, 0x41));
-            p.drawRect(barLeft - 1, y - 1, actualBarW + 1, barH + 1);
-        }
-
-        for (int i = 0; i < kSegmentCount; ++i) {
+        p.setPen(Qt::NoPen);
+        for (int i = 0; i < segCount; ++i) {
             int x = barLeft + i * (segW + segGap);
-            QRect r(x, y, segW, barH);
-            float frac = static_cast<float>(i + 1) / kSegmentCount;
-            if (i < litCount) {
-                p.fillRect(r, colorForSeg(frac));
-            } else {
-                // unlit segments: faint trace of where the segment will
-                // land so the user sees the whole scale even at silence.
-                p.fillRect(r, QColor(0x22, 0x2a, 0x32));
-            }
+            float frac = static_cast<float>(i + 1) / segCount;
+            // A segment is on if filled by the level OR it is the
+            // held-peak segment (which stays lit after the peak passes).
+            bool on = (i < lit) || (peak > 0 && i == peak - 1);
+            p.setBrush(segColor(frac, on));
+            p.drawRoundedRect(QRectF(x, y, segW, barH), 1.3, 1.3);
         }
     };
 
-    drawRow(top,                  m_l, 'L');
-    drawRow(top + barH + gapY,    m_r, 'R');
+    drawRow(top,                m_l, m_peakHoldL, 'L');
+    drawRow(top + barH + gapY,  m_r, m_peakHoldR, 'R');
 }

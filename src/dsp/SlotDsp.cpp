@@ -325,6 +325,11 @@ void SlotDsp::advanceRotationIfNeeded(PathState &p) {
 
 void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
     switch (stage) {
+    case SandboxState::Stage_Paulstretch:
+        // Represented module only - the time-stretch runs on a separate
+        // streaming feed (feedStretchShort / produceStretchedShort)
+        // before this chain. Nothing to do per-sample here.
+        break;
     case SandboxState::Stage_EQ:
         if (m_state.eqEnabled) p.eq.processStereo(l, r);
         break;
@@ -387,9 +392,6 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
     case SandboxState::Stage_Bitcrusher:
         if (m_state.bitcrusherEnabled) p.bitcrusher.processStereo(l, r);
         break;
-    case SandboxState::Stage_Mono:
-        if (m_state.monoEnabled) { float m = (l + r) * 0.5f; l = m; r = m; }
-        break;
     case SandboxState::Stage_GenLoss:
         if (m_state.genLossEnabled) p.genLoss.processStereo(l, r);
         break;
@@ -435,6 +437,11 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
             int stage = m_state.pipelineOrder[si];
             if (!m_state.enabled && stage != SandboxState::Stage_Reverb) continue;
             applyStage(stage, p, l, r);
+        }
+
+        // Mono fold-down: post-chain checkbox, not a pipeline stage.
+        if (m_state.enabled && m_state.monoEnabled) {
+            float m = (l + r) * 0.5f; l = m; r = m;
         }
 
         l = softLimit(l);
@@ -487,6 +494,11 @@ void SlotDsp::produceStretchedShort(short *out, int frames, int channels,
             int stage = m_state.pipelineOrder[si];
             if (!m_state.enabled && stage != SandboxState::Stage_Reverb) continue;
             applyStage(stage, p, l, r);
+        }
+
+        // Mono fold-down: post-chain checkbox, not a pipeline stage.
+        if (m_state.enabled && m_state.monoEnabled) {
+            float m = (l + r) * 0.5f; l = m; r = m;
         }
 
         l = softLimit(l);

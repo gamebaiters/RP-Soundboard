@@ -14,4 +14,7 @@
   <qresource prefix="style">
     <file>dark_style.qss</file>
   </qresource>
+  <qresource prefix="i18n">
+    <file alias="soundboard_it.qm">i18n/soundboard_it.qm</file>
+  </qresource>
 </RCC>

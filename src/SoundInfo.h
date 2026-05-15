@@ -25,7 +25,10 @@ public:
 	double getPlayTime() const;
 
 	static double getTimeUnitFactor(int unit);
-	bool customColorEnabled() const { return customColor.alpha() != 0; }
+	// A default-constructed QColor is invalid yet reports alpha()==255,
+	// so a never-set customColor would read as "enabled". Gate on
+	// isValid() first (matches SoundButton's own check).
+	bool customColorEnabled() const { return customColor.isValid() && customColor.alpha() != 0; }
 	void setCustomColorEnabled(bool enabled) { customColor.setAlpha(enabled ? 255 : 0); }
 
 public:

@@ -7,6 +7,8 @@
 #include "channel.h"
 #include "reset_channels_btn.h"
 #include "settings_window.h"
+#include "onboarding_overlay.h"
+#include "icon_factory.h"
 #include "../style_helper.h"
 #include "help_bubble.h"
 #include "theme.h"
@@ -85,10 +87,19 @@ MainPage::MainPage(QWidget *parent)
     m_addChannelBtn->setMinimumHeight(28);
     m_pauseAllBtn->setMinimumHeight(28);
     m_stopAllBtn->setMinimumHeight(28);
-    m_pauseAllBtn->setIcon(QIcon(":/icon/img/pausebutton_32.png"));
-    m_stopAllBtn->setIcon(QIcon(":/icon/img/stoparrow_32.png"));
+    m_pauseAllBtn->setIcon(IconFactory::pause());
+    m_stopAllBtn->setIcon(IconFactory::stop());
     m_pauseAllBtn->setIconSize(QSize(16,16));
     m_stopAllBtn->setIconSize(QSize(16,16));
+    m_addChannelBtn->setToolTip(tr("Add another independent playback channel."));
+    m_pauseAllBtn->setToolTip(tr("Pause every channel at once. Click again to resume."));
+    m_stopAllBtn->setToolTip(tr("Stop playback on every channel immediately."));
+    m_muteLocally->setToolTip(tr(
+        "Stop the soundboard from playing through your own speakers.\n"
+        "Other people on the server still hear it normally."));
+    m_muteMyself->setToolTip(tr(
+        "Mute your microphone automatically while a sound is playing,\n"
+        "so your own voice is not mixed on top of the soundboard audio."));
 
     // Profile switcher buttons
     m_profileGroup = new QButtonGroup(this);
@@ -105,9 +116,12 @@ MainPage::MainPage(QWidget *parent)
     m_profileButtons[0]->setChecked(true);
 
     // Macro restore button (hidden by default)
-    m_restoreMacroBtn = new QPushButton(tr("Restore pre-macro"), this);
+    m_restoreMacroBtn = new QPushButton(tr("Undo macro"), this);
     m_restoreMacroBtn->setMinimumHeight(28);
     m_restoreMacroBtn->setVisible(false);
+    m_restoreMacroBtn->setToolTip(tr(
+        "Revert every channel to the state it had right before the\n"
+        "last macro button was pressed."));
     m_restoreMacroBtn->setStyleSheet(
         "QPushButton { background-color: #3c6e9c; color: white; padding: 2px 10px;"
         " border-radius: 4px; } QPushButton:hover { background-color: #4a8bc2; }");
@@ -169,6 +183,10 @@ MainPage::MainPage(QWidget *parent)
     ovLay->addWidget(ovMsg, 0, Qt::AlignCenter);
     ovLay->addStretch(1);
     m_disconnectedOverlay->hide();
+
+    // First-run welcome overlay. Self-dismisses (and self-deletes) if it
+    // has already been shown once before.
+    (new OnboardingOverlay(this))->showIfFirstRun();
 }
 
 void MainPage::resizeEvent(QResizeEvent *e) {

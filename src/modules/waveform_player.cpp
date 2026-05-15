@@ -1,5 +1,6 @@
 #include "waveform_player.h"
 #include "help_bubble.h"
+#include "icon_factory.h"
 
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -60,9 +61,9 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     m_loop->setMinimumHeight(28);
     m_fwd10->setMinimumWidth(40);
 
-    m_stop->setIcon(QIcon(":/icon/img/stoparrow_32.png"));
+    m_stop->setIcon(IconFactory::stop());
     m_stop->setIconSize(QSize(20, 20));
-    m_playPause->setIcon(QIcon(":/icon/img/playarrow_32.png"));
+    m_playPause->setIcon(IconFactory::play());
     m_playPause->setIconSize(QSize(20, 20));
     m_stop->setMinimumWidth(36);
     m_playPause->setMinimumWidth(36);
@@ -164,18 +165,16 @@ void WaveformPlayer::setPlaying(bool on) {
     m_playing = on;
     if (on) m_paused = false;
     bool isPlayingNow = on && !m_paused;
-    m_playPause->setIcon(QIcon(isPlayingNow
-        ? ":/icon/img/pausebutton_32.png"
-        : ":/icon/img/playarrow_32.png"));
+    m_playPause->setIcon(isPlayingNow ? IconFactory::pause()
+                                      : IconFactory::play());
     m_playPause->setToolTip(isPlayingNow ? tr("Pause") : tr("Play"));
 }
 
 void WaveformPlayer::setPaused(bool on) {
     m_paused = on;
     bool isPlayingNow = m_playing && !on;
-    m_playPause->setIcon(QIcon(isPlayingNow
-        ? ":/icon/img/pausebutton_32.png"
-        : ":/icon/img/playarrow_32.png"));
+    m_playPause->setIcon(isPlayingNow ? IconFactory::pause()
+                                      : IconFactory::play());
     m_playPause->setToolTip(isPlayingNow ? tr("Pause") : tr("Play"));
 }
 

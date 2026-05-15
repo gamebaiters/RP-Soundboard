@@ -10,7 +10,11 @@ class QLabel;
 class QPushButton;
 class QCheckBox;
 class QGroupBox;
+class QScrollArea;
+class QVBoxLayout;
+class QLineEdit;
 class PositionalPad;
+class ExpandableSection;
 
 // Per-channel "Audio Sandbox" dialog. Hosts every DSP knob the user can
 // tweak for one slot: Spatial (Off / L-R Pan / 3D HRTF / Rotate /
@@ -66,6 +70,13 @@ private:
     void load8DPreset();           // populates state for 8D mode
     int  modeForDropdown(int idx) const;     // dropdown index -> SandboxState mode
     int  dropdownForMode(int mode) const;    // SandboxState mode -> dropdown index
+
+    // Re-orders the DSP accordion panels to match m_state.pipelineOrder.
+    void applyPipelineOrderToUi();
+    // Pipeline block clicked: scroll the matching panel into view + open.
+    void onPipelineStageClicked(int stage);
+    // Filters the DSP accordion panels by a search substring.
+    void filterDspModules(const QString &text);
 
     int m_channelId;
     QString m_channelTitle;
@@ -217,8 +228,19 @@ private:
     QPushButton *m_resetLimiter    = nullptr;
     QPushButton *m_resetBitcrush  = nullptr;
 
-    // Pipeline widget
+    // Pipeline widget + DSP module list plumbing
     class PipelineWidget *m_pipeline = nullptr;
+    QPushButton          *m_resetOrderBtn = nullptr;
+    QLineEdit            *m_dspSearch     = nullptr;
+    QScrollArea          *m_dspScrollArea = nullptr;
+    QVBoxLayout          *m_dspScrollLay  = nullptr;
+    QScrollArea          *m_outerScroll   = nullptr;
+    QGroupBox            *m_eqBox         = nullptr;
+
+    // DspStage -> its accordion panel. nullptr for stages whose UI lives
+    // outside the accordion (EQ, Spatial and Reverb are in the left
+    // column). Used for click-to-navigate and order-reflection.
+    ExpandableSection *m_stageSection[SandboxState::Stage_COUNT] = {};
 
     // Preset manager combos
     QComboBox *m_eqPresetBox      = nullptr;

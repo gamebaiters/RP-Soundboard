@@ -6,9 +6,9 @@
 const char *SandboxState::stageName(int stage)
 {
     static const char *names[Stage_COUNT] = {
-        "EQ", "Compressor", "Saturator", "Spatial",
-        "Chorus", "Flanger", "Flangus", "Phaser",
-        "Delay", "Reverb", "Limiter", "Bitcrush", "Mono", "GenLoss"
+        "Paulstretch", "EQ", "Compressor", "Saturator", "Spatial",
+        "Chorus", "Flanger", "Flangus", "Phaser", "Delay", "Reverb",
+        "Limiter", "Bitcrush", "GenLoss"
     };
     if (stage < 0 || stage >= Stage_COUNT) return "?";
     return names[stage];
@@ -112,9 +112,13 @@ QJsonObject SandboxState::toJson() const
     o["genLossEnabled"]     = genLossEnabled;
     o["genLossGenerations"] = genLossGenerations;
 
+    // Key is versioned: the DspStage enum was renumbered (Mono dropped,
+    // Paulstretch added). Old "pipelineOrder" arrays carry stale indices
+    // - using a new key makes pre-existing INIs/presets fall back to the
+    // new default order instead of silently scrambling.
     QJsonArray pipe;
     for (int i = 0; i < Stage_COUNT; ++i) pipe.append(pipelineOrder[i]);
-    o["pipelineOrder"] = pipe;
+    o["pipelineOrderV2"] = pipe;
 
     return o;
 }
@@ -212,7 +216,7 @@ SandboxState SandboxState::fromJson(const QJsonObject &o)
     s.genLossEnabled     = o.value("genLossEnabled").toBool(false);
     s.genLossGenerations = o.value("genLossGenerations").toInt(1);
 
-    QJsonArray pipe = o.value("pipelineOrder").toArray();
+    QJsonArray pipe = o.value("pipelineOrderV2").toArray();
     if (pipe.size() >= 1 && pipe.size() <= Stage_COUNT) {
         std::set<int> seen;
         bool valid = true;

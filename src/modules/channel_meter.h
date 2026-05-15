@@ -24,4 +24,6 @@ protected:
 private:
     float m_l = 0.0f;
     float m_r = 0.0f;
+    float m_peakHoldL = 0.0f;   // slow-decay peak-hold marker
+    float m_peakHoldR = 0.0f;
 };

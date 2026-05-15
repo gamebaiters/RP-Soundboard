@@ -38,6 +38,7 @@ CAPI int sb_playButtonEx(const char* btn);
 CAPI void sb_playButton(int btn);
 CAPI void sb_setConfig(int cfg);
 CAPI void sb_openAbout();
+CAPI void sb_openHowTo();
 CAPI void sb_pauseSound();
 CAPI void sb_unpauseSound();
 CAPI void sb_pauseButtonPressed();

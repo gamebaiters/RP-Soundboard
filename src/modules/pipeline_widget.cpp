@@ -4,9 +4,12 @@
 #include <QMouseEvent>
 #include <QFontMetrics>
 #include <algorithm>
+#include <cstdlib>
 
 namespace {
+// Indexed by DspStage enum value (see SandboxState.h).
 const QColor kStageColors[] = {
+    QColor(0xD6, 0x4F, 0xB0),  // Paulstretch - magenta
     QColor(0x5B, 0x9B, 0xD5),  // EQ - blue
     QColor(0xE0, 0x73, 0x35),  // Compressor - orange
     QColor(0xC0, 0x39, 0x2B),  // Saturator - red
@@ -19,7 +22,6 @@ const QColor kStageColors[] = {
     QColor(0x29, 0x80, 0xB9),  // Reverb - dark blue
     QColor(0x95, 0x5B, 0xA5),  // Limiter - mauve
     QColor(0xD3, 0x54, 0x00),  // Bitcrusher - burnt orange
-    QColor(0x56, 0x6D, 0x7E),  // Mono - steel blue
     QColor(0x8B, 0x00, 0x00),  // GenLoss - dark red
 };
 }
@@ -122,7 +124,12 @@ void PipelineWidget::paintEvent(QPaintEvent *)
 void PipelineWidget::mousePressEvent(QMouseEvent *e)
 {
     int idx = blockAtPos(e->x());
-    if (idx >= 0) {
+    m_pressIndex = idx;
+    m_movedDuringDrag = false;
+    m_dragging = false;
+    m_dragIndex = -1;
+    // Pinned prefix (Paulstretch) cannot be dragged - still clickable.
+    if (idx >= kPinnedCount) {
         m_dragIndex = idx;
         m_dragOffsetX = e->x() - blockRect(idx).left();
         m_dragCurrentX = e->x();
@@ -134,10 +141,17 @@ void PipelineWidget::mousePressEvent(QMouseEvent *e)
 
 void PipelineWidget::mouseMoveEvent(QMouseEvent *e)
 {
-    if (!m_dragging) return;
+    if (!m_dragging) {
+        // Hover feedback: pinned blocks read as clickable, not draggable.
+        int idx = blockAtPos(e->x());
+        setCursor(idx >= 0 && idx < kPinnedCount ? Qt::PointingHandCursor
+                                                 : Qt::OpenHandCursor);
+        return;
+    }
     m_dragCurrentX = e->x();
 
     int targetIdx = blockAtPos(e->x());
+    if (targetIdx < kPinnedCount) targetIdx = kPinnedCount;  // never displace the pin
     if (targetIdx >= 0 && targetIdx != m_dragIndex) {
         int stage = m_order[m_dragIndex];
         if (targetIdx < m_dragIndex) {
@@ -150,17 +164,27 @@ void PipelineWidget::mouseMoveEvent(QMouseEvent *e)
         m_order[targetIdx] = stage;
         m_dragIndex = targetIdx;
         m_dragOffsetX = e->x() - blockRect(targetIdx).left();
+        m_movedDuringDrag = true;
     }
     update();
 }
 
-void PipelineWidget::mouseReleaseEvent(QMouseEvent *)
+void PipelineWidget::mouseReleaseEvent(QMouseEvent *e)
 {
-    if (m_dragging) {
-        m_dragging = false;
-        m_dragIndex = -1;
-        setCursor(Qt::OpenHandCursor);
-        update();
+    bool wasDragging = m_dragging;
+    m_dragging = false;
+    m_dragIndex = -1;
+    setCursor(Qt::OpenHandCursor);
+    update();
+
+    // A press+release on the same block with no reorder = a click:
+    // jump the parameter panel to that effect instead of reordering.
+    int releaseIdx = blockAtPos(e->x());
+    if (!m_movedDuringDrag && m_pressIndex >= 0 && releaseIdx == m_pressIndex) {
+        emit stageClicked(m_order[m_pressIndex]);
+    } else if (wasDragging && m_movedDuringDrag) {
         emit orderChanged();
     }
+    m_pressIndex = -1;
+    m_movedDuringDrag = false;
 }

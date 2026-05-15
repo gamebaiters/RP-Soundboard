@@ -3,6 +3,7 @@
 #include "help_bubble.h"
 #include "preset_manager.h"
 #include "pipeline_widget.h"
+#include "icon_factory.h"
 #include "../ExpandableSection.h"
 #include "../dsp/EqRack.h"
 
@@ -77,7 +78,10 @@ ChannelSandboxDialog::ChannelSandboxDialog(int channelId, QWidget *parent)
     setProperty("isGBSoundboard", true);
     setModal(false);
     refreshTitle();
-    resize(1020, 750);
+    // Wider default so every column + value label fits without the
+    // scroll area clipping captions behind its scrollbar.
+    resize(1240, 780);
+    setMinimumWidth(900);
     buildUi();
     pushStateToWidgets();
     applyModeVisibility();
@@ -149,7 +153,7 @@ void ChannelSandboxDialog::buildUi()
 
     // ===== Top: enable checkbox =====
     auto *topRow = new QHBoxLayout;
-    m_enable = new QCheckBox(tr("Enable audio sandbox on this channel"), this);
+    m_enable = new QCheckBox(tr("Enable the Audio Sandbox on this channel"), this);
     m_enable->setToolTip(tr(
         "Master per-channel switch. When OFF, the entire DSP chain is\n"
         "bypassed (zero CPU cost) but every value below is preserved\n"
@@ -340,74 +344,106 @@ void ChannelSandboxDialog::buildUi()
         });
     }
     spatialCol->addWidget(eqBox, 1);
+    m_eqBox = eqBox;
 
     midRow->addLayout(spatialCol, 2);
 
-    // ---- Paulstretch + DSP column (right) ----
+    // ---- DSP modules column (right) ----
     auto *fxCol = new QVBoxLayout;
-
-    auto *stretchBox = new QGroupBox(tr("Paulstretch (extreme time-stretch)"), this);
-    auto *stretchLay = new QFormLayout(stretchBox);
-    m_stretchEn = new QCheckBox(tr("Enable"), stretchBox);
-    m_stretchEn->setToolTip(tr(
-        "Paul Nasca's phase-randomisation time-stretch. Source plays back\n"
-        "much slower (1x..50x) while keeping pitch. Stereo channels get\n"
-        "independent random phases for a wide diffuse texture."));
-    auto *stretchHeaderRow = new QHBoxLayout;
-    stretchHeaderRow->addWidget(m_stretchEn);
-    stretchHeaderRow->addWidget(new HelpBubble(tr(
-        "Paulstretch is a LOCAL effect: only you hear the stretched\n"
-        "audio - the server gets a clean mic stream while the effect\n"
-        "is on, exactly like preview-only mode. Streams up to ~30 s\n"
-        "of source material so very long clips wrap around."), stretchBox));
-    stretchHeaderRow->addStretch(1);
-    stretchLay->addRow(stretchHeaderRow);
-    {
-        QSlider *s = nullptr; QLabel *lbl = nullptr;
-        auto *row = buildSliderRow(stretchBox, tr("Factor"),
-                                   10, 500, 40, "", s, lbl);
-        m_stretchFac = s; m_stretchFacLabel = lbl;
-        m_stretchFacLabel->setText("4.0x");
-        stretchLay->addRow(row);
-    }
-    {
-        QSlider *s = nullptr; QLabel *lbl = nullptr;
-        auto *row = buildSliderRow(stretchBox, tr("Window"),
-                                   50, 1000, 180, " ms", s, lbl);
-        m_stretchWin = s; m_stretchWinLabel = lbl;
-        m_stretchWin->setToolTip(tr(
-            "FFT analysis window in milliseconds. Bigger = smoother /\n"
-            "more 'frozen-in-amber' drone, blurred high frequencies.\n"
-            "Smaller = grittier with more transient detail."));
-        stretchLay->addRow(row);
-    }
-    fxCol->addWidget(stretchBox);
 
     // ===== DSP modules in a scrollable area =====
     m_dspGroup = new QGroupBox(tr("DSP Modules"), this);
     auto *dspGroupLay = new QVBoxLayout(m_dspGroup);
     dspGroupLay->setContentsMargins(4, 8, 4, 4);
 
-    auto *pipeLabel = new QLabel(tr("DSP Pipeline Order (drag to reorder):"), m_dspGroup);
+    // Pipeline order bar + reset-order button.
+    auto *pipeRow = new QHBoxLayout;
+    auto *pipeLabel = new QLabel(tr(
+        "Pipeline order — drag to reorder, click a block to open it:"), m_dspGroup);
     pipeLabel->setStyleSheet("font-weight: bold; font-size: 11px;");
-    dspGroupLay->addWidget(pipeLabel);
+    pipeRow->addWidget(pipeLabel, 1);
+    m_resetOrderBtn = new QPushButton(tr("Reset order"), m_dspGroup);
+    m_resetOrderBtn->setToolTip(tr(
+        "Restore the default DSP processing order. Effect parameters\n"
+        "are left untouched — only the chain order is reset."));
+    pipeRow->addWidget(m_resetOrderBtn);
+    dspGroupLay->addLayout(pipeRow);
+
     m_pipeline = new PipelineWidget(m_dspGroup);
     dspGroupLay->addWidget(m_pipeline);
 
-    auto *dspScrollArea = new QScrollArea(m_dspGroup);
-    dspScrollArea->setWidgetResizable(true);
-    dspScrollArea->setFrameShape(QFrame::StyledPanel);
-    auto *dspScrollContent = new QWidget(dspScrollArea);
-    auto *dspScrollLay = new QVBoxLayout(dspScrollContent);
+    // Mono fold-down: a plain post-chain checkbox, NOT a pipeline module.
+    auto *monoRow = new QHBoxLayout;
+    m_monoEnable = new QCheckBox(tr("Fold output to mono"), m_dspGroup);
+    m_monoEnable->setToolTip(tr(
+        "Sum left + right into a single mono signal sent equally to\n"
+        "both ears. Applied at the very end of the chain — it is not\n"
+        "a reorderable module."));
+    monoRow->addWidget(m_monoEnable);
+    monoRow->addWidget(new HelpBubble(tr(
+        "Mono fold-down collapses the stereo image to one centred\n"
+        "signal. Handy for compatibility checks or to feed the spatial\n"
+        "stage from a clean mono source."), m_dspGroup));
+    monoRow->addStretch(1);
+    dspGroupLay->addLayout(monoRow);
 
-    auto makeResetBtn = [this](QWidget *parent) -> QPushButton* {
+    // Search bar over the module list.
+    m_dspSearch = new QLineEdit(m_dspGroup);
+    m_dspSearch->setPlaceholderText(tr("Search DSP modules..."));
+    m_dspSearch->setClearButtonEnabled(true);
+    dspGroupLay->addWidget(m_dspSearch);
+
+    m_dspScrollArea = new QScrollArea(m_dspGroup);
+    m_dspScrollArea->setWidgetResizable(true);
+    m_dspScrollArea->setFrameShape(QFrame::StyledPanel);
+    auto *dspScrollArea = m_dspScrollArea;            // local alias
+    auto *dspScrollContent = new QWidget(dspScrollArea);
+    m_dspScrollLay = new QVBoxLayout(dspScrollContent);
+    auto *dspScrollLay = m_dspScrollLay;              // local alias
+
+    auto makeResetBtn = [](QWidget *parent) -> QPushButton* {
         auto *btn = new QPushButton(parent);
-        btn->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
+        btn->setIcon(IconFactory::reload());
+        btn->setIconSize(QSize(14, 14));
         btn->setToolTip(tr("Reset this module to defaults"));
         btn->setFixedSize(22, 22);
         btn->setFlat(true);
         return btn;
     };
+
+    // ---- Paulstretch (represented module; runs on a separate feed) ----
+    auto *stretchSection = new ExpandableSection(tr("Paulstretch"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *hdr = new QHBoxLayout;
+        m_stretchEn = new QCheckBox(tr("Enable Paulstretch"));
+        m_stretchEn->setToolTip(tr(
+            "Paul Nasca's phase-randomisation time-stretch. Source plays back\n"
+            "much slower (1x..50x) while keeping pitch. Stereo channels get\n"
+            "independent random phases for a wide diffuse texture."));
+        hdr->addWidget(m_stretchEn);
+        hdr->addWidget(new HelpBubble(tr(
+            "Paulstretch is a LOCAL effect: only you hear the stretched\n"
+            "audio — the server gets a clean mic stream while it is on,\n"
+            "exactly like preview-only mode. Its pipeline slot is fixed\n"
+            "first: it runs on a separate streaming feed before the\n"
+            "rest of the chain."), nullptr));
+        hdr->addStretch(1);
+        lay->addLayout(hdr);
+        QSlider *s = nullptr; QLabel *lbl = nullptr;
+        auto *r1 = buildSliderRow(nullptr, tr("Factor"), 10, 500, 40, "", s, lbl);
+        m_stretchFac = s; m_stretchFacLabel = lbl; m_stretchFacLabel->setText("4.0x");
+        lay->addWidget(r1);
+        auto *r2 = buildSliderRow(nullptr, tr("Window"), 50, 1000, 180, " ms", s, lbl);
+        m_stretchWin = s; m_stretchWinLabel = lbl;
+        m_stretchWin->setToolTip(tr(
+            "FFT analysis window in milliseconds. Bigger = smoother /\n"
+            "more 'frozen-in-amber' drone, blurred high frequencies.\n"
+            "Smaller = grittier with more transient detail."));
+        lay->addWidget(r2);
+        stretchSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(stretchSection);
 
     // ---- Compressor ----
     auto *compSection = new ExpandableSection(tr("Compressor"), 200, dspScrollContent);
@@ -703,20 +739,6 @@ void ChannelSandboxDialog::buildUi()
     }
     dspScrollLay->addWidget(bitcrushSection);
 
-    // ---- Mono ----
-    auto *monoSection = new ExpandableSection(tr("Mono Converter"), 200, dspScrollContent);
-    {
-        auto *lay = new QVBoxLayout;
-        m_monoEnable = new QCheckBox(tr("Convert to Mono"));
-        m_monoEnable->setToolTip(tr(
-            "Sum left + right into a single mono signal, sent equally\n"
-            "to both channels. Useful for compatibility testing or\n"
-            "when the spatial stage should start from a mono source."));
-        lay->addWidget(m_monoEnable);
-        monoSection->setContentLayout(*lay);
-    }
-    dspScrollLay->addWidget(monoSection);
-
     // ---- Generation Loss ----
     auto *genLossSection = new ExpandableSection(tr("Generation Loss"), 200, dspScrollContent);
     {
@@ -746,6 +768,20 @@ void ChannelSandboxDialog::buildUi()
     }
     dspScrollLay->addWidget(genLossSection);
 
+    // Map each DspStage to its accordion panel. EQ, Spatial and Reverb
+    // stay nullptr - their controls live in the left column.
+    m_stageSection[SandboxState::Stage_Paulstretch] = stretchSection;
+    m_stageSection[SandboxState::Stage_Compressor]  = compSection;
+    m_stageSection[SandboxState::Stage_Saturator]   = satSection;
+    m_stageSection[SandboxState::Stage_Chorus]      = chorusSection;
+    m_stageSection[SandboxState::Stage_Flanger]     = flangerSection;
+    m_stageSection[SandboxState::Stage_Flangus]     = flangusSection;
+    m_stageSection[SandboxState::Stage_Phaser]      = phaserSection;
+    m_stageSection[SandboxState::Stage_Delay]       = delaySection;
+    m_stageSection[SandboxState::Stage_Limiter]     = limiterSection;
+    m_stageSection[SandboxState::Stage_Bitcrusher]  = bitcrushSection;
+    m_stageSection[SandboxState::Stage_GenLoss]     = genLossSection;
+
     dspScrollLay->addStretch(1);
     dspScrollArea->setWidget(dspScrollContent);
     dspGroupLay->addWidget(dspScrollArea, 1);
@@ -764,6 +800,7 @@ void ChannelSandboxDialog::buildUi()
     scrollArea->setFrameShape(QFrame::NoFrame);
     scrollArea->setWidget(scrollContent);
     root->addWidget(scrollArea, 1);
+    m_outerScroll = scrollArea;
 
     // ===== Preset row =====
     auto *presetRow = new QHBoxLayout;
@@ -1280,8 +1317,19 @@ void ChannelSandboxDialog::buildUi()
     connect(m_pipeline, &PipelineWidget::orderChanged, this, [this]{
         if (m_loading) return;
         m_pipeline->getOrder(m_state.pipelineOrder);
+        applyPipelineOrderToUi();
         pushChange();
     });
+    connect(m_pipeline, &PipelineWidget::stageClicked, this,
+            &ChannelSandboxDialog::onPipelineStageClicked);
+    connect(m_resetOrderBtn, &QPushButton::clicked, this, [this]{
+        SandboxState::defaultPipelineOrder(m_state.pipelineOrder);
+        m_pipeline->setOrder(m_state.pipelineOrder);
+        applyPipelineOrderToUi();
+        pushChange();
+    });
+    connect(m_dspSearch, &QLineEdit::textChanged, this,
+            &ChannelSandboxDialog::filterDspModules);
 }
 
 void ChannelSandboxDialog::pushStateToWidgets()
@@ -1395,6 +1443,7 @@ void ChannelSandboxDialog::pushStateToWidgets()
     if (m_bitcrushPreset) { QSignalBlocker blk(m_bitcrushPreset); m_bitcrushPreset->setCurrentIndex(0); }
 
     if (m_pipeline) m_pipeline->setOrder(m_state.pipelineOrder);
+    applyPipelineOrderToUi();
 
     // Apply gating: master switch first, then sub-checkboxes.
     bool master = m_state.enabled;
@@ -1636,5 +1685,50 @@ void ChannelSandboxDialog::setAllControlsEnabled(bool on)
     QList<QWidget*> kids = findChildren<QWidget*>();
     for (auto *w : kids) {
         if (w != m_enable) w->setEnabled(on);
+    }
+}
+
+void ChannelSandboxDialog::applyPipelineOrderToUi()
+{
+    if (!m_dspScrollLay) return;
+    // Pull every managed panel out of the layout (without deleting it),
+    // then re-insert in pipeline order. Stages with no panel (EQ,
+    // Spatial, Reverb) are skipped. The trailing stretch item stays last.
+    for (int i = 0; i < SandboxState::Stage_COUNT; ++i)
+        if (m_stageSection[i]) m_dspScrollLay->removeWidget(m_stageSection[i]);
+    int pos = 0;
+    for (int i = 0; i < SandboxState::Stage_COUNT; ++i) {
+        int stage = m_state.pipelineOrder[i];
+        if (stage < 0 || stage >= SandboxState::Stage_COUNT) continue;
+        if (m_stageSection[stage])
+            m_dspScrollLay->insertWidget(pos++, m_stageSection[stage]);
+    }
+}
+
+void ChannelSandboxDialog::onPipelineStageClicked(int stage)
+{
+    if (stage < 0 || stage >= SandboxState::Stage_COUNT) return;
+    if (ExpandableSection *sec = m_stageSection[stage]) {
+        sec->setVisible(true);          // un-hide if a search filter hid it
+        sec->setExpanded(true);
+        if (m_dspScrollArea) m_dspScrollArea->ensureWidgetVisible(sec);
+        return;
+    }
+    // EQ / Spatial / Reverb live in the left column of the outer scroll.
+    QWidget *target = (stage == SandboxState::Stage_EQ) ? m_eqBox
+                                                        : m_hrtfGroup;
+    if (target && m_outerScroll) m_outerScroll->ensureWidgetVisible(target);
+}
+
+void ChannelSandboxDialog::filterDspModules(const QString &text)
+{
+    QString needle = text.trimmed();
+    for (int i = 0; i < SandboxState::Stage_COUNT; ++i) {
+        ExpandableSection *sec = m_stageSection[i];
+        if (!sec) continue;
+        bool match = needle.isEmpty() ||
+            QString::fromLatin1(SandboxState::stageName(i))
+                .contains(needle, Qt::CaseInsensitive);
+        sec->setVisible(match);
     }
 }

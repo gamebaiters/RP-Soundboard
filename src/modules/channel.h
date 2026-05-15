@@ -98,10 +98,16 @@ protected:
     void dragEnterEvent(class QDragEnterEvent *e) override;
     void dragMoveEvent (class QDragMoveEvent  *e) override;
     void dropEvent     (class QDropEvent      *e) override;
+    void resizeEvent   (class QResizeEvent    *e) override;
 
 private slots:
     void onAnyChange();
     void onTitleEditFinished();
+
+private:
+    // Drives the meter width directly from the channel width so the
+    // meter yields space to the volume / FX controls first.
+    void updateMeterWidth();
 
 private:
     int             m_id;

@@ -47,7 +47,7 @@ AboutQt::AboutQt(QWidget *parent) :
     QWidget(parent, Qt::Window | Qt::WindowTitleHint | Qt::WindowCloseButtonHint)
 {
     setWindowTitle(tr("About GameBaiters Soundboard"));
-    setFixedSize(520, 420);
+    setFixedSize(560, 620);
     setAttribute(Qt::WA_StyledBackground, true);
     setStyleSheet(Theme::compositeStyleSheet());
     Theme::trackThemedWidget(this);
@@ -119,6 +119,30 @@ AboutQt::AboutQt(QWidget *parent) :
            "<a style='color:#6cb4ee;' href='https://ffmpeg.org/download.html'>"
            "ffmpeg.org</a> tag n6.1.1</span>"));
     root->addWidget(credits);
+
+    root->addSpacing(8);
+
+    // Quick-start basics - the essentials anyone needs, no audio sandbox.
+    auto *basics = new QLabel(this);
+    basics->setObjectName("aboutBasics");
+    basics->setTextFormat(Qt::RichText);
+    basics->setWordWrap(true);
+    basics->setStyleSheet(
+        "#aboutBasics { background: rgba(0,0,0,70); border-radius: 6px;"
+        " padding: 10px; color: #cfcfcf; font-size: 11px; }");
+    basics->setText(tr(
+        "<b style='color:#e8e8e8;'>Quick start</b><br>"
+        "&bull;&nbsp; Connect to a TeamSpeak server — the soundboard "
+        "sends audio into your voice channel.<br>"
+        "&bull;&nbsp; Drag an audio file onto a grid button to assign "
+        "it, then click the button to play.<br>"
+        "&bull;&nbsp; Each channel has a <b>Local</b> volume (what you "
+        "hear) and a <b>Remote</b> volume (what others hear).<br>"
+        "&bull;&nbsp; <b>Stop all</b> / <b>Pause all</b> control every "
+        "channel at once.<br>"
+        "&bull;&nbsp; For the complete guide open the Plugins menu and "
+        "choose <b>How to use the soundboard</b>."));
+    root->addWidget(basics);
 
     root->addSpacing(4);
 
@@ -294,37 +318,25 @@ void AboutQt::paintEvent(QPaintEvent *)
         p.drawEllipse(center, radius, radius);
     }
 
-    // --- Rebirth text (during black phase) ---
-    double rebirthT = -1.0;
-    if (m_novaResetting) {
-        double rt = m_resetClock.elapsed() / 1000.0;
-        if (rt >= 0.5 && rt < kBlackDuration - 0.2)
-            rebirthT = rt - 0.5;
-    } else if (t >= 4.4 && t < kNovaDuration) {
-        rebirthT = t - 4.4;
+    // --- Supernova shockwave ring: a thin bright ring racing outward ---
+    if (t >= 0.05 && t < 2.3) {
+        QPointF center(width() / 2.0, height() / 2.0);
+        double s = (t - 0.05) / 2.25;
+        double maxR = std::sqrt(double(width() * width() + height() * height())) * 0.5;
+        double ringR = s * maxR * 1.15;
+        int ringA = int(210 * (1.0 - s) * (1.0 - s));
+        if (ringA > 4) {
+            double thick = 2.5 + s * 10.0;
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(QColor(225, 240, 255, ringA), thick));
+            p.drawEllipse(center, ringR, ringR);
+            p.setPen(QPen(QColor(120, 190, 255, ringA / 2), thick * 2.0));
+            p.drawEllipse(center, ringR, ringR);
+        }
     }
-    if (rebirthT >= 0.0) {
-        double totalRebirthLen = m_novaResetting
-            ? (kBlackDuration - 0.7)
-            : (kNovaDuration - 4.4);
-        double fade;
-        if (rebirthT < 0.3)
-            fade = rebirthT / 0.3;
-        else if (rebirthT > totalRebirthLen - 0.3)
-            fade = 1.0 - (rebirthT - (totalRebirthLen - 0.3)) / 0.3;
-        else
-            fade = 1.0;
 
-        int a = int(180 * qBound(0.0, fade, 1.0));
-        QFont f = p.font();
-        f.setPointSizeF(10.5);
-        f.setItalic(true);
-        p.setFont(f);
-        p.setPen(QColor(140, 190, 230, a));
-        QRect textR = rect().adjusted(0, height() * 3 / 5, 0, 0);
-        p.drawText(textR, Qt::AlignHCenter | Qt::AlignTop,
-                   QStringLiteral("...see you at the next one."));
-    }
+    // (No animation caption text - it sat behind the dialog's labels
+    // and was unreadable, so it was removed.)
 
     // --- Fade children back in during reset ---
     if (m_novaResetting && resetAlpha < 1.0) {
@@ -339,28 +351,21 @@ void AboutQt::paintEvent(QPaintEvent *)
 
 void AboutQt::mousePressEvent(QMouseEvent *evt)
 {
-    bool onChild = false;
-    for (auto *child : findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly)) {
-        if (child->isVisible() && child->geometry().contains(evt->pos())) {
-            onChild = true;
-            break;
-        }
-    }
-
-    if (!onChild) {
-        if (m_novaActive) {
-            // Already animating — ignore
-        } else if (m_novaResetting) {
-            m_bgClicks = 1;
-            m_novaResetting = false;
+    // A click ANYWHERE in the window feeds the easter egg. Plain labels
+    // ignore mouse presses so their clicks propagate here; only links
+    // in the credits label consume their own clicks.
+    if (m_novaActive) {
+        // Already animating — ignore
+    } else if (m_novaResetting) {
+        m_bgClicks = 1;
+        m_novaResetting = false;
+        update();
+    } else {
+        ++m_bgClicks;
+        if (m_bgClicks >= kNovaThreshold)
+            startSupernova();
+        else
             update();
-        } else {
-            ++m_bgClicks;
-            if (m_bgClicks >= kNovaThreshold)
-                startSupernova();
-            else
-                update();
-        }
     }
 
     QWidget::mousePressEvent(evt);

@@ -1,3 +1,60 @@
+GameBaiters Soundboard v2.2.1
+=============================
+
+User-experience overhaul on top of v2.2.0: a clearer, more
+consistent interface plus full Italian localization.
+
+---------------------------------------------------------------------
+LANGUAGE
+---------------------------------------------------------------------
+* The interface is now fully translatable. Italian is selected
+  automatically when the system language is Italian, English
+  otherwise.
+* A language selector was added to Settings (Automatic / English /
+  Italiano). The choice is applied the next time the plugin loads.
+
+---------------------------------------------------------------------
+AUDIO SANDBOX
+---------------------------------------------------------------------
+* Paulstretch is now a proper module inside the DSP list, with its
+  own panel, instead of a separate box outside the chain.
+* The Mono converter is no longer a pipeline module: it is now a
+  simple "Fold output to mono" checkbox.
+* Click a block in the pipeline bar to jump straight to that
+  effect's panel and open it.
+* The module panels now follow the pipeline order, and a search
+  box was added to filter the module list.
+* New "Reset order" button restores the default processing chain.
+
+---------------------------------------------------------------------
+HELP & ONBOARDING
+---------------------------------------------------------------------
+* New "How to use the soundboard" guide, opened from the Plugins
+  menu - a detailed walkthrough of every feature.
+* A short welcome card is shown on the very first launch.
+
+---------------------------------------------------------------------
+INTERFACE POLISH
+---------------------------------------------------------------------
+* Consistent naming: the per-channel DSP feature is now called
+  "Audio Sandbox" everywhere (button, checkbox and dialog).
+* Redesigned transport / control icons - coherent, colour-coded
+  and purpose-drawn.
+* The per-channel peak meter was redesigned (segmented LED with
+  peak-hold) and now resizes correctly with the window.
+* The About dialog gained a quick-start section; its easter egg
+  now reacts to a click anywhere in the window.
+* Many controls received clearer tooltips.
+
+---------------------------------------------------------------------
+BUG FIXES
+---------------------------------------------------------------------
+* Fixed a crash of the TeamSpeak client when closing it after the
+  soundboard had been used.
+* Fixed custom button colours being treated as already set when
+  they had never actually been chosen.
+
+=====================================================================
 GameBaiters Soundboard v2.2.0
 =============================
 

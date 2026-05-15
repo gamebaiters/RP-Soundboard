@@ -14,8 +14,15 @@
 // regardless so the user can A/B test cheaply.
 struct SandboxState
 {
+    // Pipeline stages, in canonical/default order. Paulstretch is a
+    // represented module: it carries a pipeline slot, a name and a UI
+    // panel like every other effect, but its actual DSP runs on a
+    // separate streaming feed (see SlotDsp) and is pinned first - its
+    // index here is cosmetic. Mono is NOT a stage: it is a plain
+    // post-chain checkbox (monoEnabled), applied at a fixed point.
     enum DspStage {
-        Stage_EQ = 0,
+        Stage_Paulstretch = 0,
+        Stage_EQ,
         Stage_Compressor,
         Stage_Saturator,
         Stage_Spatial,
@@ -27,7 +34,6 @@ struct SandboxState
         Stage_Reverb,
         Stage_Limiter,
         Stage_Bitcrusher,
-        Stage_Mono,
         Stage_GenLoss,
         Stage_COUNT
     };
@@ -163,14 +169,13 @@ struct SandboxState
     bool  genLossEnabled     = false;
     int   genLossGenerations = 1;          // 1..1000
 
-    // DSP pipeline order (user-draggable). Default matches the
-    // hardcoded chain: EQ→Comp→Sat→Spatial→Chorus→Flanger→Flangus→
-    // Phaser→Delay→Reverb→Limiter.
+    // DSP pipeline order (user-draggable). Default = canonical enum
+    // order, so it matches defaultPipelineOrder() (out[i] = i).
     int pipelineOrder[Stage_COUNT] = {
-        Stage_EQ, Stage_Compressor, Stage_Saturator, Stage_Spatial,
-        Stage_Chorus, Stage_Flanger, Stage_Flangus, Stage_Phaser,
-        Stage_Delay, Stage_Reverb, Stage_Bitcrusher, Stage_Mono,
-        Stage_GenLoss, Stage_Limiter
+        Stage_Paulstretch, Stage_EQ, Stage_Compressor, Stage_Saturator,
+        Stage_Spatial, Stage_Chorus, Stage_Flanger, Stage_Flangus,
+        Stage_Phaser, Stage_Delay, Stage_Reverb, Stage_Limiter,
+        Stage_Bitcrusher, Stage_GenLoss
     };
 
     QJsonObject toJson() const;

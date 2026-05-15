@@ -3,6 +3,7 @@
 #include "theme.h"
 #include "channel_meter.h"
 #include "channel_sandbox_dialog.h"
+#include "icon_factory.h"
 
 // Defined in SoundButton.cpp (not exposed via header).
 extern const QString &getButtonMime();
@@ -12,6 +13,7 @@ extern const QString &getButtonMime();
 #include <QPushButton>
 #include <QFrame>
 #include <QLabel>
+#include <QResizeEvent>
 #include <QLineEdit>
 #include <QStyle>
 #include <QJsonDocument>
@@ -109,23 +111,21 @@ Channel::Channel(int channelId, QWidget *parent)
     controls->addWidget(m_fxSeparator);
     controls->addWidget(m_fx, 1);
 
-    // Per-channel DSP entry point. The button label uses a Unicode
-    // gear (U+2699) that renders cleanly cross-platform - the previous
-    // PNG icon looked rendered like a thumbnail and didn't read as
-    // "settings".
-    m_sandboxBtn = new QPushButton(
-        QString::fromUtf8("\xE2\x9A\x99 ") + tr("Spatial / EQ / Stretch"),
-        this);
-    m_sandboxBtn->setFixedHeight(22);
-    m_sandboxBtn->setMinimumWidth(160);
+    // Per-channel DSP entry point. Compact icon button (mixer-faders
+    // glyph) - the "Audio Sandbox" name is carried by the enable
+    // checkbox right next to it, so the row stays short.
+    m_sandboxBtn = new QPushButton(this);
+    m_sandboxBtn->setIcon(IconFactory::sandbox());
+    m_sandboxBtn->setIconSize(QSize(18, 18));
+    m_sandboxBtn->setFixedSize(30, 22);
     m_sandboxBtn->setStyleSheet(
-        "QPushButton { padding: 2px 10px; }");
+        "QPushButton { padding: 2px; }");
     m_sandboxBtn->setToolTip(tr(
-        "Per-channel audio sandbox. Inside you'll find:\n"
-        "  - L/R Pan (simple stereo balance)\n"
-        "  - 3D HRTF (manual position / auto-orbit / 8D preset)\n"
-        "  - 16-band ISO graphic EQ (-12..+12 dB)\n"
-        "  - Paulstretch (extreme phase-randomised time-stretch)\n"
+        "Open the Audio Sandbox editor for this channel:\n"
+        "  - 16-band ISO graphic EQ\n"
+        "  - 3D HRTF spatial audio (manual / orbit / 8D preset)\n"
+        "  - Paulstretch and 11 more DSP effects with a\n"
+        "    drag-to-reorder pipeline\n"
         "Settings persist per channel and are bundled into macros."));
 
     // Text-only button (the previous stoparrow icon was the wrong art and
@@ -140,8 +140,11 @@ Channel::Channel(int channelId, QWidget *parent)
     m_exportBtn->setVisible(false);
     connect(m_exportBtn, &QPushButton::clicked, this, [this]{ emit exportRequested(m_id); });
 
-    m_sandboxEnableCheck = new QCheckBox(tr("FX"), this);
-    m_sandboxEnableCheck->setToolTip(tr("Enable audio sandbox on this channel (EQ, spatial, effects)"));
+    m_sandboxEnableCheck = new QCheckBox(tr("Audio Sandbox"), this);
+    m_sandboxEnableCheck->setToolTip(tr(
+        "Enable the Audio Sandbox on this channel (EQ, spatial audio, "
+        "and the DSP effect chain). Open the editor with the button next "
+        "to this checkbox."));
     m_sandboxEnableCheck->setChecked(m_sandbox.enabled);
     connect(m_sandboxEnableCheck, &QCheckBox::toggled, this, [this](bool on){
         m_sandbox.enabled = on;
@@ -234,6 +237,32 @@ void Channel::setMeterPeak(float l, float r) {
 
 void Channel::setMeterVisible(bool on) {
     if (m_meter) m_meter->setVisible(on);
+}
+
+void Channel::resizeEvent(QResizeEvent *e)
+{
+    QWidget::resizeEvent(e);
+    updateMeterWidth();
+}
+
+void Channel::updateMeterWidth()
+{
+    if (!m_meter || !m_volume || !m_fx) return;
+    // Width the controls row needs for EVERYTHING except the meter.
+    int reserved = m_volume->sizeHint().width()
+                 + m_fx->sizeHint().width()
+                 + (m_fxSeparator ? m_fxSeparator->sizeHint().width() : 2)
+                 + 8 * 3;                 // controls layout spacing, 3 gaps
+    int row = width() - 16;               // frame left + right margins
+    int w = row - reserved;               // leftover space -> the meter
+    // The meter yields space FIRST and EAGERLY: a low ceiling keeps it
+    // compact even on a wide window (so the sliders already have room),
+    // and a low floor lets it keep shrinking. Only once it bottoms out
+    // do volume / FX start to shrink.
+    if (w < 56)  w = 56;
+    if (w > 150) w = 150;
+    if (m_meter->maximumWidth() != w)     // skip redundant relayouts
+        m_meter->setFixedWidth(w);
 }
 
 void Channel::setSandboxFeatureEnabled(bool on) {

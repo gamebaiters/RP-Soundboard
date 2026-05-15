@@ -2,6 +2,8 @@ set(sources
 	src/about_qt.cpp
 	src/about_qt.h
 	src/about_qt.ui
+	src/howto_qt.cpp
+	src/howto_qt.h
 	src/AudioEffectsDialog.cpp
 	src/AudioEffectsDialog.h
 	src/buildinfo.c
@@ -94,6 +96,10 @@ set(sources
 	src/modules/channel_state_persistence.cpp
 	src/modules/help_bubble.h
 	src/modules/help_bubble.cpp
+	src/modules/onboarding_overlay.h
+	src/modules/onboarding_overlay.cpp
+	src/modules/icon_factory.h
+	src/modules/icon_factory.cpp
 	src/modules/theme.h
 	src/modules/theme.cpp
 	src/modules/main_page.h

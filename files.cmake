@@ -9,8 +9,6 @@ set(sources
 	src/buildinfo.c
 	src/buildinfo.h
 	src/bytebuffer.h
-	src/CmdQueue.cpp
-	src/CmdQueue.h
 	src/common.h
 	src/config_qt.cpp
 	src/config_qt.h

@@ -30,6 +30,14 @@ void WaveformPlayer::notifySeek() {
     m_wave->notifySeek();
 }
 
+void WaveformPlayer::setCropRange(double startSeconds, double endSeconds) {
+    m_wave->setCropRange(startSeconds, endSeconds);
+}
+
+void WaveformPlayer::setShowCropMarkers(bool on) {
+    m_wave->setShowCropMarkers(on);
+}
+
 
 WaveformPlayer::WaveformPlayer(QWidget *parent)
     : QWidget(parent)
@@ -150,6 +158,9 @@ void WaveformPlayer::setFilename(const QString &name) {
 
 void WaveformPlayer::setPosition(double seconds, double total) {
     m_timeLabel->setText(fmtTime(seconds) + " / " + fmtTime(total));
+    // Feed the real decoded duration to the waveform so crop-marker
+    // fractions are computed against an accurate, per-channel length.
+    m_wave->setTotalLength(total);
 }
 
 void WaveformPlayer::setPlaybackFraction(double f) {

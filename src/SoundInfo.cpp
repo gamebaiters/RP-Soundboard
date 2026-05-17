@@ -178,6 +178,9 @@ double SoundInfo::getTimeUnitFactor(int unit)
 	case 0: return 0.001;
 	case 1: return 1.0;
 	default:
-		throw std::logic_error("No such unit");
+		// Unknown unit index (corrupt config) — fall back to seconds
+		// instead of throwing, which would crash the plugin from the
+		// audio path with no recoverable error.
+		return 1.0;
 	}
 }

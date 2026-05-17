@@ -83,14 +83,6 @@ extern "C" void rpsb_close_debug_log()
 extern "C" void rpsb_close_debug_log() {}
 #endif
 
-//#define USE_SSE2
-//#define MEASURE_PERFORMANCE
-
-#ifdef USE_SSE2
-#include <emmintrin.h>
-#endif
-
-
 using std::vector;
 using std::queue;
 
@@ -285,45 +277,6 @@ void Sampler::shutdown()
 	}
 }
 
-#ifdef USE_SSE2
-inline void loadStridedChannels(short *v, __m128i &l, __m128i &r)
-{
-	__m128i a, b;
-	a = _mm_loadu_si128(reinterpret_cast<__m128i*>(v));
-	b = _mm_loadu_si128(reinterpret_cast<__m128i*>(v + 8));
-	l = _mm_unpacklo_epi16(a, b);
-	r = _mm_unpackhi_epi16(a, b);
-	a = _mm_unpacklo_epi16(l, r);
-	b = _mm_unpackhi_epi16(l, r);
-	l = _mm_unpacklo_epi16(a, b);
-	r = _mm_unpackhi_epi16(a, b);
-}
-
-
-inline void scaleSSE(__m128i &v, int factor)
-{
-	//widen values to 32 bit
-	__m128i v0 = _mm_srai_epi32(_mm_unpacklo_epi16(v, v), 16);
-	__m128i v1 = _mm_srai_epi32(_mm_unpackhi_epi16(v, v), 16);
-
-	//TODO: Finish
-
-}
-
-static inline __m128i muly(const __m128i &a, const __m128i &b)
-{
-	__m128i tmp1 = _mm_mul_epu32(a, b); /* mul 2,0*/
-	__m128i tmp2 = _mm_mul_epu32(_mm_srli_si128(a, 4), _mm_srli_si128(b, 4)); /* mul 3,1 */
-	return _mm_unpacklo_epi32(_mm_shuffle_epi32(tmp1, _MM_SHUFFLE (0,0,2,0)), _mm_shuffle_epi32(tmp2, _MM_SHUFFLE (0,0,2,0))); /* shuffle results to [63..0] and pack */
-}
-
-#endif
-
-#ifdef MEASURE_PERFORMANCE
-size_t g_perfMeasureCount = 0;
-double g_perfMeasurement = 0.0;
-#endif
-
 //---------------------------------------------------------------
 // Purpose: Fetch and mix samples from a single buffer
 //---------------------------------------------------------------
@@ -512,7 +465,7 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 			if (canEnd)
 			{
 				if (slot.loop) {
-					slot.inputFile->seek(0.0);
+					slot.inputFile->seek(slot.cropStart);
 					{
 						SampleBuffer::Lock sblp(slot.sbPlayback.getMutex());
 						slot.sbPlayback.clear();
@@ -951,18 +904,37 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &sound, bool preview)
 	s.inputFile = CreateInputFileFFmpeg();
 	sdbgLog("  CreateInputFileFFmpeg returned %p for slot %d", s.inputFile, slot);
 
-	int openRet = s.inputFile->open(sound.filename.toUtf8(), sound.getStartTime(), sound.getPlayTime());
+	int openRet = -1;
+	try {
+		openRet = s.inputFile->open(sound.filename.toUtf8(), sound.getStartTime(), sound.getPlayTime());
+	} catch (...) {
+		// A malformed / corrupt file can throw deep inside the decoder.
+		// Catch it here so the TS3 client never crashes — the slot just
+		// reports a clean failure instead.
+		openRet = -1;
+	}
 	sdbgLog("  open() returned %d", openRet);
 	if (openRet != 0)
 	{
 		sdbgLog("  FAILED to open file, deleting inputFile");
 		delete s.inputFile;
 		s.inputFile = NULL;
+		// Tell the UI so it can show a clear error instead of silently
+		// doing nothing.
+		emit onPlaybackError(slot, sound.filename);
 		return false;
 	}
 
 	s.soundDbSetting = (double)sound.volume;
 	s.stretchBaseTime = 0.0;
+	// Remember the trim start so a looping slot restarts inside the crop
+	// range. getStartTime() is 0.0 when the cell has no crop configured.
+	s.cropStart = sound.getStartTime();
+	{
+		// getPlayTime() is the crop DURATION (-1 when no end point).
+		double pt = sound.getPlayTime();
+		s.cropEnd = (pt > 0.0) ? (s.cropStart + pt) : -1.0;
+	}
 	s.slotDbLocal = m_globalDbSettingLocal;
 	s.slotDbRemote = m_globalDbSettingRemote;
 	double localDb = m_multiMode ? s.slotDbLocal : m_globalDbSettingLocal;
@@ -1080,7 +1052,13 @@ double Sampler::getPosition(int slot)
 				return pos < 0.0 ? 0.0 : pos;
 			}
 			double decoderPos = s.inputFile->getPosition();
-			double bufferedSec = s.sbPlayback.avail() / 48000.0;
+			// avail() counts post-effect OUTPUT samples (48 kHz). The
+			// decoder position is in INPUT-file time, advanced by
+			// speedFactor. Converting the buffered span back to input
+			// time needs the same speedFactor — without it the cursor
+			// jumped erratically the moment a slowdown/effect was applied.
+			double sf = (m_speedFactor > 0.0f) ? (double)m_speedFactor : 1.0;
+			double bufferedSec = s.sbPlayback.avail() / 48000.0 * sf;
 			double audible = decoderPos - bufferedSec;
 			return audible < 0.0 ? 0.0 : audible;
 		}
@@ -1106,6 +1084,25 @@ double Sampler::getLength(int slot)
 
 
 //---------------------------------------------------------------
+// Purpose: Get the crop range (seconds) applied to a slot
+//---------------------------------------------------------------
+void Sampler::getSlotCrop(int slot, double &startSec, double &endSec) const
+{
+	startSec = 0.0;
+	endSec   = -1.0;
+	if (slot >= 0 && slot < MAX_SLOTS)
+	{
+		const PlaybackSlot &s = m_slots[slot];
+		if (s.state != eSILENT)
+		{
+			startSec = s.cropStart;
+			endSec   = s.cropEnd;
+		}
+	}
+}
+
+
+//---------------------------------------------------------------
 // Purpose: Seek to position for a specific slot
 //---------------------------------------------------------------
 void Sampler::seek(double seconds, int slot)
@@ -1116,6 +1113,13 @@ void Sampler::seek(double seconds, int slot)
 		PlaybackSlot &s = m_slots[slot];
 		if (s.inputFile && s.state != eSILENT)
 		{
+			// Clamp the seek target to the crop range. Without this the
+			// user could skip back before the crop start and hear audio
+			// outside the trimmed-in region.
+			if (s.cropStart > 0.0 && seconds < s.cropStart)
+				seconds = s.cropStart;
+			if (s.cropEnd > 0.0 && seconds > s.cropEnd)
+				seconds = s.cropEnd;
 			s.inputFile->seek(seconds);
 
 			SampleBuffer::Lock sblc(s.sbCapture.getMutex());

@@ -30,10 +30,14 @@ QHBoxLayout *checkRow(QCheckBox *cb, const QString &help, QWidget *owner) {
     return row;
 }
 
-ExpandableSection *makeSection(const QString &title, QLayout *content, QWidget *parent, bool expanded = true) {
+ExpandableSection *makeSection(const QString &title, QLayout *content, QWidget *parent,
+                               const QString &key, bool expanded = true) {
     auto *sec = new ExpandableSection(title, 200, parent);
     sec->setContentLayout(*content);
     sec->setExpanded(expanded);
+    // key is a stable, language-independent id (the visible title is
+    // translated, so it can't be used) — remembers open/collapsed state.
+    sec->setPersistenceKey(QStringLiteral("settings_") + key);
     return sec;
 }
 }
@@ -85,6 +89,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     , m_resetHotkeys(new QPushButton(tr("Reset all hotkeys"), this))
     , m_close(new QPushButton(tr("Close"), this))
     , m_adaptWaveform(new QCheckBox(tr("Adapt waveform display to audio effects"), this))
+    , m_cropMarkers(new QCheckBox(tr("Show crop start/end markers on the waveform"), this))
     , m_resetChVolume(new QCheckBox(tr("Volume"), this))
     , m_resetChFx(new QCheckBox(tr("Pitch / speed / reverb"), this))
     , m_resetChFile(new QCheckBox(tr("Loaded file / playback position"), this))
@@ -157,6 +162,10 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         "When ON, the waveform display adapts to show the visual effect of\n"
         "active audio sandbox effects (especially Paulstretch stretching).\n"
         "When OFF, the raw audio waveform is always shown."), this));
+    channelsLay->addLayout(checkRow(m_cropMarkers, tr(
+        "When ON, a sound that has a per-cell crop start and/or end point\n"
+        "shows coloured markers on the waveform at those positions.\n"
+        "Only the points that are actually set are drawn."), this));
 
     // ============== Button grid section ==============
     auto *gridLay = new QFormLayout;
@@ -377,17 +386,17 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     // Build the scrollable body with ExpandableSection for each category
     auto *body = new QVBoxLayout;
     body->setSpacing(2);
-    body->addWidget(makeSection(tr("Language"),       langLay,     this));
-    body->addWidget(makeSection(tr("Audio"),          audioLay,    this));
-    body->addWidget(makeSection(tr("Channels"),       channelsLay, this));
-    body->addWidget(makeSection(tr("Button grid"),    gridLay,     this));
-    body->addWidget(makeSection(tr("Hotkeys"),        hotkeyLay,   this));
-    body->addWidget(makeSection(tr("Logging"),        logLay,      this));
-    body->addWidget(makeSection(tr("Audio sandbox"),  sandboxLay,  this));
-    body->addWidget(makeSection(tr("Profiles"),       profileLay,  this));
-    body->addWidget(makeSection(tr("Custom theme"),   themeWrapLay,this));
-    body->addWidget(makeSection(tr("Reset behaviour"),resetBehLay, this, false));
-    body->addWidget(makeSection(tr("Import / Export"),ioLay,       this, false));
+    body->addWidget(makeSection(tr("Language"),       langLay,     this, "language"));
+    body->addWidget(makeSection(tr("Audio"),          audioLay,    this, "audio"));
+    body->addWidget(makeSection(tr("Channels"),       channelsLay, this, "channels"));
+    body->addWidget(makeSection(tr("Button grid"),    gridLay,     this, "grid"));
+    body->addWidget(makeSection(tr("Hotkeys"),        hotkeyLay,   this, "hotkeys"));
+    body->addWidget(makeSection(tr("Logging"),        logLay,      this, "logging"));
+    body->addWidget(makeSection(tr("Audio sandbox"),  sandboxLay,  this, "sandbox"));
+    body->addWidget(makeSection(tr("Profiles"),       profileLay,  this, "profiles"));
+    body->addWidget(makeSection(tr("Custom theme"),   themeWrapLay,this, "theme"));
+    body->addWidget(makeSection(tr("Reset behaviour"),resetBehLay, this, "reset", false));
+    body->addWidget(makeSection(tr("Import / Export"),ioLay,       this, "io",    false));
     body->addStretch(1);
 
     auto *scrollWidget = new QWidget(this);
@@ -433,6 +442,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_resetHotkeys, &QPushButton::clicked, this, &SettingsWindow::resetAllHotkeysRequested);
     connect(m_close,  &QPushButton::clicked, this, &QDialog::accept);
     connect(m_adaptWaveform, &QCheckBox::toggled, this, &SettingsWindow::adaptWaveformToFxChanged);
+    connect(m_cropMarkers,   &QCheckBox::toggled, this, &SettingsWindow::showCropMarkersChanged);
 
     connect(m_resetChVolume,      &QCheckBox::toggled, this, &SettingsWindow::resetChVolumeChanged);
     connect(m_resetChFx,          &QCheckBox::toggled, this, &SettingsWindow::resetChFxChanged);
@@ -472,6 +482,7 @@ bool SettingsWindow::disableHotkeys()         const { return m_disableHotkeys->i
 int  SettingsWindow::rows()                   const { return m_rows->value();               }
 int  SettingsWindow::cols()                   const { return m_cols->value();               }
 bool SettingsWindow::adaptWaveformToFx()      const { return m_adaptWaveform->isChecked();  }
+bool SettingsWindow::showCropMarkers()        const { return m_cropMarkers->isChecked();    }
 
 bool SettingsWindow::resetChVolume()          const { return m_resetChVolume->isChecked();      }
 bool SettingsWindow::resetChFx()              const { return m_resetChFx->isChecked();          }
@@ -503,6 +514,7 @@ void SettingsWindow::setDisableHotkeys(bool on)        { QSignalBlocker b(m_disa
 void SettingsWindow::setRows(int r)                    { QSignalBlocker b(m_rows);           m_rows->setValue(r);              }
 void SettingsWindow::setCols(int c)                    { QSignalBlocker b(m_cols);           m_cols->setValue(c);              }
 void SettingsWindow::setAdaptWaveformToFx(bool on)     { QSignalBlocker b(m_adaptWaveform);  m_adaptWaveform->setChecked(on);  }
+void SettingsWindow::setShowCropMarkers(bool on)       { QSignalBlocker b(m_cropMarkers);    m_cropMarkers->setChecked(on);    }
 
 void SettingsWindow::setResetChVolume(bool on)         { QSignalBlocker b(m_resetChVolume);      m_resetChVolume->setChecked(on);      }
 void SettingsWindow::setResetChFx(bool on)             { QSignalBlocker b(m_resetChFx);          m_resetChFx->setChecked(on);          }

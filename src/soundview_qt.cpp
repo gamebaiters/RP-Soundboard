@@ -82,22 +82,61 @@ void SoundView::paintEvent(QPaintEvent *evt)
 	}
 	drawWaves(&painter);
 
-	// Draw crop region overlay (from SoundInfo)
-	double songLength = SampleVisualizerThread::GetInstance().fileLength();
-	if (songLength > 0.0)
+	// Draw crop region overlay + start/end markers. Fed by the wiring
+	// with the ACTUAL crop applied to the slot, so it survives looping
+	// and is cleared automatically on stop / sound change.
+	if (m_showCropMarkers && m_totalLength > 0.0)
 	{
-		double start = m_soundInfo.getStartTime();
-		double playTime = m_soundInfo.getPlayTime();
-		double end = (playTime > 0.0) ? (start + playTime) : songLength;
-		int startPixel = int(start / songLength * (width() - 1));
-		int endPixel = int(end / songLength * (width() - 1));
+		double start = (m_cropStart > 0.0) ? m_cropStart : 0.0;
+		double end   = (m_cropEnd   > 0.0) ? m_cropEnd   : m_totalLength;
+		if (start > m_totalLength) start = m_totalLength;
+		if (end   > m_totalLength) end   = m_totalLength;
+		bool hasStart = m_cropStart > 0.0 && start < m_totalLength;
+		bool hasEnd   = m_cropEnd   > 0.0 && end   < m_totalLength - 1e-3;
 
-		painter.setPen(Qt::NoPen);
-		painter.setBrush(QColor(0, 0, 0, 150));
-		if (start > 0.0)
-			painter.drawRect(0, 0, startPixel, height() - 1);
-		if (end < songLength)
-			painter.drawRect(endPixel + 1, 0, width() - 1 - (endPixel + 1), height() - 1);
+		if (hasStart || hasEnd)
+		{
+			const int w1 = width() - 1;
+			int startPixel = int(start / m_totalLength * w1);
+			int endPixel   = int(end   / m_totalLength * w1);
+
+			// Dim the trimmed-away regions.
+			painter.setPen(Qt::NoPen);
+			painter.setBrush(QColor(0, 0, 0, 150));
+			if (hasStart)
+				painter.drawRect(0, 0, startPixel, height() - 1);
+			if (hasEnd)
+				painter.drawRect(endPixel + 1, 0, w1 - (endPixel + 1), height() - 1);
+
+			// Explicit marker line + flag label at each defined point.
+			painter.setRenderHint(QPainter::Antialiasing, true);
+			QFont mf = font();
+			mf.setPixelSize(8);
+			mf.setBold(true);
+			painter.setFont(mf);
+			QFontMetrics fm(mf);
+			auto drawMarker = [&](int x, const QColor &c, const QString &label,
+			                      bool labelLeft) {
+				painter.setPen(QPen(c, 2));
+				painter.drawLine(x, 0, x, height() - 1);
+				int tw = fm.horizontalAdvance(label) + 6;
+				int th = fm.height();
+				int fx = labelLeft ? (x - tw) : x;
+				if (fx < 0) fx = 0;
+				if (fx + tw > width()) fx = width() - tw;
+				QRect fr(fx, 0, tw, th);
+				painter.setPen(Qt::NoPen);
+				painter.setBrush(c);
+				painter.drawRect(fr);
+				painter.setPen(Qt::black);
+				painter.drawText(fr, Qt::AlignCenter, label);
+			};
+			if (hasStart)
+				drawMarker(startPixel, QColor(0x3f, 0xb0, 0xe0), tr("Start"), false);
+			if (hasEnd)
+				drawMarker(endPixel, QColor(0xe0, 0xa0, 0x22), tr("End"), true);
+			painter.setRenderHint(QPainter::Antialiasing, false);
+		}
 	}
 
 	// Draw position cursor
@@ -220,6 +259,37 @@ void SoundView::clearPlayback()
 	m_timer->stop();
 	m_loadActive = false;
 	m_loadTimer->stop();
+	// Crop markers must not survive a stop / sound change.
+	m_cropStart = 0.0;
+	m_cropEnd = -1.0;
+	m_totalLength = 0.0;
+	update();
+}
+
+
+//---------------------------------------------------------------
+// Purpose: crop marker feed (see header)
+//---------------------------------------------------------------
+void SoundView::setCropRange(double startSeconds, double endSeconds)
+{
+	m_cropStart = startSeconds;
+	m_cropEnd   = endSeconds;
+	update();
+}
+
+void SoundView::setTotalLength(double seconds)
+{
+	if (seconds == m_totalLength)
+		return;
+	m_totalLength = seconds;
+	update();
+}
+
+void SoundView::setShowCropMarkers(bool on)
+{
+	if (m_showCropMarkers == on)
+		return;
+	m_showCropMarkers = on;
 	update();
 }
 

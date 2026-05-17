@@ -131,9 +131,9 @@ Channel::Channel(int channelId, QWidget *parent)
     // Text-only button (the previous stoparrow icon was the wrong art and
     // forced the channel row taller). Same fixed height as the sandbox
     // button so the title row stays compact.
-    m_exportBtn = new QPushButton(tr("Export"), this);
+    m_exportBtn = new QPushButton(tr("Export audio"), this);
     m_exportBtn->setFixedHeight(22);
-    m_exportBtn->setMinimumWidth(70);
+    m_exportBtn->setMinimumWidth(96);
     m_exportBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     m_exportBtn->setStyleSheet("QPushButton { padding: 2px 10px; }");
     m_exportBtn->setToolTip(tr("Export this channel's audio with all DSP effects applied to a WAV file"));

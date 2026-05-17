@@ -782,6 +782,13 @@ void ChannelSandboxDialog::buildUi()
     m_stageSection[SandboxState::Stage_Bitcrusher]  = bitcrushSection;
     m_stageSection[SandboxState::Stage_GenLoss]     = genLossSection;
 
+    // Remember which DSP panels the user left open/closed so re-opening
+    // the sandbox does not force them to re-collapse everything.
+    for (int st = 0; st < SandboxState::Stage_COUNT; ++st)
+        if (m_stageSection[st])
+            m_stageSection[st]->setPersistenceKey(
+                QStringLiteral("sandbox_stage_") + QString::number(st));
+
     dspScrollLay->addStretch(1);
     dspScrollArea->setWidget(dspScrollContent);
     dspGroupLay->addWidget(dspScrollArea, 1);

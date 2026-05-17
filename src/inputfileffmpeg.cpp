@@ -665,9 +665,15 @@ int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
 		filters += "aresample=" + std::to_string(srcSampleRate) + ",";
 	}
 
+	// FFmpeg's atempo filter only accepts a factor in 0.5..2.0. Anything
+	// outside must be decomposed into a chain of in-range atempo filters.
+	// The old code clamped the upper bound at 100.0 (itself invalid), so
+	// e.g. max speed (3.0) + min pitch (0.333) produced a single
+	// atempo=9.0 — rejected by avfilter_graph_config(), crashing the plugin.
 	double t = usePitch ? (speed / pitch) : speed;
+	if (!(t > 0.0)) t = 1.0;   // guard against a degenerate / NaN factor
 	while (t < 0.5) { filters += "atempo=0.5,"; t /= 0.5; }
-	while (t > 100.0) { filters += "atempo=100.0,"; t /= 100.0; }
+	while (t > 2.0) { filters += "atempo=2.0,"; t /= 2.0; }
 	if (t != 1.0) { filters += "atempo=" + fmtDbl(t) + ","; }
 
 	filters += "aformat=sample_fmts=s16:sample_rates=48000";
@@ -948,7 +954,14 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 		_seek(startPosSeconds);
 
 	if(playTimeSeconds > 0.0)
-		m_maxConvertedSamples = uint64_t(playTimeSeconds * (double)m_outputSamplerate + 0.5);
+		// _seek() above advanced m_convertedSamples to the trim start, and
+		// the readSamples() limit is compared against that running counter.
+		// The limit must therefore be the ABSOLUTE end sample (start + dur).
+		// Setting it to just playTime*rate cut the clip short by the start
+		// offset — and played nothing at all when start >= playTime, which
+		// is why trimmed playback / preview "did not start".
+		m_maxConvertedSamples = (uint64_t)m_convertedSamples
+		                      + uint64_t(playTimeSeconds * (double)m_outputSamplerate + 0.5);
 
 	return 0;
 }

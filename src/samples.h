@@ -121,12 +121,19 @@ public:
 	// Latest peak |L|, |R| (0..1) measured at the slot's DSP output. The
 	// channel meter widget polls these via QTimer at ~25 Hz.
 	void getSlotPeak(int slot, float &peakL, float &peakR) const;
+	// Crop range (seconds) currently applied to a slot. endSec < 0 means
+	// no end point. Both 0 / negative means the slot has no crop.
+	void getSlotCrop(int slot, double &startSec, double &endSec) const;
 
 signals:
 	void onStartPlaying(int slot, bool preview, QString filename);
 	void onStopPlaying(int slot);
 	void onPausePlaying(int slot);
 	void onUnpausePlaying(int slot);
+	// A sound failed to open (missing / unsupported / damaged file). The
+	// UI shows a clear message instead of the client silently doing
+	// nothing or crashing.
+	void onPlaybackError(int slot, QString filename);
 
 public:
 	// Direct slot-targeted play - the new modular UI uses this to do its
@@ -160,6 +167,13 @@ private:
 		float fxReverbWet = 0.0f;
 		bool loop = false;
 		double stretchBaseTime = 0.0;
+		// Trim start (seconds) of the currently loaded sound. A looping
+		// slot must restart from here, not from the file start, otherwise
+		// the loop ignores the per-cell crop range.
+		double cropStart = 0.0;
+		// Trim end (seconds), or < 0 when the cell has no end point set.
+		// Used only to drive the waveform crop markers.
+		double cropEnd = -1.0;
 
 		PlaybackSlot();
 		~PlaybackSlot();

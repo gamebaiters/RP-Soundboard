@@ -44,6 +44,7 @@ public:
     int  rows() const;
     int  cols() const;
     bool adaptWaveformToFx() const;
+    bool showCropMarkers() const;
 
     // Reset behaviour flags
     bool resetChVolume() const;
@@ -77,6 +78,7 @@ public slots:
     void setRows(int r);
     void setCols(int c);
     void setAdaptWaveformToFx(bool on);
+    void setShowCropMarkers(bool on);
 
     void setResetChVolume(bool on);
     void setResetChFx(bool on);
@@ -118,6 +120,7 @@ signals:
     void importRequested();
     void resetAllHotkeysRequested();
     void adaptWaveformToFxChanged(bool);
+    void showCropMarkersChanged(bool);
 
     void resetChVolumeChanged(bool);
     void resetChFxChanged(bool);
@@ -175,6 +178,7 @@ private:
     QPushButton *m_resetHotkeys;
     QPushButton *m_close;
     QCheckBox   *m_adaptWaveform = nullptr;
+    QCheckBox   *m_cropMarkers = nullptr;
 
     // Reset behaviour
     QCheckBox   *m_resetChVolume     = nullptr;

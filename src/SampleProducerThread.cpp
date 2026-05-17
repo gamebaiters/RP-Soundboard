@@ -81,10 +81,19 @@ void SampleProducerThread::run()
 {
 	while(!m_stop.load(std::memory_order_relaxed))
 	{
+		try
 		{
 			Lock lock(m_mutex);
 			if (m_source)
 				singleBufferFill();
+		}
+		catch (...)
+		{
+			// A corrupt / malformed file can throw deep inside the
+			// decoder. Swallow it here so the producer thread — and the
+			// whole TS3 client — does not crash; the slot simply stops
+			// receiving samples and ends cleanly.
+			m_stop.store(true);
 		}
 
 		// We now have half a second of samples available and have done

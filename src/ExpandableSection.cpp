@@ -6,6 +6,7 @@
 
 #include "ExpandableSection.h"
 #include <QPropertyAnimation>
+#include <QSettings>
 
 ExpandableSection::ExpandableSection(const QString &title, int animationDuration, QWidget *parent) :
 	QWidget(parent),
@@ -72,4 +73,21 @@ void ExpandableSection::setExpanded(bool expanded)
 	toggleButton.setArrowType(expanded ? Qt::ArrowType::DownArrow : Qt::ArrowType::RightArrow);
 	toggleAnimation.setDirection(expanded ? QAbstractAnimation::Forward : QAbstractAnimation::Backward);
 	toggleAnimation.start();
+
+	if (!m_persistKey.isEmpty())
+	{
+		QSettings s(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+		s.setValue(QStringLiteral("sections/") + m_persistKey, expanded);
+	}
+}
+
+void ExpandableSection::setPersistenceKey(const QString &key)
+{
+	m_persistKey = key;
+	if (key.isEmpty())
+		return;
+	QSettings s(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+	bool saved = s.value(QStringLiteral("sections/") + key, isExpanded()).toBool();
+	if (saved != isExpanded())
+		setExpanded(saved);
 }

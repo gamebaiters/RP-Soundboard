@@ -34,6 +34,14 @@ public:
 	void setSandboxState(const SandboxState &s);
 	void notifySeek();
 
+	// Crop markers. The wiring feeds the ACTUAL crop applied to the
+	// playing slot (seconds). endSeconds < 0 means "no end point set".
+	// Both <= 0 means no crop — nothing is drawn. Total length comes
+	// from setTotalLength() (the real decoded duration of the slot).
+	void setCropRange(double startSeconds, double endSeconds);
+	void setTotalLength(double seconds);
+	void setShowCropMarkers(bool on);
+
 signals:
 	void seekRequested(double fraction);
 
@@ -70,6 +78,12 @@ private:
 	QElapsedTimer  m_loadElapsed;
 	int            m_loadDurationMs = 0;
 	bool           m_loadActive = false;
+
+	// Crop marker state (fed by the wiring, cleared on stop / sound change).
+	double         m_cropStart   = 0.0;
+	double         m_cropEnd     = -1.0;
+	double         m_totalLength = 0.0;
+	bool           m_showCropMarkers = true;
 };
 
 #endif // rpsbsrc__soundview_qt_H__

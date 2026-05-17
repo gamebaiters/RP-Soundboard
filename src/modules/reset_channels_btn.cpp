@@ -13,6 +13,14 @@ ResetChannelsBtn::ResetChannelsBtn(QWidget *parent)
 }
 
 void ResetChannelsBtn::onClicked() {
-    // No confirmation. Reset is cheap, reversible by re-tweaking sliders.
-    emit resetRequested();
+    // Reset wipes volumes, FX and the whole audio sandbox of every
+    // channel and is then persisted — confirm first so a stray click
+    // can never silently clear the user's mixer.
+    auto reply = QMessageBox::question(
+        this, tr("Reset channels"),
+        tr("Reset all channel state — volumes, pitch, speed, reverb and the "
+           "audio sandbox — back to defaults?\n\nThis cannot be undone."),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (reply == QMessageBox::Yes)
+        emit resetRequested();
 }

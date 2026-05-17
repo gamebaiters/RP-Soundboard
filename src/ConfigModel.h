@@ -175,6 +175,9 @@ public:
 	inline bool getAdaptWaveformToFx() const { return m_adaptWaveformToFx; }
 	void setAdaptWaveformToFx(bool on);
 
+	inline bool getShowCropMarkers() const { return m_showCropMarkers; }
+	void setShowCropMarkers(bool on);
+
 	inline bool getResetChVolume() const { return m_resetChVolume; }
 	void setResetChVolume(bool on);
 	inline bool getResetChFx() const { return m_resetChFx; }
@@ -257,6 +260,7 @@ private:
 	bool m_audioMeterVisible;
 	bool m_audioExportEnabled = false;
 	bool m_adaptWaveformToFx = false;
+	bool m_showCropMarkers   = true;
 
 	bool m_resetChVolume     = true;
 	bool m_resetChFx         = true;

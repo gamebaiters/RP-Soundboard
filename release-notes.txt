@@ -1,3 +1,47 @@
+GameBaiters Soundboard v2.2.2
+=============================
+
+Bug-fix and stability release on top of v2.2.1: audio crash
+fixes, a working per-cell crop, clearer error handling and new
+waveform crop markers.
+
+---------------------------------------------------------------------
+CRASH & STABILITY
+---------------------------------------------------------------------
+* Fixed a crash that happened when the speed was set to maximum
+  while the pitch was at minimum.
+* A missing, unsupported or corrupt audio file no longer crashes
+  the TeamSpeak client - a clear error message is shown instead.
+* The "Reset channels" button now asks for confirmation before
+  wiping every channel's volumes, FX and audio sandbox.
+
+---------------------------------------------------------------------
+PER-CELL CROP (TRIM)
+---------------------------------------------------------------------
+* The per-cell crop start/end points now work correctly during
+  normal playback, preview and looping - previously a trimmed
+  sound could play nothing at all.
+* Looping a cropped sound now restarts inside the crop range
+  instead of from the beginning of the file.
+* Skipping backwards can no longer jump before the crop start.
+* New coloured Start / End markers are drawn on the waveform for
+  a cropped sound. They can be turned off in Settings > Channels.
+
+---------------------------------------------------------------------
+INTERFACE
+---------------------------------------------------------------------
+* The waveform playback cursor no longer lags or jumps around
+  when a speed effect or other DSP effect is active.
+* Collapsible sections (the DSP effect panels and the settings
+  groups) now remember whether they were left open or closed.
+* The per-channel "Export" button is now labelled "Export audio".
+
+---------------------------------------------------------------------
+INTERNAL
+---------------------------------------------------------------------
+* Removed unused and dead code; general project tidy-up.
+
+=====================================================================
 GameBaiters Soundboard v2.2.1
 =============================
 

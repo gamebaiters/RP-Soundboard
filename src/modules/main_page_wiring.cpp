@@ -148,6 +148,7 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     w->setShowHotkeysOnButtons(model->getShowHotkeysOnButtons());
     w->setDisableHotkeys(!model->getHotkeysEnabled());
     w->setAdaptWaveformToFx(model->getAdaptWaveformToFx());
+    w->setShowCropMarkers(model->getShowCropMarkers());
     w->setResetChVolume(model->getResetChVolume());
     w->setResetChFx(model->getResetChFx());
     w->setResetChFile(model->getResetChFile());
@@ -427,6 +428,10 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
     QObject::connect(w, &SettingsWindow::adaptWaveformToFxChanged, [model, page](bool v){
         model->setAdaptWaveformToFx(v);
         for (auto *ch : page->channels()) ch->waveform()->setAdaptToFx(v);
+    });
+    QObject::connect(w, &SettingsWindow::showCropMarkersChanged, [model, page](bool v){
+        model->setShowCropMarkers(v);
+        for (auto *ch : page->channels()) ch->waveform()->setShowCropMarkers(v);
     });
     QObject::connect(w, &SettingsWindow::resetChVolumeChanged, [model](bool v){ model->setResetChVolume(v); });
     QObject::connect(w, &SettingsWindow::resetChFxChanged, [model](bool v){ model->setResetChFx(v); });
@@ -768,7 +773,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
     // Sampler -> waveform indicator. Slot N drives channel widget N.
     if (sampler) {
         QObject::connect(sampler, &Sampler::onStartPlaying, page,
-                         [page](int slot, bool preview, QString filename){
+                         [page, sampler](int slot, bool preview, QString filename){
             // Preview never owns a channel widget.
             if (preview) return;
             if (slot < 0 || slot >= page->channels().size()) return;
@@ -777,6 +782,13 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             info.filename = filename;
             ch->waveform()->setSound(info);
             ch->waveform()->setPlaying(true);
+            // Feed the actual crop applied to this slot so the waveform
+            // can mark its start / end points. clearPlayback() on stop
+            // or sound change wipes it, and looping never re-emits this
+            // signal so the markers stay put across loops.
+            double cropStart = 0.0, cropEnd = -1.0;
+            sampler->getSlotCrop(slot, cropStart, cropEnd);
+            ch->waveform()->setCropRange(cropStart, cropEnd);
         }, Qt::QueuedConnection);
         QObject::connect(sampler, &Sampler::onStopPlaying, page,
                          [page, sampler](int slot){
@@ -797,6 +809,18 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                          [page](int slot){
             if (slot < 0 || slot >= page->channels().size()) return;
             page->channels().at(slot)->waveform()->setPaused(false);
+        }, Qt::QueuedConnection);
+        // Unplayable file -> clear error dialog instead of a silent no-op.
+        QObject::connect(sampler, &Sampler::onPlaybackError, page,
+                         [page](int /*slot*/, QString filename){
+            QString base = filename;
+            int sl = qMax(base.lastIndexOf('/'), base.lastIndexOf('\\'));
+            if (sl >= 0) base = base.mid(sl + 1);
+            if (base.isEmpty()) base = QObject::tr("(unknown file)");
+            QMessageBox::warning(page, QObject::tr("Playback error"),
+                QObject::tr("Could not play \"%1\".\n\n"
+                            "The file may be missing, in an unsupported "
+                            "format, or damaged.").arg(base));
         }, Qt::QueuedConnection);
     }
 
@@ -1164,10 +1188,11 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         model->addObserver(s_observer);
     }
 
-    // 10 Hz playback position poll for waveform overlay + time labels.
+    // 20 Hz playback position poll for waveform overlay + time labels.
+    // 10 Hz felt visibly laggy; 20 Hz tracks smoothly without cost.
     if (sampler) {
         auto *posTimer = new QTimer(page);
-        posTimer->setInterval(100);
+        posTimer->setInterval(50);
         QObject::connect(posTimer, &QTimer::timeout, page, [page, sampler]{
             for (int i = 0; i < page->channels().size(); ++i) {
                 auto *ch = page->channels().at(i);
@@ -1327,6 +1352,7 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         ch->setMeterVisible(model->getAudioMeterVisible());
         ch->setExportVisible(model->getAudioExportEnabled());
         ch->waveform()->setAdaptToFx(model->getAdaptWaveformToFx());
+        ch->waveform()->setShowCropMarkers(model->getShowCropMarkers());
         if (model->getAdaptWaveformToFx())
             ch->waveform()->setSandboxState(ch->sandboxState());
     };

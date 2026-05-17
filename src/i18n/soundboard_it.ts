@@ -388,8 +388,8 @@ Le impostazioni sono salvate per canale e incluse nelle macro.</translation>
     </message>
     <message>
         <location filename="../modules/channel.cpp" line="133"/>
-        <source>Export</source>
-        <translation>Esporta</translation>
+        <source>Export audio</source>
+        <translation>Esporta audio</translation>
     </message>
     <message>
         <location filename="../modules/channel.cpp" line="138"/>
@@ -1859,6 +1859,25 @@ Connettiti a un server per usare la soundboard.</translation>
         <translation>Importazione riuscita</translation>
     </message>
     <message>
+        <location filename="../modules/main_page_wiring.cpp" line="803"/>
+        <source>Playback error</source>
+        <translation>Errore di riproduzione</translation>
+    </message>
+    <message>
+        <location filename="../modules/main_page_wiring.cpp" line="804"/>
+        <source>Could not play &quot;%1&quot;.
+
+The file may be missing, in an unsupported format, or damaged.</source>
+        <translation>Impossibile riprodurre &quot;%1&quot;.
+
+Il file potrebbe essere mancante, in un formato non supportato o danneggiato.</translation>
+    </message>
+    <message>
+        <location filename="../modules/main_page_wiring.cpp" line="800"/>
+        <source>(unknown file)</source>
+        <translation>(file sconosciuto)</translation>
+    </message>
+    <message>
         <location filename="../modules/config_io.cpp" line="200"/>
         <source>Could not read the file</source>
         <translation>Impossibile leggere il file</translation>
@@ -2096,6 +2115,15 @@ Global settings and button assignments are preserved.</source>
         <translation>Azzera solo lo stato dei canali (volumi / pitch / velocità / riverbero).
 Impostazioni globali e assegnazioni dei pulsanti restano.</translation>
     </message>
+    <message>
+        <location filename="../modules/reset_channels_btn.cpp" line="18"/>
+        <source>Reset all channel state — volumes, pitch, speed, reverb and the audio sandbox — back to defaults?
+
+This cannot be undone.</source>
+        <translation>Azzerare lo stato di tutti i canali — volumi, pitch, velocità, riverbero e l&apos;audio sandbox — riportandoli ai valori predefiniti?
+
+L&apos;operazione non può essere annullata.</translation>
+    </message>
 </context>
 <context>
     <name>SearchBar</name>
@@ -2125,6 +2153,20 @@ i pulsanti la cui etichetta non contiene il testo. Svuota il campo
         <location filename="../modules/settings_window.cpp" line="43"/>
         <source>Earrape protection</source>
         <translation>Anti-earrape</translation>
+    </message>
+    <message>
+        <location filename="../modules/settings_window.cpp" line="92"/>
+        <source>Show crop start/end markers on the waveform</source>
+        <translation>Mostra i marcatori di inizio/fine ritaglio sulla waveform</translation>
+    </message>
+    <message>
+        <location filename="../modules/settings_window.cpp" line="164"/>
+        <source>When ON, a sound that has a per-cell crop start and/or end point
+shows coloured markers on the waveform at those positions.
+Only the points that are actually set are drawn.</source>
+        <translation>Se attivo, un suono con un punto di inizio e/o fine ritaglio
+mostra dei marcatori colorati sulla waveform in quelle posizioni.
+Vengono disegnati solo i punti effettivamente impostati.</translation>
     </message>
     <message>
         <location filename="../modules/settings_window.cpp" line="44"/>
@@ -2635,6 +2677,16 @@ Da OFF, viene sempre mostrata la forma d&apos;onda grezza.</translation>
         <location filename="../soundview_qt.cpp" line="161"/>
         <source>Paulstretch ready</source>
         <translation>Paulstretch pronto</translation>
+    </message>
+    <message>
+        <location filename="../soundview_qt.cpp" line="132"/>
+        <source>Start</source>
+        <translation>Inizio</translation>
+    </message>
+    <message>
+        <location filename="../soundview_qt.cpp" line="134"/>
+        <source>End</source>
+        <translation>Fine</translation>
     </message>
 </context>
 <context>

@@ -39,6 +39,10 @@ public slots:
     void setAdaptToFx(bool on);
     void setSandboxState(const SandboxState &s);
     void notifySeek();
+    // Crop markers: range = actual crop applied to the slot (seconds,
+    // endSeconds < 0 = open end); toggle = global "show crop markers".
+    void setCropRange(double startSeconds, double endSeconds);
+    void setShowCropMarkers(bool on);
 
 signals:
     void playClicked();

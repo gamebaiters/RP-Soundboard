@@ -64,6 +64,7 @@ ConfigModel::ConfigModel()
 	m_audioMeterVisible = true;
 	m_audioExportEnabled = false;
 	m_adaptWaveformToFx = false;
+	m_showCropMarkers = true;
 
 	m_resetChVolume = true;
 	m_resetChFx = true;
@@ -138,6 +139,7 @@ void ConfigModel::readConfig(const QString &file)
 	m_audioMeterVisible   = settings.value("audio_meter_visible", true).toBool();
 	m_audioExportEnabled  = settings.value("audio_export_enabled", false).toBool();
 	m_adaptWaveformToFx   = settings.value("adapt_waveform_to_fx", false).toBool();
+	m_showCropMarkers     = settings.value("show_crop_markers", true).toBool();
 	m_resetChVolume       = settings.value("reset_ch_volume", true).toBool();
 	m_resetChFx           = settings.value("reset_ch_fx", true).toBool();
 	m_resetChFile         = settings.value("reset_ch_file", true).toBool();
@@ -208,6 +210,7 @@ void ConfigModel::writeConfig(const QString &file)
 	settings.setValue("audio_meter_visible", m_audioMeterVisible);
 	settings.setValue("audio_export_enabled", m_audioExportEnabled);
 	settings.setValue("adapt_waveform_to_fx", m_adaptWaveformToFx);
+	settings.setValue("show_crop_markers", m_showCropMarkers);
 	settings.setValue("reset_ch_volume", m_resetChVolume);
 	settings.setValue("reset_ch_fx", m_resetChFx);
 	settings.setValue("reset_ch_file", m_resetChFile);
@@ -754,6 +757,12 @@ void ConfigModel::setAudioExportEnabled(bool on)
 void ConfigModel::setAdaptWaveformToFx(bool on)
 {
 	m_adaptWaveformToFx = on;
+	writeConfig();
+}
+
+void ConfigModel::setShowCropMarkers(bool on)
+{
+	m_showCropMarkers = on;
 	writeConfig();
 }
 

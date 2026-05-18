@@ -25,6 +25,8 @@
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QJsonDocument>
+#include <QScreen>
+#include <QGuiApplication>
 #include <cmath>
 
 namespace {
@@ -78,10 +80,17 @@ ChannelSandboxDialog::ChannelSandboxDialog(int channelId, QWidget *parent)
     setProperty("isGBSoundboard", true);
     setModal(false);
     refreshTitle();
-    // Wider default so every column + value label fits without the
-    // scroll area clipping captions behind its scrollbar.
-    resize(1240, 780);
-    setMinimumWidth(900);
+    // Open at a size that fits the user's screen. The whole dialog is
+    // scroll-backed, so a smaller window scrolls instead of clipping -
+    // never force a window bigger than the desktop.
+    {
+        QSize avail(1280, 800);
+        if (QScreen *scr = QGuiApplication::primaryScreen())
+            avail = scr->availableGeometry().size();
+        resize(qMin(1240, avail.width()  - 80),
+               qMin(940,  avail.height() - 48));
+    }
+    setMinimumSize(640, 460);
     buildUi();
     pushStateToWidgets();
     applyModeVisibility();
@@ -167,17 +176,24 @@ void ChannelSandboxDialog::buildUi()
     root->addLayout(topRow);
 
     // ===== Spatial mode selector =====
-    auto *modeSection = new QHBoxLayout;
+    // Vertical so the caption (which wraps) sits above the combo - in a
+    // horizontal row a long non-wrapping caption forces the whole
+    // spatial panel wider than its viewport and clips every control.
+    auto *modeSection = new QVBoxLayout;
     auto *modeHeader = new QLabel(tr(
         "Spatial mode — choose how the sound is positioned in 3D space:"), this);
     modeHeader->setStyleSheet("font-weight: bold; margin-top: 2px;");
+    modeHeader->setWordWrap(true);
     modeSection->addWidget(modeHeader);
-    modeSection->addSpacing(12);
+    auto *modeRow = new QHBoxLayout;
     m_modeBox = new QComboBox(this);
     for (const auto &m : kModes) m_modeBox->addItem(QObject::tr(m.label));
-    m_modeBox->setMinimumWidth(260);
-    modeSection->addWidget(m_modeBox);
-    modeSection->addWidget(new HelpBubble(tr(
+    // No hard minimum width - the combo must be free to shrink with the
+    // panel; the drop-down still shows each item in full.
+    m_modeBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    m_modeBox->setMinimumContentsLength(6);
+    modeRow->addWidget(m_modeBox, 1);
+    modeRow->addWidget(new HelpBubble(tr(
         "Spatial mode:\n"
         "  - Off: pure passthrough.\n"
         "  - L/R Pan: equal-power balance (cheap, no HRTF).\n"
@@ -187,14 +203,20 @@ void ChannelSandboxDialog::buildUi()
         "    RPM and radius.\n"
         "  - 8D preset: orbit + head sway + tight width, the classic\n"
         "    'YouTube 8D remix' recipe."), this));
-    modeSection->addStretch(1);
-    root->addLayout(modeSection);
+    modeSection->addLayout(modeRow);
+    // The mode selector is packed into the fixed-size spatial panel
+    // below so that every spatial control lives in one self-contained,
+    // independently scrollable box.
+    auto *modeWidget = new QWidget(this);
+    modeWidget->setLayout(modeSection);
 
     // ===== Mid row: Spatial column | EQ column =====
     auto *midRow = new QHBoxLayout;
 
-    // ---- Spatial column ----
+    // ---- Spatial column: collected here, then wrapped in a fixed-size
+    //      scroll area further down. ----
     auto *spatialCol = new QVBoxLayout;
+    spatialCol->addWidget(modeWidget);
 
     // Pan group (visible only in L/R Pan mode)
     m_panGroup = new QGroupBox(tr("L/R Pan"), this);
@@ -214,6 +236,31 @@ void ChannelSandboxDialog::buildUi()
     m_hrtfGroup = new QGroupBox(tr("3D HRTF"), this);
     {
         auto *l = new QVBoxLayout(m_hrtfGroup);
+
+        // HRTF engine selector - applies to every 3D mode.
+        {
+            auto *engRow = new QWidget(m_hrtfGroup);
+            auto *eh = new QHBoxLayout(engRow);
+            eh->setContentsMargins(0, 0, 0, 0);
+            auto *engLbl = new QLabel(tr("HRTF engine"), engRow);
+            engLbl->setStyleSheet("font-weight: bold;");
+            eh->addWidget(engLbl);
+            m_engineBox = new QComboBox(engRow);
+            m_engineBox->addItem(tr("Classic (parametric)"));
+            m_engineBox->addItem(tr("Leia (measured HRTF)"));
+            m_engineBox->setSizeAdjustPolicy(
+                QComboBox::AdjustToMinimumContentsLengthWithIcon);
+            m_engineBox->setMinimumContentsLength(6);
+            eh->addWidget(m_engineBox, 1);
+            eh->addWidget(new HelpBubble(tr(
+                "Classic: the original lightweight parametric HRTF.\n"
+                "Leia: convolution with a measured HRTF dataset plus\n"
+                "image-source room reflections - correct front/back\n"
+                "localisation and a far more convincing sense of space.\n"
+                "If the Leia data cannot load, playback falls back to\n"
+                "Classic automatically."), engRow));
+            l->addWidget(engRow);
+        }
 
         m_padContainer = new QWidget(m_hrtfGroup);
         auto *padLay = new QVBoxLayout(m_padContainer);
@@ -239,10 +286,10 @@ void ChannelSandboxDialog::buildUi()
         m_dist = s; m_distLabel = lbl;
         l->addWidget(m_distRow);
 
-        row = buildSliderRow(m_hrtfGroup, tr("Stereo width"),
+        m_widthRow = buildSliderRow(m_hrtfGroup, tr("Stereo width"),
                               0, 120, 60, " deg", s, lbl);
         m_width = s; m_widthLabel = lbl;
-        l->addWidget(row);
+        l->addWidget(m_widthRow);
 
         m_rpmRow = buildSliderRow(m_hrtfGroup, tr("RPM"),
                                    0, 120, 15, " rpm", s, lbl);
@@ -286,6 +333,66 @@ void ChannelSandboxDialog::buildUi()
         l->addWidget(r2);
     }
     spatialCol->addWidget(m_hrtfGroup, 1);
+
+    // Leia engine room / tone controls (visible only when the Leia
+    // engine is selected for a 3D mode).
+    m_leiaGroup = new QGroupBox(tr("Leia engine - room & tone"), this);
+    {
+        auto *l = new QVBoxLayout(m_leiaGroup);
+        QSlider *s = nullptr; QLabel *lbl = nullptr;
+
+        m_leiaRefl = new QCheckBox(tr("Early reflections (room)"), m_leiaGroup);
+        m_leiaRefl->setToolTip(tr(
+            "Image-source early reflections. They place the sound in a\n"
+            "real room - the single strongest 'out of the head' cue.\n"
+            "Turn off for a dry, anechoic placement."));
+        l->addWidget(m_leiaRefl);
+
+        QWidget *row = buildSliderRow(m_leiaGroup, tr("Reflection level"),
+                                      -25, 20, -6, " dB", s, lbl);
+        m_leiaReflLevel = s; m_leiaReflLevelLabel = lbl;
+        l->addWidget(row);
+
+        row = buildSliderRow(m_leiaGroup, tr("Room size"),
+                             7, 50, 12, " m", s, lbl);
+        m_leiaRoomSize = s; m_leiaRoomSizeLabel = lbl;
+        l->addWidget(row);
+
+        {
+            auto *rtRow = new QWidget(m_leiaGroup);
+            auto *rh = new QHBoxLayout(rtRow);
+            rh->setContentsMargins(0, 0, 0, 0);
+            rh->addWidget(new QLabel(tr("Room type"), rtRow));
+            m_leiaRoomType = new QComboBox(rtRow);
+            m_leiaRoomType->addItem(tr("Drapes (most absorbent)"));
+            m_leiaRoomType->addItem(tr("Studio"));
+            m_leiaRoomType->addItem(tr("Tiles"));
+            m_leiaRoomType->addItem(tr("Concrete"));
+            m_leiaRoomType->addItem(tr("Glass (most reflective)"));
+            m_leiaRoomType->setSizeAdjustPolicy(
+                QComboBox::AdjustToMinimumContentsLengthWithIcon);
+            m_leiaRoomType->setMinimumContentsLength(6);
+            rh->addWidget(m_leiaRoomType, 1);
+            l->addWidget(rtRow);
+        }
+
+        row = buildSliderRow(m_leiaGroup, tr("Clarity"),
+                             0, 100, 100, "%", s, lbl);
+        m_leiaClarity = s; m_leiaClarityLabel = lbl;
+        m_leiaClarity->setToolTip(tr(
+            "Level of the direct (dry HRTF) path. 100 = full direct\n"
+            "sound; lower values lean on the room reflections."));
+        l->addWidget(row);
+
+        row = buildSliderRow(m_leiaGroup, tr("Width"),
+                             0, 100, 35, "%", s, lbl);
+        m_leiaWidth = s; m_leiaWidthLabel = lbl;
+        m_leiaWidth->setToolTip(tr(
+            "Amount of room reflection blended in. 0 = pure direct,\n"
+            "higher = a wider, more enveloping space."));
+        l->addWidget(row);
+    }
+    spatialCol->addWidget(m_leiaGroup, 1);
 
     // ---- EQ (belongs with spatial on the left) ----
 
@@ -343,10 +450,29 @@ void ChannelSandboxDialog::buildUi()
             pushChange();
         });
     }
-    spatialCol->addWidget(eqBox, 1);
     m_eqBox = eqBox;
 
-    midRow->addLayout(spatialCol, 2);
+    // Wrap every spatial control (mode selector, Pan, 3D HRTF, Leia
+    // room/tone) into a fixed-height, independently scrollable panel.
+    // This is the whole point: the user can reach any spatial option
+    // by scrolling this box alone, never the entire dialog.
+    spatialCol->addStretch(1);
+    auto *spatialInner = new QWidget(this);
+    spatialInner->setLayout(spatialCol);
+    m_spatialScroll = new QScrollArea(this);
+    m_spatialScroll->setWidget(spatialInner);
+    m_spatialScroll->setWidgetResizable(true);
+    // As-needed (not Off): if the panel is ever narrower than the
+    // controls' hard minimum, scroll rather than clip them invisibly.
+    m_spatialScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_spatialScroll->setFixedHeight(480);
+    m_spatialScroll->setMinimumWidth(320);
+
+    auto *leftCol = new QVBoxLayout;
+    leftCol->addWidget(m_spatialScroll);
+    leftCol->addWidget(eqBox, 1);
+
+    midRow->addLayout(leftCol, 2);
 
     // ---- DSP modules column (right) ----
     auto *fxCol = new QVBoxLayout;
@@ -917,6 +1043,35 @@ void ChannelSandboxDialog::buildUi()
     connect(m_sway,    &QCheckBox::toggled,    this, &ChannelSandboxDialog::onSwayToggled);
     connect(m_spatialMix, &QSlider::valueChanged, this, &ChannelSandboxDialog::onSpatialMixChanged);
     connect(m_ambience,   &QSlider::valueChanged, this, &ChannelSandboxDialog::onAmbienceChanged);
+    connect(m_engineBox,  qOverload<int>(&QComboBox::currentIndexChanged),
+            this, &ChannelSandboxDialog::onEngineChanged);
+    connect(m_leiaRefl, &QCheckBox::toggled, this, [this](bool on){
+        m_state.leiaReflEnable = on; pushChange();
+    });
+    connect(m_leiaReflLevel, &QSlider::valueChanged, this, [this](int v){
+        m_state.leiaReflLevel = static_cast<float>(v);
+        m_leiaReflLevelLabel->setText(QString::number(v) + " dB");
+        pushChange();
+    });
+    connect(m_leiaRoomSize, &QSlider::valueChanged, this, [this](int v){
+        m_state.leiaRoomSize = static_cast<float>(v);
+        m_leiaRoomSizeLabel->setText(QString::number(v) + " m");
+        pushChange();
+    });
+    connect(m_leiaRoomType, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, [this](int idx){
+        m_state.leiaRoomType = idx; pushChange();
+    });
+    connect(m_leiaClarity, &QSlider::valueChanged, this, [this](int v){
+        m_state.leiaClarity = static_cast<float>(v);
+        m_leiaClarityLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+    connect(m_leiaWidth, &QSlider::valueChanged, this, [this](int v){
+        m_state.leiaWidth = static_cast<float>(v);
+        m_leiaWidthLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
     connect(m_stretchEn,  &QCheckBox::toggled,    this, &ChannelSandboxDialog::onStretchToggled);
     connect(m_stretchFac, &QSlider::valueChanged, this, &ChannelSandboxDialog::onStretchFactorChanged);
     connect(m_stretchWin, &QSlider::valueChanged, this, &ChannelSandboxDialog::onStretchWindowChanged);
@@ -1366,6 +1521,30 @@ void ChannelSandboxDialog::pushStateToWidgets()
     m_spatialMixLabel->setText(QString::number(m_spatialMix->value()) + "%");
     m_ambience->setValue(static_cast<int>(m_state.reverbWet * 100.0f));
     m_ambienceLabel->setText(QString::number(m_ambience->value()) + "%");
+    if (m_engineBox)
+        m_engineBox->setCurrentIndex(
+            m_state.spatialEngine == SandboxState::Engine_Leia ? 1 : 0);
+    if (m_leiaRefl) m_leiaRefl->setChecked(m_state.leiaReflEnable);
+    if (m_leiaReflLevel) {
+        m_leiaReflLevel->setValue(static_cast<int>(m_state.leiaReflLevel));
+        m_leiaReflLevelLabel->setText(
+            QString::number(m_leiaReflLevel->value()) + " dB");
+    }
+    if (m_leiaRoomSize) {
+        m_leiaRoomSize->setValue(static_cast<int>(m_state.leiaRoomSize));
+        m_leiaRoomSizeLabel->setText(
+            QString::number(m_leiaRoomSize->value()) + " m");
+    }
+    if (m_leiaRoomType) m_leiaRoomType->setCurrentIndex(m_state.leiaRoomType);
+    if (m_leiaClarity) {
+        m_leiaClarity->setValue(static_cast<int>(m_state.leiaClarity));
+        m_leiaClarityLabel->setText(
+            QString::number(m_leiaClarity->value()) + "%");
+    }
+    if (m_leiaWidth) {
+        m_leiaWidth->setValue(static_cast<int>(m_state.leiaWidth));
+        m_leiaWidthLabel->setText(QString::number(m_leiaWidth->value()) + "%");
+    }
     m_stretchEn->setChecked(m_state.stretchEnabled);
     m_stretchFac->setValue(static_cast<int>(m_state.stretchFactor * 10.0f));
     m_stretchFacLabel->setText(QString::number(m_state.stretchFactor, 'f', 1) + "x");
@@ -1457,6 +1636,7 @@ void ChannelSandboxDialog::pushStateToWidgets()
     if (m_modeBox)     m_modeBox->setEnabled(master);
     if (m_panGroup)    m_panGroup->setEnabled(master);
     if (m_hrtfGroup)   m_hrtfGroup->setEnabled(master);
+    if (m_leiaGroup)   m_leiaGroup->setEnabled(master);
     if (m_eqEnable)    m_eqEnable->setEnabled(master);
     for (auto *s : m_eqSliders) if (s) s->setEnabled(master && m_state.eqEnabled);
     if (m_stretchEn)   m_stretchEn->setEnabled(master);
@@ -1475,17 +1655,35 @@ void ChannelSandboxDialog::applyModeVisibility()
     bool is8D     = (m == SandboxState::Spatial_8DPreset);
     bool any3D    = isManual || isRotate || is8D;
 
+    // Leia is a measured-HRTF engine: it has no virtual-speaker pair
+    // (no stereo-width angle) and resolves front/back from the data
+    // itself (no head-sway trick), so those Classic-only rows are
+    // hidden when Leia is the active engine. Its room / tone controls
+    // appear in their own group instead.
+    bool leia = (m_state.spatialEngine == SandboxState::Engine_Leia);
+
     m_panGroup->setVisible(isPan);
     m_hrtfGroup->setVisible(any3D);
+    if (m_leiaGroup) m_leiaGroup->setVisible(any3D && leia);
 
     // Inside the 3D group: pad + dist visible only in Manual; rpm +
-    // radius + ccw visible in Rotate / 8D. Elev / Width / Sway always
-    // visible in any 3D mode.
+    // radius + ccw visible in Rotate / 8D. Elevation / Spatial mix /
+    // Ambience always visible in any 3D mode.
     if (m_padContainer) m_padContainer->setVisible(isManual);
-    if (m_distRow)      m_distRow->setVisible(isManual);
+    if (m_distRow)      m_distRow->setVisible(isManual && !leia);
+    if (m_widthRow)     m_widthRow->setVisible(any3D && !leia);
+    if (m_sway)         m_sway->setVisible(any3D && !leia);
     if (m_rpmRow)       m_rpmRow->setVisible(isRotate || is8D);
     if (m_radiusRow)    m_radiusRow->setVisible(isRotate || is8D);
     if (m_ccw)          m_ccw->setVisible(isRotate || is8D);
+}
+
+void ChannelSandboxDialog::onEngineChanged(int idx)
+{
+    m_state.spatialEngine = (idx == 1) ? SandboxState::Engine_Leia
+                                       : SandboxState::Engine_Classic;
+    applyModeVisibility();
+    pushChange();
 }
 
 void ChannelSandboxDialog::onEnableToggled(bool on)
@@ -1497,6 +1695,7 @@ void ChannelSandboxDialog::onEnableToggled(bool on)
     if (m_modeBox)     m_modeBox->setEnabled(on);
     if (m_panGroup)    m_panGroup->setEnabled(on);
     if (m_hrtfGroup)   m_hrtfGroup->setEnabled(on);
+    if (m_leiaGroup)   m_leiaGroup->setEnabled(on);
     if (m_eqEnable)    m_eqEnable->setEnabled(on);
     for (auto *s : m_eqSliders) if (s) s->setEnabled(on && m_state.eqEnabled);
     if (m_stretchEn)   m_stretchEn->setEnabled(on);
@@ -1540,6 +1739,16 @@ void ChannelSandboxDialog::load8DPreset()
     // Spatial mix slightly under 100 keeps original stereo content
     // bleeding through, again matching standalone behaviour.
     m_state.spatialMix     = 0.85f;
+
+    // Leia-engine 8D recipe: image-source reflections give the orbit a
+    // believable room so the preset sounds right whichever engine the
+    // user has selected. The engine choice itself is left untouched.
+    m_state.leiaReflEnable = true;
+    m_state.leiaRoomType   = 1;       // Studio
+    m_state.leiaRoomSize   = 14.0f;
+    m_state.leiaReflLevel  = -4.0f;
+    m_state.leiaClarity    = 100.0f;
+    m_state.leiaWidth      = 45.0f;
 }
 
 void ChannelSandboxDialog::onPanChanged(int v) {
@@ -1724,7 +1933,12 @@ void ChannelSandboxDialog::onPipelineStageClicked(int stage)
     // EQ / Spatial / Reverb live in the left column of the outer scroll.
     QWidget *target = (stage == SandboxState::Stage_EQ) ? m_eqBox
                                                         : m_hrtfGroup;
-    if (target && m_outerScroll) m_outerScroll->ensureWidgetVisible(target);
+    if (!target) return;
+    if (m_outerScroll) m_outerScroll->ensureWidgetVisible(target);
+    // The 3D HRTF controls sit inside their own fixed-size spatial
+    // panel - scroll that one too so the target actually shows.
+    if (target == m_hrtfGroup && m_spatialScroll)
+        m_spatialScroll->ensureWidgetVisible(target);
 }
 
 void ChannelSandboxDialog::filterDspModules(const QString &text)

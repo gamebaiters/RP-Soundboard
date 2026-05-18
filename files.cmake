@@ -116,6 +116,18 @@ set(sources
 	src/dsp/EqRack.cpp
 	src/dsp/Positional.h
 	src/dsp/Positional.cpp
+	src/dsp/SpatialLeia.h
+	src/dsp/SpatialLeia.cpp
+	src/dsp/leia/SimpleFFT.h
+	src/dsp/leia/RingBuffer.h
+	src/dsp/leia/IIRSmoother.h
+	src/dsp/leia/GainRamp.h
+	src/dsp/leia/HrtfProcessor.h
+	src/dsp/leia/HrtfProcessor.cpp
+	src/dsp/leia/ShoeboxRoom.h
+	src/dsp/leia/ShoeboxRoom.cpp
+	src/dsp/leia/LeiaEngine.h
+	src/dsp/leia/LeiaEngine.cpp
 	src/dsp/Reverb.h
 	src/dsp/Reverb.cpp
 	src/dsp/Paulstretch.h

@@ -40,6 +40,7 @@ signals:
 private slots:
     void onEnableToggled(bool on);
     void onModeChanged(int idx);
+    void onEngineChanged(int idx);
     void onPanChanged(int v);
     void onPadMoved(float x, float y);
     void onElevChanged(int v);
@@ -114,9 +115,20 @@ private:
     QSlider       *m_ambience        = nullptr;
     QLabel        *m_ambienceLabel   = nullptr;
 
+    // Spatial engine selector + Leia (measured-HRTF) only controls.
+    QComboBox  *m_engineBox      = nullptr;
+    QGroupBox  *m_leiaGroup      = nullptr;
+    QCheckBox  *m_leiaRefl       = nullptr;
+    QSlider    *m_leiaReflLevel  = nullptr; QLabel *m_leiaReflLevelLabel = nullptr;
+    QSlider    *m_leiaRoomSize   = nullptr; QLabel *m_leiaRoomSizeLabel  = nullptr;
+    QComboBox  *m_leiaRoomType   = nullptr;
+    QSlider    *m_leiaClarity    = nullptr; QLabel *m_leiaClarityLabel   = nullptr;
+    QSlider    *m_leiaWidth      = nullptr; QLabel *m_leiaWidthLabel     = nullptr;
+
     // Per-mode rows (whole rows that get hidden together).
     class QWidget *m_padContainer = nullptr;
     class QWidget *m_distRow      = nullptr;
+    class QWidget *m_widthRow     = nullptr;
     class QWidget *m_rpmRow       = nullptr;
     class QWidget *m_radiusRow    = nullptr;
 
@@ -235,6 +247,7 @@ private:
     QScrollArea          *m_dspScrollArea = nullptr;
     QVBoxLayout          *m_dspScrollLay  = nullptr;
     QScrollArea          *m_outerScroll   = nullptr;
+    QScrollArea          *m_spatialScroll = nullptr;   // fixed-size spatial panel
     QGroupBox            *m_eqBox         = nullptr;
 
     // DspStage -> its accordion panel. nullptr for stages whose UI lives

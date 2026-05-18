@@ -36,6 +36,13 @@ QJsonObject SandboxState::toJson() const
     o["rotateRadiusM"]    = rotateRadiusM;
     o["rotateCcw"]        = rotateCcw;
     o["rotateElev"]       = rotateElev;
+    o["spatialEngine"]    = spatialEngine;
+    o["leiaReflEnable"]   = leiaReflEnable;
+    o["leiaReflLevel"]    = static_cast<double>(leiaReflLevel);
+    o["leiaRoomSize"]     = static_cast<double>(leiaRoomSize);
+    o["leiaRoomType"]     = leiaRoomType;
+    o["leiaClarity"]      = static_cast<double>(leiaClarity);
+    o["leiaWidth"]        = static_cast<double>(leiaWidth);
     o["stretchEnabled"]   = stretchEnabled;
     o["stretchFactor"]    = stretchFactor;
     o["stretchWindowMs"]  = stretchWindowMs;
@@ -140,6 +147,13 @@ SandboxState SandboxState::fromJson(const QJsonObject &o)
     s.rotateRadiusM   = static_cast<float>(o.value("rotateRadiusM").toDouble(1.5));
     s.rotateCcw       = o.value("rotateCcw").toBool(false);
     s.rotateElev      = static_cast<float>(o.value("rotateElev").toDouble(0.0));
+    s.spatialEngine   = o.value("spatialEngine").toInt(Engine_Classic);
+    s.leiaReflEnable  = o.value("leiaReflEnable").toBool(true);
+    s.leiaReflLevel   = static_cast<float>(o.value("leiaReflLevel").toDouble(-6.0));
+    s.leiaRoomSize    = static_cast<float>(o.value("leiaRoomSize").toDouble(12.0));
+    s.leiaRoomType    = o.value("leiaRoomType").toInt(1);
+    s.leiaClarity     = static_cast<float>(o.value("leiaClarity").toDouble(100.0));
+    s.leiaWidth       = static_cast<float>(o.value("leiaWidth").toDouble(35.0));
     s.stretchEnabled  = o.value("stretchEnabled").toBool(false);
     s.stretchFactor   = static_cast<float>(o.value("stretchFactor").toDouble(4.0));
     s.stretchWindowMs = static_cast<float>(o.value("stretchWindowMs").toDouble(180.0));
@@ -248,6 +262,7 @@ bool SandboxState::isModified() const
     SandboxState d;
     if (enabled != d.enabled) return true;
     if (spatialMode != d.spatialMode) return true;
+    if (spatialEngine != d.spatialEngine) return true;
     if (stretchEnabled != d.stretchEnabled) return true;
     if (reverbWet != d.reverbWet) return true;
     for (int i = 0; i < 16; ++i) if (eqBandDb[i] != 0.0f) return true;

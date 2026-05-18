@@ -51,6 +51,18 @@ struct SandboxState
         Spatial_8DPreset = 4    // behaves like Rotate, preset values applied on selection
     };
 
+    // Which HRTF engine renders the 3D spatial modes.
+    //   Engine_Classic - the original parametric Brown-Duda structural
+    //                    model (dsp/Positional). Zero dependencies.
+    //   Engine_Leia    - measured-HRTF convolution from a bundled SOFA
+    //                    dataset plus image-source room reflections
+    //                    (dsp/leia). Correct front/back, richer space.
+    // Stable values; default 0 keeps every pre-existing INI on Classic.
+    enum SpatialEngine {
+        Engine_Classic = 0,
+        Engine_Leia    = 1
+    };
+
     // Master per-channel toggle. False = DSP completely bypassed.
     bool  enabled = false;
 
@@ -74,6 +86,18 @@ struct SandboxState
     float rotateRadiusM  = 1.5f;
     bool  rotateCcw      = false;
     float rotateElev     = 0.0f;
+
+    // ---- Spatial engine selection + Leia-only parameters ----
+    // spatialEngine applies to every 3D HRTF mode (Manual / Rotate /
+    // 8D preset). L/R Pan and Off ignore it. The leia* fields are read
+    // only when spatialEngine == Engine_Leia.
+    int   spatialEngine  = Engine_Classic;
+    bool  leiaReflEnable = true;        // image-source room reflections
+    float leiaReflLevel  = -6.0f;       // dB, -25..20
+    float leiaRoomSize   = 12.0f;       // m, 7..50
+    int   leiaRoomType   = 1;           // 0..4 Drapes/Studio/Tiles/Concrete/Glass
+    float leiaClarity    = 100.0f;      // %, 0..100 direct-path level
+    float leiaWidth      = 35.0f;       // %, 0..100 reflection amount
 
     // ---- Paulstretch ----
     bool  stretchEnabled = false;

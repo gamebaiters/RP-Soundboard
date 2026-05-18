@@ -1,3 +1,44 @@
+GameBaiters Soundboard v2.2.3
+=============================
+
+Adds a brand-new spatial audio engine you can switch to per
+channel, fixes the 8D preset bass blow-out and tidies up the
+Audio Sandbox window.
+
+---------------------------------------------------------------------
+NEW SPATIAL ENGINE
+---------------------------------------------------------------------
+* New "Leia" HRTF engine - convolution with a measured
+  head-related transfer dataset plus real room reflections. It
+  gives correct front/back positioning and a far more convincing
+  sense of space than the original parametric engine.
+* The 3D HRTF section now has an engine selector: Classic or
+  Leia. The choice is saved per channel and stored in presets,
+  so you can A/B the two engines on the same sound.
+* Leia adds room controls: early reflections on/off, reflection
+  level, room size, room type (Drapes / Studio / Tiles /
+  Concrete / Glass), clarity and width.
+* The 8D preset and the auto-rotate modes work with both
+  engines.
+* If the Leia data cannot load, playback falls back to the
+  Classic engine automatically - audio is never interrupted.
+
+---------------------------------------------------------------------
+SPATIAL AUDIO FIXES
+---------------------------------------------------------------------
+* Fixed the 8D preset (and other narrow-width 3D modes) blowing
+  out the bass into a distorted, rotating "boombox" effect.
+
+---------------------------------------------------------------------
+INTERFACE
+---------------------------------------------------------------------
+* Every spatial control now lives in one fixed-size, separately
+  scrollable panel - no more scrolling the whole window to reach
+  an option, and the controls always fit horizontally.
+* The Audio Sandbox window now opens at a size that fits the
+  screen instead of needing to be resized first.
+
+=====================================================================
 GameBaiters Soundboard v2.2.2
 =============================
 

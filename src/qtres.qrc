@@ -17,4 +17,7 @@
   <qresource prefix="i18n">
     <file alias="soundboard_it.qm">i18n/soundboard_it.qm</file>
   </qresource>
+  <qresource prefix="leia">
+    <file alias="default.sofa">leia/default.sofa</file>
+  </qresource>
 </RCC>

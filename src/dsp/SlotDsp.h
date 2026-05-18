@@ -2,6 +2,7 @@
 
 #include "SandboxState.h"
 #include "Positional.h"
+#include "SpatialLeia.h"
 #include "EqRack.h"
 #include "Paulstretch.h"
 #include "Reverb.h"
@@ -99,6 +100,7 @@ private:
         Saturator  sat;
         Positional posL;
         Positional posR;
+        SpatialLeia leia;        // measured-HRTF engine (alt to posL/posR)
         Chorus     chorus;
         Flanger    flanger;
         Flangus    flangus;
@@ -114,6 +116,7 @@ private:
 
     void pushSpeakerPair(PathState &p, float cx, float cy, float cz);
     void advanceRotationIfNeeded(PathState &p);
+    void updateLeiaDirection(PathState &p);     // control-rate az/el feed
     void applyStage(int stage, PathState &p, float &l, float &r);
 
     double m_fs = 0.0;

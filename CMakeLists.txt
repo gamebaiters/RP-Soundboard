@@ -93,6 +93,67 @@ add_custom_target(autogenFiles ALL
 # suppress warning for disabled autogen on generated files
 set_property(SOURCE "src/version/version.h" PROPERTY SKIP_AUTOGEN ON)
 
+# ---------------------------------------------------------------------
+# Leia spatial-audio engine dependencies.
+#
+# libmysofa reads the bundled SOFA HRTF dataset; zlib is required by
+# libmysofa because SOFA files store their HRIRs gzip-compressed. Both
+# are fetched and built statically so the plugin still ships as a single
+# self-contained file on Windows, Linux and macOS. The FFmpeg static
+# archives only *reference* zlib (they never bundle it), so providing
+# our own zlibstatic here resolves cleanly without symbol clashes.
+# ---------------------------------------------------------------------
+include(FetchContent)
+if(NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM)
+	set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+endif()
+
+set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
+FetchContent_Declare(zlib
+	GIT_REPOSITORY https://github.com/madler/zlib.git
+	GIT_TAG        v1.3.1
+	GIT_SHALLOW    TRUE
+)
+FetchContent_GetProperties(zlib)
+if(NOT zlib_POPULATED)
+	FetchContent_Populate(zlib)
+	add_subdirectory(${zlib_SOURCE_DIR} ${zlib_BINARY_DIR} EXCLUDE_FROM_ALL)
+endif()
+# Make the FetchContent zlib discoverable by libmysofa's find_package(ZLIB).
+set(ZLIB_FOUND TRUE CACHE BOOL "" FORCE)
+set(ZLIB_INCLUDE_DIRS "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}" CACHE STRING "" FORCE)
+set(ZLIB_LIBRARIES zlibstatic CACHE STRING "" FORCE)
+set(ZLIB_INCLUDE_DIR "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}" CACHE PATH "" FORCE)
+set(ZLIB_LIBRARY zlibstatic CACHE STRING "" FORCE)
+
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(MYSOFA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(mysofa
+	GIT_REPOSITORY https://github.com/hoene/libmysofa.git
+	GIT_TAG        v1.3.2
+	GIT_SHALLOW    TRUE
+)
+FetchContent_GetProperties(mysofa)
+if(NOT mysofa_POPULATED)
+	FetchContent_Populate(mysofa)
+	# Neutralise libmysofa's own install()/export() rules while it is
+	# add_subdirectory'd so they cannot clash with this project's
+	# install targets. Restored immediately afterwards.
+	macro(install)
+	endmacro()
+	macro(export)
+	endmacro()
+	add_subdirectory(${mysofa_SOURCE_DIR} ${mysofa_BINARY_DIR} EXCLUDE_FROM_ALL)
+	macro(install)
+		_install(${ARGV})
+	endmacro()
+	macro(export)
+		_export(${ARGV})
+	endmacro()
+endif()
+
 # actual library definition
 add_library(rp_soundboard_fx SHARED ${sources} "src/version/version.h")
 
@@ -118,6 +179,9 @@ if(APPLE)
 endif()
 
 target_link_libraries(rp_soundboard_fx Qt5::Core Qt5::Widgets Qt5::Gui Qt5::Network)
+
+# Leia engine: measured-HRTF reader (libmysofa) + zlib, both static.
+target_link_libraries(rp_soundboard_fx mysofa-static zlibstatic)
 if (FFMPEG_STATIC)
 	# Static FFmpeg linking: minimal custom build, no external deps
 	target_link_libraries(rp_soundboard_fx
@@ -139,6 +203,8 @@ elseif(MSVC OR MINGW)
 endif()
 
 target_include_directories(rp_soundboard_fx PUBLIC "pluginsdk/include" "src" ${ffmpegIncludeDir})
+# libmysofa public header (mysofa.h) for the Leia engine.
+target_include_directories(rp_soundboard_fx PRIVATE "${mysofa_SOURCE_DIR}/src/hrtf")
 # Required by the new audio-sandbox DSP modules so M_PI is defined when
 # they include <cmath> on MSVC.
 target_compile_definitions(rp_soundboard_fx PRIVATE _USE_MATH_DEFINES NOMINMAX)

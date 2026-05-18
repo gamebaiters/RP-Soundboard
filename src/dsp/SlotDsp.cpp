@@ -52,6 +52,7 @@ void SlotDsp::setSampleRate(double sr) {
         p.sat.setSampleRate(m_fs);
         p.posL.setSampleRate(m_fs);
         p.posR.setSampleRate(m_fs);
+        p.leia.setSampleRate(m_fs);
         p.chorus.setSampleRate(m_fs);
         p.flanger.setSampleRate(m_fs);
         p.flangus.setSampleRate(m_fs);
@@ -77,6 +78,7 @@ void SlotDsp::reset() {
         p.sat.reset();
         p.posL.reset();
         p.posR.reset();
+        p.leia.reset();
         p.chorus.reset();
         p.flanger.reset();
         p.flangus.reset();
@@ -203,6 +205,7 @@ void SlotDsp::feedStretchShort(const short *interleaved, int frames, bool isCapt
 
 void SlotDsp::applyState(const SandboxState &s) {
     int oldMode = m_state.spatialMode;
+    int oldEngine = m_state.spatialEngine;
     bool oldStretch = m_state.stretchEnabled;
     m_state = s;
 
@@ -213,7 +216,9 @@ void SlotDsp::applyState(const SandboxState &s) {
     // a sustained robotic transient until everything settled. Same
     // protection on stretch toggle so re-enabling never inherits a
     // half-flushed filter.
-    bool modeChanged = (oldMode != s.spatialMode) || (oldStretch != s.stretchEnabled);
+    bool modeChanged = (oldMode != s.spatialMode) ||
+                       (oldEngine != s.spatialEngine) ||
+                       (oldStretch != s.stretchEnabled);
     if (modeChanged) {
         auto resetFull = [](PathState &p){
             p.eq.reset();
@@ -238,7 +243,7 @@ void SlotDsp::applyState(const SandboxState &s) {
 
     recomputeActive();
 
-    auto applyToPath = [&s](PathState &p){
+    auto applyToPath = [this, &s](PathState &p){
         p.reverb.setRoomSize(0.5f);
         p.reverb.setDamping(0.5f);
         for (int i = 0; i < 16; ++i)
@@ -266,6 +271,24 @@ void SlotDsp::applyState(const SandboxState &s) {
                             s.limiterRatio, s.limiterGateThresh);
         p.bitcrusher.setParams(s.bitcrusherBitDepth, s.bitcrusherRate);
         p.genLoss.setGenerations(s.genLossGenerations);
+
+        // Leia (measured-HRTF) engine. The heavy SOFA load happens
+        // lazily here on the GUI thread, and only when the user has
+        // actually picked Leia for a 3D mode - otherwise the instance
+        // stays a zero-cost no-op. If init fails (missing/bad SOFA),
+        // leia.ready() stays false and applyStage falls back to the
+        // Classic engine, so audio is never broken.
+        bool leia3D = (s.spatialEngine == SandboxState::Engine_Leia) &&
+                      (s.spatialMode == SandboxState::Spatial_3DManual ||
+                       s.spatialMode == SandboxState::Spatial_3DRotate ||
+                       s.spatialMode == SandboxState::Spatial_8DPreset);
+        if (leia3D)
+            p.leia.ensureInit(m_fs);
+        p.leia.setMix(s.spatialMix);
+        p.leia.setReflections(s.leiaReflEnable, s.leiaReflLevel,
+                              s.leiaRoomSize, s.leiaRoomType);
+        p.leia.setClarity(s.leiaClarity);
+        p.leia.setWidth(s.leiaWidth);
     };
     applyToPath(m_play);
     applyToPath(m_cap);
@@ -323,6 +346,41 @@ void SlotDsp::advanceRotationIfNeeded(PathState &p) {
     p.rotBlockCounter = kRotateUpdateBlock;
 }
 
+void SlotDsp::updateLeiaDirection(PathState &p) {
+    // Control-rate az/el feed for the Leia engine, mirroring the cadence
+    // and orbit direction of advanceRotationIfNeeded so 8D presets sound
+    // the same regardless of engine.
+    if (p.rotBlockCounter > 0) { --p.rotBlockCounter; return; }
+    p.rotBlockCounter = kRotateUpdateBlock;
+
+    constexpr double kPi      = 3.14159265358979323846;
+    constexpr float  kRad2Deg = static_cast<float>(180.0 / 3.14159265358979323846);
+    float az = 0.0f, el = 0.0f;
+
+    if (m_state.spatialMode == SandboxState::Spatial_3DManual) {
+        // x = right, y = back, z = up. Front = (0,-1,0).
+        float ux = m_state.posX, uy = m_state.posY, uz = m_state.elev;
+        float n = std::sqrt(ux*ux + uy*uy + uz*uz);
+        if (n < 1e-3f) { ux = 0.0f; uy = -1.0f; uz = 0.0f; n = 1.0f; }
+        ux /= n; uy /= n; uz /= n;
+        az = std::atan2(ux, -uy) * kRad2Deg;
+        el = std::atan2(uz, std::sqrt(ux*ux + uy*uy)) * kRad2Deg;
+    } else {
+        // Rotate / 8D preset: advance the orbit phase.
+        int dir = m_state.rotateCcw ? -1 : +1;
+        double dPhase = 2.0 * kPi * m_state.rotateRpm / 60.0 *
+                        (kRotateUpdateBlock / m_fs);
+        p.rotPhase += dir * dPhase;
+        if (p.rotPhase >  2.0 * kPi) p.rotPhase -= 2.0 * kPi;
+        if (p.rotPhase < -2.0 * kPi) p.rotPhase += 2.0 * kPi;
+        az = static_cast<float>(p.rotPhase) * kRad2Deg;
+        float radius = m_state.rotateRadiusM;
+        if (radius < 0.05f) radius = 0.05f;
+        el = std::atan2(m_state.rotateElev, radius) * kRad2Deg;
+    }
+    p.leia.setDirection(az, el);
+}
+
 void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
     switch (stage) {
     case SandboxState::Stage_Paulstretch:
@@ -353,16 +411,35 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
             case SandboxState::Spatial_3DManual:
             case SandboxState::Spatial_3DRotate:
             case SandboxState::Spatial_8DPreset: {
-                advanceRotationIfNeeded(p);
-                float ll, lr, rl, rr;
-                p.posL.process(l, ll, lr);
-                p.posR.process(r, rl, rr);
-                float wetL = ll + rl, wetR = lr + rr;
-                float w = m_state.spatialMix;
-                if (w < 0.0f) w = 0.0f; else if (w > 1.0f) w = 1.0f;
-                float d = 1.0f - w;
-                l = w * wetL + d * l;
-                r = w * wetR + d * r;
+                if (m_state.spatialEngine == SandboxState::Engine_Leia &&
+                    p.leia.ready()) {
+                    // Leia (measured HRTF). The wrapper does its own
+                    // block buffering + wet/dry crossfade internally.
+                    updateLeiaDirection(p);
+                    p.leia.process(l, r);
+                } else {
+                    // Classic parametric HRTF (also the fallback path
+                    // when a Leia init failed).
+                    advanceRotationIfNeeded(p);
+                    float ll, lr, rl, rr;
+                    p.posL.process(l, ll, lr);
+                    p.posR.process(r, rl, rr);
+                    float wetL = ll + rl, wetR = lr + rr;
+                    // Each ear re-sums both virtual speakers. When the
+                    // speakers coincide (narrow width - e.g. the width-0
+                    // 8D preset) that doubles mono/bass content, the
+                    // "boombox" bass bump the user heard. Halve the sum
+                    // at zero width and ease back to unity as the
+                    // speakers spread past 90 deg.
+                    float wScale = 0.5f + 0.5f * std::min(1.0f,
+                        m_state.stereoWidthDeg / 90.0f);
+                    wetL *= wScale; wetR *= wScale;
+                    float w = m_state.spatialMix;
+                    if (w < 0.0f) w = 0.0f; else if (w > 1.0f) w = 1.0f;
+                    float d = 1.0f - w;
+                    l = w * wetL + d * l;
+                    r = w * wetR + d * r;
+                }
                 break;
             }
             default: break;

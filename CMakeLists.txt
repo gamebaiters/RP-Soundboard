@@ -154,6 +154,16 @@ if(NOT mysofa_POPULATED)
 	endmacro()
 endif()
 
+# Both static deps are linked into the plugin's shared object, so they
+# must be position-independent. Force it explicitly: libmysofa's own
+# CMake does not reliably honour CMAKE_POSITION_INDEPENDENT_CODE, which
+# broke the Linux .so link ("relocation against stdin in .text").
+foreach(leiaDep mysofa-static zlibstatic)
+	if(TARGET ${leiaDep})
+		set_target_properties(${leiaDep} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+	endif()
+endforeach()
+
 # actual library definition
 add_library(rp_soundboard_fx SHARED ${sources} "src/version/version.h")
 

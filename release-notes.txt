@@ -1,3 +1,58 @@
+GameBaiters Soundboard v2.2.4
+=============================
+
+Polish release on top of v2.2.3: fixes a frying buzz and rear-pass
+jump in the new Leia engine, makes the elevation slider work in
+every 3D mode, kills the duplicate error dialog, smooths the
+waveform cursor, and adds right-click crop editing on the waveform.
+
+---------------------------------------------------------------------
+SPATIAL AUDIO
+---------------------------------------------------------------------
+* Fixed a faint "frying" buzz heard while the Leia engine was
+  active. One output sample per block was being dropped, which
+  produced a continuous ~187 Hz tone underneath the audio.
+* Fixed the 8D preset on Leia jumping between ears when the
+  source passed straight behind the head with reflections turned
+  up. The reflection pan now uses a continuous curve through the
+  rear so the sound circles smoothly all the way around.
+* Hot Leia settings (high reflection level + clarity + width) no
+  longer push the wet signal into a distorted, "earrape" overload.
+  A soft post-engine limiter pulls sustained peaks down without
+  pumping on the brief peaks of an orbiting source.
+* The Elevation slider now affects every 3D mode (Manual, Rotate
+  and 8D) on both engines. It previously felt dead in the
+  rotating modes because it wrote to the wrong field.
+
+---------------------------------------------------------------------
+WAVEFORM & PLAYBACK
+---------------------------------------------------------------------
+* New: right-click a channel's waveform to set a Start or End
+  marker exactly at the click point, or right-click an existing
+  marker to remove it. There is also a "Remove both markers"
+  shortcut. Edits are saved back to the cell just like changing
+  the crop in the cell's settings, and the change applies to the
+  audio that is already playing - the cell truncates at the new
+  end point instead of waiting for the next play.
+* The cursor on the waveform is now much smoother and lands
+  exactly where you click. Position updates at 60 Hz instead of
+  20 Hz, the cursor snaps to the release point the instant you
+  let go of the mouse, and the buffered span is now scaled by
+  each slot's own speed factor so the cursor no longer drifts
+  ahead of the audio on sped-up cells.
+
+---------------------------------------------------------------------
+INTERFACE
+---------------------------------------------------------------------
+* An unplayable file now shows a single, clear error dialog.
+  Before this, two different "Playback failed" messages popped
+  up back-to-back when a cell pointed at a missing or corrupt
+  file.
+* New strings ("Set start here", "Set end here", "Remove start
+  marker", "Remove end marker", "Remove both markers") are also
+  available in Italian.
+
+=====================================================================
 GameBaiters Soundboard v2.2.3
 =============================
 

@@ -126,6 +126,16 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     connect(m_stop,      &QPushButton::clicked, this, &WaveformPlayer::onStop);
     connect(m_playPause, &QPushButton::clicked, this, &WaveformPlayer::onPlayPause);
     connect(m_wave,      &SoundView::seekRequested, this, &WaveformPlayer::onWaveSeek);
+    connect(m_wave, &SoundView::cropStartRequestedAt,
+            this,   &WaveformPlayer::cropStartRequestedAt);
+    connect(m_wave, &SoundView::cropEndRequestedAt,
+            this,   &WaveformPlayer::cropEndRequestedAt);
+    connect(m_wave, &SoundView::cropClearStartRequested,
+            this,   &WaveformPlayer::cropClearStartRequested);
+    connect(m_wave, &SoundView::cropClearEndRequested,
+            this,   &WaveformPlayer::cropClearEndRequested);
+    connect(m_wave, &SoundView::cropClearAllRequested,
+            this,   &WaveformPlayer::cropClearAllRequested);
 }
 
 QString WaveformPlayer::filename() const  { return m_fullPath; }

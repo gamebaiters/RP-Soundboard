@@ -2688,6 +2688,26 @@ Da OFF, viene sempre mostrata la forma d&apos;onda grezza.</translation>
         <source>End</source>
         <translation>Fine</translation>
     </message>
+    <message>
+        <source>Remove start marker</source>
+        <translation>Rimuovi marcatore di inizio</translation>
+    </message>
+    <message>
+        <source>Remove end marker</source>
+        <translation>Rimuovi marcatore di fine</translation>
+    </message>
+    <message>
+        <source>Set start here (%1 s)</source>
+        <translation>Imposta inizio qui (%1 s)</translation>
+    </message>
+    <message>
+        <source>Set end here (%1 s)</source>
+        <translation>Imposta fine qui (%1 s)</translation>
+    </message>
+    <message>
+        <source>Remove both markers</source>
+        <translation>Rimuovi entrambi i marcatori</translation>
+    </message>
 </context>
 <context>
     <name>UpdaterWindow</name>

@@ -124,6 +124,11 @@ public:
 	// Crop range (seconds) currently applied to a slot. endSec < 0 means
 	// no end point. Both 0 / negative means the slot has no crop.
 	void getSlotCrop(int slot, double &startSec, double &endSec) const;
+	// Live-update the slot's crop range (e.g. from the waveform context
+	// menu). Affects loop restart point and the marker overlay; does
+	// not retrigger the decoder, so the new end point only takes effect
+	// after a re-play. endSec < 0 means "no end point".
+	void setSlotCropLive(int slot, double startSec, double endSec);
 
 signals:
 	void onStartPlaying(int slot, bool preview, QString filename);

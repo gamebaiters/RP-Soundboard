@@ -11,6 +11,8 @@
 #include <QPainter>
 #include <QTimer>
 #include <QMouseEvent>
+#include <QContextMenuEvent>
+#include <QMenu>
 #include "soundview_qt.h"
 #include "modules/theme.h"
 #include "SampleVisualizerThread.h"
@@ -720,6 +722,81 @@ void SoundView::mouseReleaseEvent(QMouseEvent *evt)
 	{
 		m_dragging = false;
 		double frac = fractionFromMouseX(evt->x());
+		// Snap the cursor to the release point immediately - without
+		// this, the next position poll (~16 ms later) painted the
+		// cursor drifting a bit forward as the buffered samples drained.
+		m_playbackPosition = frac;
+		update();
 		emit seekRequested(frac);
 	}
+}
+
+
+// Right-click crop editor: hit-test the click against existing Start
+// / End flags (Remove) and otherwise offer Set start / Set end. Needs
+// a total-length feed to map click x -> seconds.
+void SoundView::contextMenuEvent(QContextMenuEvent *evt)
+{
+	if (m_totalLength <= 0.0) {
+		QWidget::contextMenuEvent(evt);
+		return;
+	}
+
+	const int w1 = width() - 1;
+	const double frac = fractionFromMouseX(evt->x());
+	const double clickSec = frac * m_totalLength;
+	const bool hasStart = m_cropStart > 0.0 && m_cropStart < m_totalLength;
+	const bool hasEnd   = m_cropEnd   > 0.0 && m_cropEnd   < m_totalLength - 1e-3;
+
+	auto pixelOf = [this, w1](double sec) {
+		if (m_totalLength <= 0.0) return 0;
+		return int(sec / m_totalLength * w1 + 0.5);
+	};
+	const int kHitPx = 10;
+	bool onStartFlag = hasStart && std::abs(evt->x() - pixelOf(m_cropStart)) <= kHitPx;
+	bool onEndFlag   = hasEnd   && std::abs(evt->x() - pixelOf(m_cropEnd))   <= kHitPx;
+
+	QMenu menu(this);
+	if (onStartFlag) {
+		menu.addAction(tr("Remove start marker"), this, [this]{
+			emit cropClearStartRequested();
+		});
+	} else if (onEndFlag) {
+		menu.addAction(tr("Remove end marker"), this, [this]{
+			emit cropClearEndRequested();
+		});
+	} else {
+		double startSec = hasStart ? m_cropStart : 0.0;
+		double endSec   = hasEnd   ? m_cropEnd   : m_totalLength;
+		QAction *startAct = menu.addAction(tr("Set start here (%1 s)")
+			.arg(clickSec, 0, 'f', 2),
+			this, [this, clickSec]{ emit cropStartRequestedAt(clickSec); });
+		// Enforce start < end. If clicking past the current end, the
+		// "set start" option would invert the range - disable it.
+		if (hasEnd && clickSec >= endSec - 0.01)
+			startAct->setEnabled(false);
+
+		QAction *endAct = menu.addAction(tr("Set end here (%1 s)")
+			.arg(clickSec, 0, 'f', 2),
+			this, [this, clickSec]{ emit cropEndRequestedAt(clickSec); });
+		if (hasStart && clickSec <= startSec + 0.01)
+			endAct->setEnabled(false);
+
+		if (hasStart || hasEnd) {
+			menu.addSeparator();
+			if (hasStart)
+				menu.addAction(tr("Remove start marker"), this, [this]{
+					emit cropClearStartRequested();
+				});
+			if (hasEnd)
+				menu.addAction(tr("Remove end marker"), this, [this]{
+					emit cropClearEndRequested();
+				});
+			menu.addAction(tr("Remove both markers"), this, [this]{
+				emit cropClearAllRequested();
+			});
+		}
+	}
+	menu.exec(evt->globalPos());
+	evt->accept();
 }

@@ -51,6 +51,13 @@ signals:
     void skip(int seconds);              // signed: -10, -5, +5, +10
     void seekRequested(double fraction); // 0..1 from waveform click
     void loopToggled(bool on);
+    // Right-click crop editor (forwarded from SoundView). Seconds are
+    // already clamped to the slot's decoded length.
+    void cropStartRequestedAt(double seconds);
+    void cropEndRequestedAt(double seconds);
+    void cropClearStartRequested();
+    void cropClearEndRequested();
+    void cropClearAllRequested();
 
 private slots:
     void onPlayPause();

@@ -375,7 +375,9 @@ public:
 	int64_t outputSamplesEstimation() const override;
 	void setPitchFactor(float factor) override;
 	void setSpeedFactor(float factor) override;
+	float getSpeedFactor() const override { return m_speedFactor; }
 	void setReverbMix(float mix) override;
+	void setMaxPlayTime(double seconds) override;
 
 private:
 	int _close();
@@ -1284,6 +1286,21 @@ void InputFileFFmpeg::setReverbMix(float mix)
 {
 	Lock lock(m_mutex);
 	m_reverbMix = mix;
+}
+
+
+//---------------------------------------------------------------
+// Purpose: live-update the absolute end-sample bound so the
+// waveform right-click "Set end" truncates active playback at the
+// new point. seconds <= 0 -> clear bound (unlimited).
+//---------------------------------------------------------------
+void InputFileFFmpeg::setMaxPlayTime(double seconds)
+{
+	Lock lock(m_mutex);
+	if (seconds <= 0.0)
+		m_maxConvertedSamples = 0;
+	else
+		m_maxConvertedSamples = (int64_t)(seconds * (double)m_outputSamplerate + 0.5);
 }
 
 

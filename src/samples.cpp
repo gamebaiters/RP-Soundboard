@@ -1052,12 +1052,13 @@ double Sampler::getPosition(int slot)
 				return pos < 0.0 ? 0.0 : pos;
 			}
 			double decoderPos = s.inputFile->getPosition();
-			// avail() counts post-effect OUTPUT samples (48 kHz). The
-			// decoder position is in INPUT-file time, advanced by
-			// speedFactor. Converting the buffered span back to input
-			// time needs the same speedFactor — without it the cursor
-			// jumped erratically the moment a slowdown/effect was applied.
-			double sf = (m_speedFactor > 0.0f) ? (double)m_speedFactor : 1.0;
+			// Buffered span is OUTPUT samples; convert to INPUT-file time
+			// using the SLOT'S speed factor (per-channel FxPanel speed
+			// differs from the Sampler global m_speedFactor). The earlier
+			// global-only fallback undercounted the lag on sped-up slots
+			// and made the cursor read ahead of the audible audio.
+			double sf = (double)s.inputFile->getSpeedFactor();
+			if (sf <= 0.0) sf = 1.0;
 			double bufferedSec = s.sbPlayback.avail() / 48000.0 * sf;
 			double audible = decoderPos - bufferedSec;
 			return audible < 0.0 ? 0.0 : audible;
@@ -1099,6 +1100,24 @@ void Sampler::getSlotCrop(int slot, double &startSec, double &endSec) const
 			endSec   = s.cropEnd;
 		}
 	}
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Live-update the slot's crop range. Updates loop restart
+// point, seek() clamp, marker overlay, and pushes the new upper
+// bound into the decoder so current playback truncates immediately.
+//---------------------------------------------------------------
+void Sampler::setSlotCropLive(int slot, double startSec, double endSec)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	if (startSec < 0.0) startSec = 0.0;
+	if (endSec >= 0.0 && endSec <= startSec) endSec = -1.0;
+	m_slots[slot].cropStart = startSec;
+	m_slots[slot].cropEnd   = endSec;
+	if (m_slots[slot].inputFile)
+		m_slots[slot].inputFile->setMaxPlayTime(endSec);
 }
 
 

@@ -104,9 +104,15 @@ void ShoeboxRoom::process(float* leftIO, float* rightIO, int frames,
 
         float g = tap.gain * m_reflLevel;
 
-        // Simple equal-power stereo panning based on reflection azimuth.
-        float azNorm = (tap.azimuthDeg + 180.0f) / 360.0f;
-        azNorm = std::max(0.0f, std::min(1.0f, azNorm));
+        // Pan from sin(azimuth), not (az+180)/360. The linear mapping
+        // jumped L<->R at the -180/+180 wrap when a rotating source
+        // crossed straight-behind; sin() is continuous and collapses
+        // front/rear to centre, matching the median-plane cue.
+        float azRad = tap.azimuthDeg * static_cast<float>(M_PI / 180.0);
+        float lateral = std::sin(azRad);
+        if (lateral < -1.0f) lateral = -1.0f;
+        if (lateral >  1.0f) lateral =  1.0f;
+        float azNorm = (lateral + 1.0f) * 0.5f;
         float panR = azNorm;
         float panL = 1.0f - azNorm;
         float gainL = g * std::sqrt(panL);

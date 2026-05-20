@@ -135,6 +135,32 @@ void LeiaEngine::processBlock(const float* stereoIn,
     // Master gain ramp spans entire block.
     m_gainRamp.apply(stereoOut, frames, 2);
 
+    // Post-engine soft peak limiter. Slow attack (15 ms) + long
+    // release (200 ms) catches sustained overdrive without pumping on
+    // transient rotational peaks. Ceiling 1.0 matches outer softLimit.
+    {
+        constexpr float kCeil = 1.0f;
+        float peak = 0.0f;
+        for (int i = 0; i < frames * 2; ++i) {
+            float a = std::fabs(stereoOut[i]);
+            if (a > peak) peak = a;
+        }
+        float targetGain = 1.0f;
+        if (peak * m_postLimGain > kCeil) targetGain = kCeil / peak;
+        const float attackCoef  = 1.0f - std::exp(-1.0f / (0.015f * m_sampleRate));
+        const float releaseCoef = 1.0f - std::exp(-1.0f / (0.200f * m_sampleRate));
+        float g = m_postLimGain;
+        for (int i = 0; i < frames; ++i) {
+            float coef = (targetGain < g) ? attackCoef : releaseCoef;
+            g += coef * (targetGain - g);
+            if (g < 0.1f) g = 0.1f;
+            if (g > 1.0f) g = 1.0f;
+            stereoOut[i * 2 + 0] *= g;
+            stereoOut[i * 2 + 1] *= g;
+        }
+        m_postLimGain = g;
+    }
+
     restoreFPU();
 }
 
@@ -171,6 +197,7 @@ void LeiaEngine::reset()
         std::memset(m_mixR.data(),  0, m_mixR.size()  * sizeof(float));
     }
     m_gainRamp.setTarget(1.0f, 0);
+    m_postLimGain = 1.0f;
 }
 
 void LeiaEngine::setFTZDAZ()

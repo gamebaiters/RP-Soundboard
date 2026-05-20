@@ -1505,8 +1505,19 @@ void ChannelSandboxDialog::pushStateToWidgets()
     m_padLabel->setText(QString("x=%1 y=%2")
                             .arg(m_state.posX, 0, 'f', 2)
                             .arg(m_state.posY, 0, 'f', 2));
-    m_elev->setValue(static_cast<int>(m_state.elev * 100.0f));
-    m_elevLabel->setText(fmtElev(m_elev->value()));
+    // Restore from whichever field the active mode reads; on legacy
+    // INIs where only one was ever written, prefer the non-zero side.
+    {
+        float ev = (m_state.spatialMode == SandboxState::Spatial_3DRotate ||
+                    m_state.spatialMode == SandboxState::Spatial_8DPreset)
+                       ? m_state.rotateElev
+                       : m_state.elev;
+        if (std::fabs(ev) < 1e-4f &&
+            std::fabs(m_state.elev) > std::fabs(m_state.rotateElev))
+            ev = m_state.elev;
+        m_elev->setValue(static_cast<int>(ev * 100.0f));
+        m_elevLabel->setText(fmtElev(m_elev->value()));
+    }
     m_dist->setValue(static_cast<int>(m_state.distanceM * 100.0f));
     m_distLabel->setText(QString::number(m_dist->value()) + " cm");
     m_width->setValue(static_cast<int>(m_state.stereoWidthDeg));
@@ -1764,7 +1775,11 @@ void ChannelSandboxDialog::onPadMoved(float x, float y) {
     pushChange();
 }
 void ChannelSandboxDialog::onElevChanged(int v) {
-    m_state.elev = v / 100.0f;
+    // One slider drives every 3D mode: 3DManual reads m_state.elev
+    // (posZ), 3DRotate / 8D read m_state.rotateElev (orbit tilt).
+    float f = v / 100.0f;
+    m_state.elev = f;
+    m_state.rotateElev = f;
     m_elevLabel->setText(fmtElev(v));
     pushChange();
 }

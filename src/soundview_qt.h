@@ -44,6 +44,13 @@ public:
 
 signals:
 	void seekRequested(double fraction);
+	// Right-click crop edit. Emitted only when totalLength > 0 (i.e. a
+	// sound is playing). Seconds are clamped to [0, totalLength].
+	void cropStartRequestedAt(double seconds);
+	void cropEndRequestedAt(double seconds);
+	void cropClearStartRequested();
+	void cropClearEndRequested();
+	void cropClearAllRequested();
 
 protected:
 	void paintEvent(QPaintEvent *evt);
@@ -51,6 +58,7 @@ protected:
 	void mousePressEvent(QMouseEvent *evt);
 	void mouseMoveEvent(QMouseEvent *evt);
 	void mouseReleaseEvent(QMouseEvent *evt);
+	void contextMenuEvent(QContextMenuEvent *evt);
 
 private slots:
 	void onTimer();

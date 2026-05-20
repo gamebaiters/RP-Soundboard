@@ -66,6 +66,11 @@ static QVector<ChannelState> s_preMacroStates;
 static int s_preMacroChannelCount = 0;
 static bool s_macroActive = false;
 
+// Map slot -> grid button index, so the waveform right-click crop
+// editor knows which SoundInfo cell to write back to. Missing entry
+// (macro restore, drag-from-file) = live-only edit, no persistence.
+static QHash<int, int> s_slotToBtnIdx;
+
 void pushSoundsToGrid(MainPage *page, ConfigModel *model);
 void pushSettingsToWindow(MainPage *page, ConfigModel *model);
 
@@ -539,14 +544,11 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
 
         // playSoundInSlot resets per-slot volume to global defaults and
         // only honors pitch/speed/reverb on slots with an inputFile, so
-        // push channel/per-button values AFTER play returns.
-        if (!sampler->playSoundInSlot(slot, *info, false)) {
-            QMessageBox::warning(page, QObject::tr("Playback failed"),
-                QObject::tr("Could not play \"%1\".\n\n"
-                            "The file may be missing, unreadable, or in an "
-                            "unsupported format.").arg(info->filename));
+        // push channel/per-button values AFTER play returns. Error
+        // dialog comes from the onPlaybackError handler.
+        if (!sampler->playSoundInSlot(slot, *info, false))
             return;
-        }
+        s_slotToBtnIdx[slot] = idx;
         auto *ch = page->channels().at(slot);
         sampler->setSlotVolumeLocal (slot, ch->volume()->local());
         sampler->setSlotVolumeRemote(slot, ch->volume()->remote());
@@ -711,12 +713,10 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             }
             if (slot < 0) return;
             sampler->stopPlayback(slot);
-            if (!sampler->playSoundInSlot(slot, *info, false)) {
-                QMessageBox::warning(page, QObject::tr("Playback failed"),
-                    QObject::tr("Could not load \"%1\" into the channel.")
-                        .arg(info->filename));
+            // Error dialog comes from onPlaybackError handler.
+            if (!sampler->playSoundInSlot(slot, *info, false))
                 return;
-            }
+            s_slotToBtnIdx[slot] = btnIdx;
             auto *target = page->channels().at(slot);
             sampler->setSlotVolumeLocal (slot, target->volume()->local());
             sampler->setSlotVolumeRemote(slot, target->volume()->remote());
@@ -764,6 +764,63 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         });
         int idx = page->channels().indexOf(ch);
         ch->setRemovable(idx > 0);
+
+        // Waveform right-click crop editor: persist edit back to the
+        // originating cell via the slot->btn map, then live-update the
+        // active playback so the marker + decoder bound + loop agree.
+        auto applyCropEdit = [page, sampler, model, ch](auto mutate) {
+            int slot = -1;
+            for (int i = 0; i < page->channels().size(); ++i) {
+                if (page->channels().at(i) == ch) { slot = i; break; }
+            }
+            if (slot < 0) return;
+            int btn = s_slotToBtnIdx.value(slot, -1);
+            SoundInfo si;
+            if (btn >= 0) {
+                if (auto *cur = model->getSoundInfo(btn)) si = *cur;
+            }
+            double sCur = 0.0, eCur = -1.0;
+            if (sampler) sampler->getSlotCrop(slot, sCur, eCur);
+            mutate(si, sCur, eCur);
+            if (btn >= 0) {
+                bool anyCrop = sCur > 0.0 || eCur > 0.0;
+                si.cropEnabled = anyCrop;
+                si.cropStartUnit  = 0;
+                si.cropStartValue = anyCrop ? int(sCur * 1000.0 + 0.5) : 0;
+                si.cropStopAfterAt = 1;
+                si.cropStopUnit    = 0;
+                si.cropStopValue   = (eCur > 0.0) ? int(eCur * 1000.0 + 0.5) : 0;
+                model->setSoundInfo(btn, si);
+            }
+            if (sampler) sampler->setSlotCropLive(slot, sCur, eCur);
+            ch->waveform()->setCropRange(sCur, eCur);
+        };
+        QObject::connect(ch->waveform(), &WaveformPlayer::cropStartRequestedAt,
+                         page, [applyCropEdit](double seconds){
+            applyCropEdit([seconds](SoundInfo &, double &s, double &e){
+                s = seconds;
+                if (e > 0.0 && s >= e) s = qMax(0.0, e - 0.1);
+            });
+        });
+        QObject::connect(ch->waveform(), &WaveformPlayer::cropEndRequestedAt,
+                         page, [applyCropEdit](double seconds){
+            applyCropEdit([seconds](SoundInfo &, double &s, double &e){
+                e = seconds;
+                if (e <= s + 0.01) e = s + 0.1;
+            });
+        });
+        QObject::connect(ch->waveform(), &WaveformPlayer::cropClearStartRequested,
+                         page, [applyCropEdit]{
+            applyCropEdit([](SoundInfo &, double &s, double &){ s = 0.0; });
+        });
+        QObject::connect(ch->waveform(), &WaveformPlayer::cropClearEndRequested,
+                         page, [applyCropEdit]{
+            applyCropEdit([](SoundInfo &, double &, double &e){ e = -1.0; });
+        });
+        QObject::connect(ch->waveform(), &WaveformPlayer::cropClearAllRequested,
+                         page, [applyCropEdit]{
+            applyCropEdit([](SoundInfo &, double &s, double &e){ s = 0.0; e = -1.0; });
+        });
     };
     QObject::connect(page, &MainPage::channelAdded, page, [page, wireChannelButtons](int idx){
         if (auto *ch = page->channelAt(idx)) wireChannelButtons(ch);
@@ -799,6 +856,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             wave->setPlaying(false);
             wave->setFilename(QString());
             wave->clearPlayback();
+            s_slotToBtnIdx.remove(slot);
         }, Qt::QueuedConnection);
         QObject::connect(sampler, &Sampler::onPausePlaying, page,
                          [page](int slot){
@@ -1188,11 +1246,13 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         model->addObserver(s_observer);
     }
 
-    // 20 Hz playback position poll for waveform overlay + time labels.
-    // 10 Hz felt visibly laggy; 20 Hz tracks smoothly without cost.
+    // 60 Hz playback position poll for waveform overlay + time labels.
+    // 20 Hz produced stair-step jumps on short audios where ~50 ms of
+    // play translated to several pixels of cursor motion; 60 Hz matches
+    // typical display refresh and feels smooth without measurable cost.
     if (sampler) {
         auto *posTimer = new QTimer(page);
-        posTimer->setInterval(50);
+        posTimer->setInterval(16);
         QObject::connect(posTimer, &QTimer::timeout, page, [page, sampler]{
             for (int i = 0; i < page->channels().size(); ++i) {
                 auto *ch = page->channels().at(i);

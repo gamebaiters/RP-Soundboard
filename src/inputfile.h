@@ -56,7 +56,12 @@ public:
 	virtual int64_t outputSamplesEstimation() const = 0;
 	virtual void setPitchFactor(float factor) { (void)factor; }
 	virtual void setSpeedFactor(float factor) { (void)factor; }
+	virtual float getSpeedFactor() const { return 1.0f; }
 	virtual void setReverbMix(float mix) { (void)mix; }
+	// Live-update the decoder's end-of-playback bound. <0 = unlimited.
+	// Lets the waveform right-click crop editor truncate the active
+	// playback without restarting the slot.
+	virtual void setMaxPlayTime(double seconds) { (void)seconds; }
 };
 
 extern InputFile *CreateInputFileFFmpeg(InputFileOptions options = InputFileOptions());

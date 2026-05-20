@@ -88,6 +88,11 @@ private:
     ShoeboxRoom   m_room;
     GainRamp      m_gainRamp;
 
+    // Post-engine soft peak limiter state. Keeps the wet stereo
+    // bounded below the outer SlotDsp::softLimit's hard cap so hot
+    // reflection / clarity / width combos can't drive it into clipping.
+    float m_postLimGain = 1.0f;
+
     // Scratch buffers (allocated once in init, reused every block) ---------
     std::vector<float> m_monoL, m_monoR;           // deinterleaved input
     std::vector<float> m_hrtfOutLL, m_hrtfOutLR;   // L chan -> L ear, R ear

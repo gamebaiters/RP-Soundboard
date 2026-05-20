@@ -237,10 +237,9 @@ void SpatialLeia::process(float &l, float &r)
     m_dryBuf[m_dryPos * 2 + 1] = r;
     m_dryPos = (m_dryPos + 1) % kBlock;
 
-    // Accumulate the input block.
-    m_inBuf[m_inFill * 2 + 0] = l;
-    m_inBuf[m_inFill * 2 + 1] = r;
-    ++m_inFill;
+    // Process block, then read, then write input. The earlier order
+    // (write, then process, then read) silently dropped outBuf[kBlock-1]
+    // every block - audible as a ~187 Hz frying buzz at 48 kHz.
     if (m_inFill >= kBlock) {
         m_engine.processBlock(m_inBuf.data(), m_outBuf.data(), kBlock);
         m_inFill   = 0;
@@ -250,8 +249,11 @@ void SpatialLeia::process(float &l, float &r)
 
     if (!m_outValid) {
         // Pre-roll: first kBlock samples have no processed output yet.
-        // Pass the (delayed) dry through untouched so playback never
-        // starts with a gap.
+        // Stash the input and pass the (delayed) dry through so
+        // playback never starts with a gap.
+        m_inBuf[m_inFill * 2 + 0] = l;
+        m_inBuf[m_inFill * 2 + 1] = r;
+        ++m_inFill;
         l = dryL;
         r = dryR;
         return;
@@ -260,6 +262,11 @@ void SpatialLeia::process(float &l, float &r)
     float wetL = m_outBuf[m_outPos * 2 + 0];
     float wetR = m_outBuf[m_outPos * 2 + 1];
     m_outPos = (m_outPos + 1) % kBlock;
+
+    // Accumulate the current input for the NEXT block.
+    m_inBuf[m_inFill * 2 + 0] = l;
+    m_inBuf[m_inFill * 2 + 1] = r;
+    ++m_inFill;
 
     // Click-free engagement ramp from full dry to the wet/dry mix.
     if (m_engage < 1.0f) {

@@ -1,3 +1,42 @@
+GameBaiters Soundboard v2.2.5
+=============================
+
+Stability release on top of v2.2.4: three independent fixes to
+TS3's transmission state. The mic no longer goes dead when you
+release a held PTT mid-playback, voice activation no longer gets
+stuck after a sound stops, and TeamSpeak no longer crashes on
+close when the soundboard is active.
+
+---------------------------------------------------------------------
+TRANSMISSION STATE
+---------------------------------------------------------------------
+* Fixed: in a PTT channel, holding PTT before starting a sound
+  and releasing it mid-playback no longer cuts the soundboard
+  audio off for everyone else. A 150 ms watchdog now re-asserts
+  continuous transmission if TS3's PTT-up handler steals it back.
+* Fixed: voice activity detection stayed dead after a sound
+  stopped, until the user mute/unmuted manually. The plugin now
+  forces a VAD preprocessor re-init on restore (vad off then on),
+  which is the programmatic equivalent of the manual workaround.
+* Fixed: a fast play / pause / unpause / stop sequence could
+  leave the mic permanently open after playback. A stale TS3
+  state read was being captured as "the user's real talk mode",
+  so the restore looped back to continuous transmission instead
+  of PTT. Adds a sticky last-known-mode cache, rejects an
+  obviously stale snapshot, and verifies the restored
+  CLIENT_INPUT_DEACTIVATED actually took effect.
+
+---------------------------------------------------------------------
+STABILITY
+---------------------------------------------------------------------
+* Fixed: TeamSpeak crashing on close while the soundboard was
+  active. On disconnect / shutdown the plugin was still writing
+  CLIENT_INPUT_DEACTIVATED + flushClientSelfUpdates after TS3
+  had begun tearing down its audio backend, hitting a NULL in
+  directsound_win64.dll. The plugin now invalidates its TS3
+  handle before any queued restore can fire.
+
+=====================================================================
 GameBaiters Soundboard v2.2.4
 =============================
 

@@ -32,11 +32,18 @@ const char * TalkStateManager::toString(talk_state_e ts)
 TalkStateManager::TalkStateManager() :
 	previousTalkState(TS_INVALID),
 	currentTalkState(TS_INVALID),
+	lastUserMode(TS_INVALID),
 	activeServerId(0),
 	playingServerId(0),
 	m_sampler(NULL)
 {
-
+	// 150 ms watchdog: cheap enough to be invisible, fast enough to
+	// catch TS3's PTT-up overwrite of CLIENT_INPUT_DEACTIVATED before
+	// the soundboard audibly drops.
+	m_contTransWatchdog.setInterval(150);
+	m_contTransWatchdog.setSingleShot(false);
+	QObject::connect(&m_contTransWatchdog, &QTimer::timeout,
+		this, &TalkStateManager::onContTransWatchdog);
 }
 
 
@@ -128,16 +135,65 @@ void TalkStateManager::setTalkTransMode()
 		return;
 	talk_state_e ts = previousTalkState;
 	previousTalkState = TS_INVALID;
-	// Skip the TS3 API call if the client is already in the target
-	// state. Avoids an unnecessary flushClientSelfUpdates round-trip
-	// that can briefly glitch VAD / continuous-transmission.
 	uint64 srv = playingServerId ? playingServerId : activeServerId;
-	talk_state_e current = getTalkState(srv);
-	if (current != TS_INVALID && current == ts) {
-		currentTalkState = ts;
+	// Stop the cont-trans watchdog before we leave TS_CONT_TRANS.
+	m_contTransWatchdog.stop();
+	// Server already disconnected (onConnectionLost cleared the ids).
+	// Skip ts3Functions calls - they'd race with TS3's audio backend
+	// teardown and crash the client.
+	if (srv == 0)
 		return;
-	}
+	// Always call setTalkState. The previous early-exit on "current==ts"
+	// could mistakenly skip the restore when TS3's getTalkState read
+	// returned a stale value matching our target - the user's mic would
+	// then stay in the override state. Forcing the call is cheap and
+	// guarantees the flush actually propagates.
 	setTalkState(srv, ts);
+	// When restoring a VAD-enabled mode (either pure voice activation
+	// or PTT-with-VA), force a VAD preprocessor re-init. The vad=false
+	// -> vad=true ping-pong from CONT_TRANS / restore leaves TS3's
+	// VAD module in a stuck state where voice no longer triggers
+	// transmission until the user mute+unmutes manually.
+	if (ts == TS_VOICE_ACTIVATION || ts == TS_PTT_WITH_VA)
+		forceVadReinit(srv);
+	// Final safety net: re-read CLIENT_INPUT_DEACTIVATED and re-assert
+	// if TS3 didn't actually apply our last write. Catches the case
+	// where the watchdog re-asserted INPUT_ACTIVE one tick before the
+	// restore landed.
+	verifyInputDeactivated(srv, ts);
+}
+
+void TalkStateManager::forceVadReinit(uint64 scHandlerID)
+{
+	if (scHandlerID == 0)
+		return;
+	// Cycle vad off and back on with flushes in between. TS3 tears
+	// down + re-creates the VAD module on each "vad" toggle, which is
+	// the only programmatic equivalent of the user's manual
+	// mute/unmute workaround.
+	ts3Functions.setPreProcessorConfigValue(scHandlerID, "vad", "false");
+	ts3Functions.flushClientSelfUpdates(scHandlerID, NULL);
+	ts3Functions.setPreProcessorConfigValue(scHandlerID, "vad", "true");
+	ts3Functions.flushClientSelfUpdates(scHandlerID, NULL);
+}
+
+
+void TalkStateManager::verifyInputDeactivated(uint64 scHandlerID, talk_state_e ts)
+{
+	if (scHandlerID == 0)
+		return;
+	bool wantActive = (ts == TS_CONT_TRANS || ts == TS_VOICE_ACTIVATION);
+	int actual = 0;
+	if (ts3Functions.getClientSelfVariableAsInt(scHandlerID, CLIENT_INPUT_DEACTIVATED, &actual) != ERROR_ok)
+		return;
+	bool actualActive = (actual == INPUT_ACTIVE);
+	if (wantActive != actualActive) {
+		logDebug("TSMGR: post-restore mismatch ts=%s actual=%d, re-asserting",
+			toString(ts), actual);
+		ts3Functions.setClientSelfVariableAsInt(scHandlerID, CLIENT_INPUT_DEACTIVATED,
+			wantActive ? INPUT_ACTIVE : INPUT_DEACTIVATED);
+		ts3Functions.flushClientSelfUpdates(scHandlerID, NULL);
+	}
 }
 
 
@@ -146,6 +202,8 @@ void TalkStateManager::setTalkTransMode()
 //---------------------------------------------------------------
 void TalkStateManager::setPlayTransMode()
 {
+	if (activeServerId == 0)
+		return;
 	// Only snapshot the user's real talk state the FIRST time we
 	// override it. On subsequent calls (re-arm after PTT release,
 	// unpause, etc.) we already know the original state.
@@ -153,7 +211,24 @@ void TalkStateManager::setPlayTransMode()
 		talk_state_e s = getTalkState(activeServerId);
 		if (s == TS_INVALID)
 			return;
+		// Reject a TS_CONT_TRANS snapshot. setClientSelfVariable +
+		// flushClientSelfUpdates is not always immediately visible to
+		// the next getClientSelfVariableAsInt - on a fast play/pause/
+		// unpause sequence we sometimes read back the value WE just
+		// wrote in setContinuousTransmission. Using that as the
+		// "original user mode" would make setTalkTransMode restore to
+		// TS_CONT_TRANS forever, leaving the mic open after playback.
+		// Fall back to the last known user mode if we have one, else
+		// default conservatively to TS_PTT_WITHOUT_VA (the safe
+		// option for PTT-required channels).
+		if (s == TS_CONT_TRANS) {
+			if (lastUserMode != TS_INVALID && lastUserMode != TS_CONT_TRANS)
+				s = lastUserMode;
+			else
+				s = TS_PTT_WITHOUT_VA;
+		}
 		previousTalkState = s;
+		lastUserMode = s;
 	}
 	setContinuousTransmission(activeServerId);
 }
@@ -171,6 +246,10 @@ void TalkStateManager::setActiveServerId(uint64 id)
 	if (activeServerId != 0 && previousTalkState != TS_INVALID)
 		setTalkState(activeServerId, previousTalkState);
 	previousTalkState = TS_INVALID;
+	// Different server may have a different user mode - drop the sticky
+	// cache so the next setPlayTransMode re-snapshots fresh on the new
+	// server.
+	lastUserMode = TS_INVALID;
 	activeServerId = id;
 	if (oldCurrentTS == TS_CONT_TRANS && anySlotStillPlaying())
 	{
@@ -184,6 +263,8 @@ void TalkStateManager::setActiveServerId(uint64 id)
 //---------------------------------------------------------------
 TalkStateManager::talk_state_e TalkStateManager::getTalkState(uint64 scHandlerID)
 {
+	if (scHandlerID == 0)
+		return TS_INVALID;
 	char *vadStr;
 	if (checkError(ts3Functions.getPreProcessorConfigValue(scHandlerID, "vad", &vadStr), "Error retrieving vad setting"))
 		return TS_INVALID;
@@ -226,7 +307,42 @@ bool TalkStateManager::setTalkState(uint64 scHandlerID, talk_state_e state)
 
 	ts3Functions.flushClientSelfUpdates(scHandlerID, NULL);
 	currentTalkState = state;
+	// Arm the cont-trans watchdog when we enter TS_CONT_TRANS so a TS3
+	// PTT-up that overwrites CLIENT_INPUT_DEACTIVATED gets undone fast.
+	if (state == TS_CONT_TRANS) {
+		if (!m_contTransWatchdog.isActive())
+			m_contTransWatchdog.start();
+	} else {
+		if (m_contTransWatchdog.isActive())
+			m_contTransWatchdog.stop();
+	}
 	return true;
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Watchdog tick. Runs while we are holding TS_CONT_TRANS
+// for soundboard playback. If TS3 has flipped CLIENT_INPUT_DEACTIVATED
+// back to INPUT_DEACTIVATED behind our back (the PTT-key-up handler is
+// the usual culprit), force it back to INPUT_ACTIVE.
+//---------------------------------------------------------------
+void TalkStateManager::onContTransWatchdog()
+{
+	if (currentTalkState != TS_CONT_TRANS) {
+		m_contTransWatchdog.stop();
+		return;
+	}
+	uint64 srv = playingServerId ? playingServerId : activeServerId;
+	if (srv == 0)
+		return;
+	int input = 0;
+	if (ts3Functions.getClientSelfVariableAsInt(srv, CLIENT_INPUT_DEACTIVATED, &input) != ERROR_ok)
+		return;
+	if (input != INPUT_ACTIVE) {
+		logDebug("TSMGR: Watchdog re-asserting INPUT_ACTIVE (was %d)", input);
+		ts3Functions.setClientSelfVariableAsInt(srv, CLIENT_INPUT_DEACTIVATED, INPUT_ACTIVE);
+		ts3Functions.flushClientSelfUpdates(srv, NULL);
+	}
 }
 
 
@@ -267,6 +383,19 @@ void TalkStateManager::onClientStopsTalking()
 	// If we are in PTT mode and the client lets go of the PTT key while playing a sound, ptt state gets reset to not-talking.
 	if (currentTalkState == TS_CONT_TRANS && (previousTalkState == TS_PTT_WITHOUT_VA || previousTalkState == TS_PTT_WITH_VA))
 		setPlayTransMode();
+}
+
+void TalkStateManager::onConnectionLost()
+{
+	// Drop active state without calling ts3Functions - on disconnect /
+	// shutdown TS3 has already begun tearing down its audio backend and
+	// any setClientSelfVariable / flushClientSelfUpdates call from us
+	// will reach freed pointers in directsound_win64.dll / WASAPI.
+	m_contTransWatchdog.stop();
+	previousTalkState = TS_INVALID;
+	currentTalkState = TS_INVALID;
+	playingServerId = 0;
+	activeServerId = 0;
 }
 
 void TalkStateManager::onPreviewOnlyToggled(bool on)

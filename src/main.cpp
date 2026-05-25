@@ -323,6 +323,14 @@ CAPI void sb_saveConfig()
 
 CAPI void sb_kill()
 {
+	// Tear down the TalkStateManager active server FIRST so the watchdog
+	// timer stops and any in-flight queued setTalkTransMode calls skip
+	// their ts3Functions invocations. By the time TS3 calls
+	// ts3plugin_shutdown its audio backend (directsound_win64.dll /
+	// WASAPI) is already in tear-down and any further setClientSelfVariable
+	// / flushClientSelfUpdates from us hits freed pointers in that DLL.
+	if (tsMgr) tsMgr->onConnectionLost();
+
 	// Stop the singleton visualizer thread FIRST. It's a std::thread that holds
 	// references to DLL code; if it survives DLL unload, FreeLibrary fails and
 	// TS3's plugin uninstall leaves the file locked.
@@ -575,7 +583,7 @@ CAPI void sb_openHowTo()
 }
 
 
-CAPI void sb_onConnectStatusChange(uint64 serverConnectionHandlerID, int newStatus, unsigned int errorNumber) 
+CAPI void sb_onConnectStatusChange(uint64 serverConnectionHandlerID, int newStatus, unsigned int errorNumber)
 {
     Q_UNUSED(errorNumber)
 
@@ -587,7 +595,16 @@ CAPI void sb_onConnectStatusChange(uint64 serverConnectionHandlerID, int newStat
 	if (serverConnectionHandlerID == activeServerId)
 	{
 		if (newStatus == STATUS_DISCONNECTED)
+		{
+			// Invalidate the talk state BEFORE stopping playback. The
+			// stop emits queued onStopPlaying signals; without the
+			// invalidation those would run setTalkTransMode -> ts3Functions
+			// on the just-disconnected handler, racing with TS3's
+			// directsound / WASAPI teardown and crashing the client on
+			// close.
+			if (tsMgr) tsMgr->onConnectionLost();
 			sb_stopPlayback();
+		}
 		sb_enableInterface(newStatus == STATUS_CONNECTION_ESTABLISHED);
 	}
 }

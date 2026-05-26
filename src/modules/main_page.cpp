@@ -12,6 +12,7 @@
 #include "../style_helper.h"
 #include "help_bubble.h"
 #include "theme.h"
+#include "../ConfigModel.h"   // flushPendingWrite() on window close/hide
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -25,6 +26,8 @@
 #include <QCheckBox>
 #include <QLabel>
 #include <QResizeEvent>
+#include <QCloseEvent>
+#include <QHideEvent>
 
 MainPage::MainPage(QWidget *parent)
     : QWidget(parent)
@@ -195,6 +198,21 @@ void MainPage::resizeEvent(QResizeEvent *e) {
         m_disconnectedOverlay->setGeometry(rect());
         m_disconnectedOverlay->raise();
     }
+}
+
+void MainPage::closeEvent(QCloseEvent *e) {
+    // Event-triggered save: closing the soundboard window persists any
+    // dirty model state so the user's volume / theme / sandbox settings
+    // survive closing-without-quitting-TS3.
+    ConfigModel::flushPendingWrite();
+    QWidget::closeEvent(e);
+}
+
+void MainPage::hideEvent(QHideEvent *e) {
+    // Same as closeEvent - covers the case where TS3 sends a hide
+    // without firing closeEvent (e.g. tab switch in older builds).
+    ConfigModel::flushPendingWrite();
+    QWidget::hideEvent(e);
 }
 
 void MainPage::triggerButton(int idx) {

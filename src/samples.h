@@ -166,6 +166,18 @@ private:
 		// read from the GUI thread).
 		std::atomic<float> peakL{0.0f};
 		std::atomic<float> peakR{0.0f};
+		// Lock-free position / length cache. Updated by the audio
+		// thread inside fetchInputSamples once per cycle; read by the
+		// GUI position-poll timer at ~30 Hz. Without this the GUI
+		// polled Sampler::getPosition / getLength under m_mutex 30
+		// times a second per channel, contending against the audio
+		// thread's mutex hold inside fetchSamples - measurable as a
+		// system-wide lag on the GUI thread (~30 ms slider stalls)
+		// once the Leia engine started running its 5 ms convolution
+		// blocks inside that same lock. Atomic double is lock-free on
+		// every platform we ship (x86-64, ARM64).
+		std::atomic<double> cachedPositionSec{0.0};
+		std::atomic<double> cachedLengthSec{0.0};
 		// Latest FxPanel reverb value (0..1). Stored on the slot so
 		// the routing decision (decoder vs end-of-DSP reverb) can be
 		// re-applied whenever the slot's dsp is created/cleared.

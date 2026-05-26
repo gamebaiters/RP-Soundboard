@@ -40,6 +40,7 @@ void ShoeboxRoom::init(float sampleRate, int blockSize,
     m_monoScratch .assign(static_cast<size_t>(blockSize), 0.0f);
     m_leftScratch .assign(static_cast<size_t>(blockSize), 0.0f);
     m_rightScratch.assign(static_cast<size_t>(blockSize), 0.0f);
+    m_delayRamp   .assign(static_cast<size_t>(blockSize), 0.0f);
 }
 
 void ShoeboxRoom::setRoomSize(float meters)
@@ -97,10 +98,29 @@ void ShoeboxRoom::process(float* leftIO, float* rightIO, int frames,
 
     // For each reflection: read delayed mono, apply gain, pan to stereo, sum in.
     for (int w = 0; w < kNumWalls; ++w) {
-        const ReflectionTap& tap = m_taps[w];
+        ReflectionTap& tap = m_taps[w];
         if (tap.gain < 1e-6f) continue;
 
-        tap.buffer.readFixed(tap.delaySamples, m_monoScratch.data(), frames);
+        // Crackle / frying buzz fix on rotating sources (8D preset + Leia):
+        // computeReflections() sets a fresh integer delaySamples every
+        // block. As the source rotates, the image-source distance moves
+        // by a few samples per block, and the previous readFixed() jumped
+        // the delay-line read offset stepwise - producing a per-block
+        // discontinuity in the reflection signal that summed to a ~187 Hz
+        // (48 kHz / kBlock 256) frying tone around the head. Replace the
+        // stepwise read with a per-sample fractional read that lerps the
+        // delay from the previous block's value to the target across the
+        // block. Sub-sample precision + smooth slew = doppler-like sweep
+        // instead of zipper noise.
+        float prev = tap.prevDelaySamples;
+        if (prev < 0.0f) prev = tap.delaySamples;       // first call: no slew
+        float target = tap.delaySamples;
+        float dD = (frames > 0) ? (target - prev) / static_cast<float>(frames)
+                                : 0.0f;
+        for (int i = 0; i < frames; ++i)
+            m_delayRamp[i] = prev + dD * static_cast<float>(i);
+        tap.buffer.readFractional(m_delayRamp.data(), m_monoScratch.data(), frames);
+        tap.prevDelaySamples = target;
 
         float g = tap.gain * m_reflLevel;
 
@@ -135,11 +155,13 @@ void ShoeboxRoom::computeReflections(float srcAz, float srcEl)
         m_taps[w].elevationDeg = el;
 
         static constexpr float kSpeedOfSound = 343.0f;
-        int delaySamples = static_cast<int>(dist / kSpeedOfSound * m_sampleRate + 0.5f);
+        float delaySamplesF = dist / kSpeedOfSound * m_sampleRate;
 
-        int maxDelay = m_taps[w].buffer.capacity - m_blockSize - 1;
-        if (maxDelay < 0) maxDelay = 0;
-        m_taps[w].delaySamples = std::min(delaySamples, maxDelay);
+        float maxDelay = static_cast<float>(m_taps[w].buffer.capacity - m_blockSize - 2);
+        if (maxDelay < 0.0f) maxDelay = 0.0f;
+        if (delaySamplesF < 0.0f)        delaySamplesF = 0.0f;
+        if (delaySamplesF > maxDelay)    delaySamplesF = maxDelay;
+        m_taps[w].delaySamples = delaySamplesF;
 
         float absCoef = m_absorption[w];
         m_taps[w].gain = (1.0f - absCoef) / std::max(dist, 0.1f);
@@ -196,6 +218,10 @@ void ShoeboxRoom::computeImageSource(int   wallIdx,
 
 void ShoeboxRoom::reset()
 {
-    for (int w = 0; w < kNumWalls; ++w)
+    for (int w = 0; w < kNumWalls; ++w) {
         m_taps[w].buffer.clear();
+        // Force the first post-reset block to NOT slew from the prior
+        // session's delay (which would resample the empty ring oddly).
+        m_taps[w].prevDelaySamples = -1.0f;
+    }
 }

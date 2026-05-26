@@ -27,7 +27,28 @@
 #include <QJsonDocument>
 #include <QScreen>
 #include <QGuiApplication>
+#include <QSettings>
 #include <cmath>
+
+namespace {
+// Global preferred sandbox engine. Written by the sandbox dialog when
+// the user picks Classic / Leia from the combo, read at Channel ctor
+// time so a freshly-added channel inherits the last choice instead of
+// always falling back to the SandboxState default (Classic). Per-channel
+// persistence (when enabled) overrides this on restore.
+constexpr const char *kPreferredEngineKey = "sandbox/preferred_engine";
+} // namespace
+
+namespace SandboxEnginePref {
+int load() {
+    QSettings s("GameBaiters", "Soundboard");
+    return s.value(kPreferredEngineKey, SandboxState::Engine_Classic).toInt();
+}
+void save(int engine) {
+    QSettings s("GameBaiters", "Soundboard");
+    s.setValue(kPreferredEngineKey, engine);
+}
+} // namespace SandboxEnginePref
 
 namespace {
 QString fmtFreq(double hz) {
@@ -1691,8 +1712,14 @@ void ChannelSandboxDialog::applyModeVisibility()
 
 void ChannelSandboxDialog::onEngineChanged(int idx)
 {
-    m_state.spatialEngine = (idx == 1) ? SandboxState::Engine_Leia
-                                       : SandboxState::Engine_Classic;
+    int engine = (idx == 1) ? SandboxState::Engine_Leia
+                            : SandboxState::Engine_Classic;
+    m_state.spatialEngine = engine;
+    // Remember the choice so the next channel the user creates picks
+    // it up by default. Per-channel persistence (when enabled) still
+    // overrides this on restore - the QSettings key is only the seed
+    // for fresh sandboxes that have no saved state of their own.
+    SandboxEnginePref::save(engine);
     applyModeVisibility();
     pushChange();
 }

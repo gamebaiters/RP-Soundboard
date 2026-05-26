@@ -135,11 +135,26 @@ void LeiaEngine::processBlock(const float* stereoIn,
     // Master gain ramp spans entire block.
     m_gainRamp.apply(stereoOut, frames, 2);
 
-    // Post-engine soft peak limiter. Slow attack (15 ms) + long
-    // release (200 ms) catches sustained overdrive without pumping on
-    // transient rotational peaks. Ceiling 1.0 matches outer softLimit.
+    // Post-engine catastrophic peak guard.
+    //
+    // Earlier this stage was a 1.0-ceiling envelope-following limiter
+    // (15 ms attack / 200 ms release). On complex (broadband, high
+    // peak) material with the 8D engine that limiter pumped the gain
+    // down for each peak, then released slowly - and as the HRIR
+    // changed with rotation the peak spectrum changed with it, so the
+    // limiter's gain modulated at the rotation rate. That AM riding
+    // the signal sounded like the "frying" the user kept reporting.
+    //
+    // SlotDsp::softLimit already provides a memoryless tanh-style
+    // bound to [-1, 1] downstream of every spatial stage, so the
+    // role of this stage shrinks to "do not let a runaway HRIR sum
+    // blow up the output above 1.4 - softLimit handles everything
+    // up to that comfortably". Ceiling 1.4 with the same envelope
+    // means the limiter is essentially asleep on normal material and
+    // only wakes up on genuinely pathological overshoot - no pumping,
+    // no rotation-rate AM artefact.
     {
-        constexpr float kCeil = 1.0f;
+        constexpr float kCeil = 1.4f;
         float peak = 0.0f;
         for (int i = 0; i < frames * 2; ++i) {
             float a = std::fabs(stereoOut[i]);

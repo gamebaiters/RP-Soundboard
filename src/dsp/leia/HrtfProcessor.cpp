@@ -61,6 +61,9 @@ bool HrtfProcessor::init(const std::string& sofaPath,
     m_irRight      .assign(FL, 0.0f);
     m_irLeftFreq   .assign(N2, 0.0f);
     m_irRightFreq  .assign(N2, 0.0f);
+    m_irLeftFreqTarget .assign(N2, 0.0f);
+    m_irRightFreqTarget.assign(N2, 0.0f);
+    m_irTargetValid = false;
 
     m_convLeft     .assign(N2, 0.0f);
     m_convRight    .assign(N2, 0.0f);
@@ -91,11 +94,60 @@ void HrtfProcessor::process(const float* monoIn,
     }
     if (frames > m_blockSize) frames = m_blockSize;
 
-    // 1. Update HRIR if direction changed.
-    if (azimuthDeg != m_lastAzimuth || elevationDeg != m_lastElevation) {
+    // 1. Update HRIR target if direction changed enough to matter.
+    //    Wider deadband (3 deg) than the SOFA grid resolution (~5 deg
+    //    on MIT KEMAR), well above the 0.32 deg/block 8D rotation
+    //    rate at the default 10 RPM. Cuts mysofa_getfilter_float +
+    //    IR-FFT cost from every block down to every ~10 blocks on a
+    //    moderate rotation - audible CPU savings on the audio thread
+    //    that was missing deadlines and producing the residual frying
+    //    buzz on complex (broadband, high-peak) material.
+    constexpr float kHrirAzDeadbandDeg = 3.0f;
+    constexpr float kHrirElDeadbandDeg = 3.0f;
+    bool firstLookup = (m_lastAzimuth   <= -9000.0f) ||
+                        (m_lastElevation <= -9000.0f);
+    bool azMoved = std::fabs(azimuthDeg   - m_lastAzimuth)   >= kHrirAzDeadbandDeg;
+    bool elMoved = std::fabs(elevationDeg - m_lastElevation) >= kHrirElDeadbandDeg;
+    if (firstLookup || azMoved || elMoved) {
         lookupHRIR(azimuthDeg, elevationDeg);
         m_lastAzimuth   = azimuthDeg;
         m_lastElevation = elevationDeg;
+        if (firstLookup) {
+            // Snap on the very first lookup so the first block does
+            // not produce a half-second silent ramp-up.
+            std::memcpy(m_irLeftFreq.data(),  m_irLeftFreqTarget.data(),
+                        (m_fftSize + 2) * sizeof(float));
+            std::memcpy(m_irRightFreq.data(), m_irRightFreqTarget.data(),
+                        (m_fftSize + 2) * sizeof(float));
+        }
+    }
+
+    // 1b. Smooth the live IR toward the latest target. Single-pole
+    //     filter per freq bin: each block the live IR moves a fixed
+    //     fraction of the way toward the lookup result. The convolution
+    //     uses the smoothed IR, so block-to-block changes are tiny and
+    //     the OLA overlap (generated with the live IR's previous state)
+    //     adds nearly-coherently with the new block's convolution.
+    //
+    //     kIrLerp == 0.06 -> ~50 blocks to 95% (~270 ms at 48 kHz /
+    //     kBlock 256). Much slower than the previous 0.18 - turns out
+    //     the residual frying buzz on complex audio came from the
+    //     remaining block-to-block IR delta still being audible. At
+    //     0.06 the per-block delta is 3x smaller; combined with the
+    //     wider 3 deg lookup deadband the IR is effectively held flat
+    //     for slow rotations and creeps smoothly during fast ones -
+    //     listener still perceives motion, no click train.
+    if (m_irTargetValid) {
+        constexpr float kIrLerp = 0.06f;
+        const int n = m_fftSize + 2;
+        const float *tgtL = m_irLeftFreqTarget.data();
+        const float *tgtR = m_irRightFreqTarget.data();
+        float *liveL = m_irLeftFreq.data();
+        float *liveR = m_irRightFreq.data();
+        for (int i = 0; i < n; ++i) {
+            liveL[i] += (tgtL[i] - liveL[i]) * kIrLerp;
+            liveR[i] += (tgtR[i] - liveR[i]) * kIrLerp;
+        }
     }
 
     // 2. Copy current block into FFT input, zero-pad to fftSize.
@@ -169,16 +221,21 @@ void HrtfProcessor::lookupHRIR(float azDeg, float elDeg)
                            m_irLeft.data(), m_irRight.data(),
                            &delayL, &delayR);
 
-    // Zero-pad and FFT each ear's IR.
+    // FFT into the TARGET buffers; process() lerps the live IR toward
+    // these each block so direction changes are smoothed across multiple
+    // blocks instead of taking effect instantly (which produced an
+    // OLA-overlap discontinuity = audible click train under rotation).
     std::memset(m_fftInput.data(), 0, m_fftSize * sizeof(float));
     std::memcpy(m_fftInput.data(), m_irLeft.data(),
                 m_filterLength * sizeof(float));
-    m_fft->forward(m_fftInput.data(), m_irLeftFreq.data());
+    m_fft->forward(m_fftInput.data(), m_irLeftFreqTarget.data());
 
     std::memset(m_fftInput.data(), 0, m_fftSize * sizeof(float));
     std::memcpy(m_fftInput.data(), m_irRight.data(),
                 m_filterLength * sizeof(float));
-    m_fft->forward(m_fftInput.data(), m_irRightFreq.data());
+    m_fft->forward(m_fftInput.data(), m_irRightFreqTarget.data());
+
+    m_irTargetValid = true;
 }
 
 void HrtfProcessor::complexMultiply(float*       dst,
@@ -211,4 +268,7 @@ void HrtfProcessor::reset()
 
     m_lastAzimuth   = -9999.0f;
     m_lastElevation = -9999.0f;
+    // First lookup after reset must snap rather than lerp from the
+    // stale target left over from the previous session.
+    m_irTargetValid = false;
 }

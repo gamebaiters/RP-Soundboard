@@ -31,11 +31,28 @@ void ChannelMeter::setPeak(float l, float r)
     if (r < 0.0f) r = 0.0f;
     if (r > 1.5f) r = 1.5f;
     // Peak-hold tracks the maximum then decays toward the live level.
-    m_peakHoldL = (l > m_peakHoldL) ? l : std::max(l, m_peakHoldL * kPeakDecay);
-    m_peakHoldR = (r > m_peakHoldR) ? r : std::max(r, m_peakHoldR * kPeakDecay);
+    float newHoldL = (l > m_peakHoldL) ? l : std::max(l, m_peakHoldL * kPeakDecay);
+    float newHoldR = (r > m_peakHoldR) ? r : std::max(r, m_peakHoldR * kPeakDecay);
+    // Snap to floor so the multiplicative decay actually reaches zero
+    // (without this, float -> denormal infinite-tail land and the
+    // change-detect below keeps pumping micro-paints forever).
+    constexpr float kHoldFloor = 1e-4f;   // -80 dB - well below the meter's -60 dB floor
+    if (newHoldL < kHoldFloor) newHoldL = 0.0f;
+    if (newHoldR < kHoldFloor) newHoldR = 0.0f;
+    // Change-detect: once everything decays to zero the paint loop
+    // stops, but only AFTER the marker has finished animating back
+    // down. Previously the meter wiring sent a single drain tick on
+    // playback-stop and never followed up - the marker froze where it
+    // landed instead of completing the fall-off animation, the user
+    // regression reported. The meter timer now pumps every tick and
+    // this guard kills paints only at true rest (0,0,0,0).
+    bool changed = (l != m_l) || (r != m_r)
+                || (newHoldL != m_peakHoldL) || (newHoldR != m_peakHoldR);
+    m_peakHoldL = newHoldL;
+    m_peakHoldR = newHoldR;
     m_l = l;
     m_r = r;
-    update();
+    if (changed) update();
 }
 
 void ChannelMeter::paintEvent(QPaintEvent *)

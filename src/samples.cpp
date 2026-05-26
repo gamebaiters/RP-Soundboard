@@ -131,12 +131,42 @@ void Sampler::setSlotLoop(int slot, bool on)
 void Sampler::setSlotSandboxState(int slot, const SandboxState &s)
 {
 	if (slot < 0 || slot >= MAX_SLOTS) return;
-	std::lock_guard<std::mutex> Lock(m_mutex);
 	PlaybackSlot &sl = m_slots[slot];
+
+	// Phase 1 - ensure the SlotDsp object exists. The dsp pointer is
+	// only mutated from the GUI thread (here and clearSlotSandbox), so
+	// once we have created it under m_mutex we can call into it from
+	// outside the lock; the audio thread will see a fully-constructed
+	// object because make_unique returns before we publish the pointer.
+	{
+		std::lock_guard<std::mutex> Lock(m_mutex);
+		if (!sl.dsp) sl.dsp = std::make_unique<SlotDsp>();
+		sl.dsp->setSampleRate(48000.0);
+	}
+
+	// Phase 2 - heavy Leia bring-up runs OUTSIDE m_mutex. The first
+	// time the user picks the Leia 3D engine the SOFA file load + FFT
+	// plan + noise-probe calibration can burn ~1 second. With the lock
+	// held that 1 second freezes BOTH the audio callback (m_mutex
+	// blocks fetchSamples) and the GUI thread (the signal that
+	// triggered us blocks behind the audio callback). Moving init out
+	// of the lock makes engine swap responsive: the audio thread keeps
+	// running through the Classic fallback (leia.ready() stays false)
+	// until the init finishes, then quietly flips to Leia next block.
+	bool wantsLeia3D = (s.spatialEngine == SandboxState::Engine_Leia) &&
+	                   (s.spatialMode == SandboxState::Spatial_3DManual ||
+	                    s.spatialMode == SandboxState::Spatial_3DRotate ||
+	                    s.spatialMode == SandboxState::Spatial_8DPreset);
+	if (wantsLeia3D)
+		sl.dsp->prepareLeia(48000.0);
+
+	// Phase 3 - apply the rest of the state under the audio lock. With
+	// Leia already initialised, applyState's own ensureInit call is a
+	// cached early-return, so total lock-hold time is microseconds even
+	// on engine swap.
+	std::lock_guard<std::mutex> Lock(m_mutex);
 	bool wasStretchOn = sl.dsp ? sl.dsp->state().stretchEnabled : false;
-	bool wasDspMissing = (sl.dsp == nullptr);
-	if (!sl.dsp) sl.dsp = std::make_unique<SlotDsp>();
-	sl.dsp->setSampleRate(48000.0);
+	bool wasDspMissing = false;  // dsp was ensured under Phase 1's lock
 	sl.dsp->applyState(s);
 	// Re-route any prior FxPanel reverb into the dsp's end-stage and
 	// disable the libavfilter pre-reverb. Without this, enabling the
@@ -425,6 +455,25 @@ int Sampler::findChannelId(unsigned int channel, const unsigned int *channelSpea
 //---------------------------------------------------------------
 int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *finished)
 {
+	// Lock-free fast path: at idle (no slot in PLAYING / PAUSED) the
+	// audio thread used to acquire + release m_mutex every callback
+	// (50 Hz from TS3), and any GUI thread waiting on m_mutex got
+	// shoved to the back of the lock queue on each cycle. Atomic state
+	// loads let the audio callback bail in nanoseconds when nothing is
+	// playing, so GUI slider / scroll events see m_mutex completely
+	// uncontended.
+	{
+		bool any = false;
+		for (int s = 0; s < MAX_SLOTS; s++) {
+			state_e st = m_slots[s].state.load(std::memory_order_relaxed);
+			if (st == ePLAYING || st == ePAUSED) { any = true; break; }
+		}
+		if (!any) {
+			if (finished) *finished = true;
+			return 0;
+		}
+	}
+
 	std::lock_guard<std::mutex> Lock(m_mutex);
 
 	int totalWritten = 0;
@@ -449,6 +498,39 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 			0, 1, muteCapture && isFirstSlot, muteCapture && isFirstSlot, 0.0f, &slot);
 		if (written > totalWritten)
 			totalWritten = written;
+
+		// Refresh the GUI's lock-free position cache. Computing it here
+		// (audio thread) instead of on demand under m_mutex from the GUI
+		// timer eliminates a 30 Hz x N-channel mutex contention that
+		// stalled scroll repaints and slider drags - especially under
+		// the Leia engine, which holds m_mutex inside its block-FFT.
+		if (slot.inputFile) {
+			double posSec = 0.0;
+			double lenSec = slot.inputFile->getLength();
+			if (slot.dsp && slot.dsp->isStretchEnabled()) {
+				posSec = slot.stretchBaseTime + slot.dsp->stretchPlaybackPosition();
+				if (lenSec > 0.0 && posSec > lenSec) posSec = std::fmod(posSec, lenSec);
+				if (posSec < 0.0) posSec = 0.0;
+			} else {
+				double decoderPos = slot.inputFile->getPosition();
+				double sf = (double)slot.inputFile->getSpeedFactor();
+				if (sf <= 0.0) sf = 1.0;
+				int availSamples = 0;
+				{
+					// SampleBuffer::avail() asserts the buffer mutex is
+					// held; the position computation is best-effort anyway,
+					// so a brief lock here keeps the assert + RaceBuilder
+					// clean without measurably extending the audio block.
+					SampleBuffer::Lock sblp(slot.sbPlayback.getMutex());
+					availSamples = slot.sbPlayback.avail();
+				}
+				double bufferedSec = availSamples / 48000.0 * sf;
+				posSec = decoderPos - bufferedSec;
+				if (posSec < 0.0) posSec = 0.0;
+			}
+			slot.cachedPositionSec.store(posSec, std::memory_order_relaxed);
+			slot.cachedLengthSec.store(lenSec, std::memory_order_relaxed);
+		}
 
 		// Check if this slot's file is done
 		if (st == ePLAYING && slot.inputFile && slot.inputFile->done())
@@ -512,6 +594,18 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 //---------------------------------------------------------------
 int Sampler::fetchOutputSamples(short *samples, int count, int channels, const unsigned int *channelSpeakerArray, unsigned int *channelFillMask)
 {
+	// Lock-free fast path (see fetchInputSamples for rationale).
+	{
+		bool any = false;
+		for (int s = 0; s < MAX_SLOTS; s++) {
+			state_e st = m_slots[s].state.load(std::memory_order_relaxed);
+			if (st == ePLAYING || st == ePAUSED || st == ePLAYING_PREVIEW) {
+				any = true; break;
+			}
+		}
+		if (!any) return 0;
+	}
+
 	std::lock_guard<std::mutex> Lock(m_mutex);
 
 	const unsigned int bitMaskLeft = SPEAKER_FRONT_LEFT | SPEAKER_HEADPHONES_LEFT;
@@ -935,6 +1029,12 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &sound, bool preview)
 		double pt = sound.getPlayTime();
 		s.cropEnd = (pt > 0.0) ? (s.cropStart + pt) : -1.0;
 	}
+	// Prime the lock-free position cache with sensible initial values
+	// so the GUI's first poll (before the audio thread has run a fetch)
+	// reads the file length we just opened instead of a stale 0 from
+	// a previous slot owner.
+	s.cachedPositionSec.store(s.cropStart, std::memory_order_relaxed);
+	s.cachedLengthSec.store(s.inputFile->getLength(), std::memory_order_relaxed);
 	s.slotDbLocal = m_globalDbSettingLocal;
 	s.slotDbRemote = m_globalDbSettingRemote;
 	double localDb = m_multiMode ? s.slotDbLocal : m_globalDbSettingLocal;
@@ -1039,32 +1139,14 @@ void Sampler::unpausePlayback(int slot)
 //---------------------------------------------------------------
 double Sampler::getPosition(int slot)
 {
-	std::lock_guard<std::mutex> Lock(m_mutex);
-	if (slot >= 0 && slot < MAX_SLOTS)
-	{
-		PlaybackSlot &s = m_slots[slot];
-		if (s.inputFile && s.state != eSILENT)
-		{
-			if (s.dsp && s.dsp->isStretchEnabled()) {
-				double pos = s.stretchBaseTime + s.dsp->stretchPlaybackPosition();
-				double len = s.inputFile->getLength();
-				if (len > 0.0 && pos > len) pos = std::fmod(pos, len);
-				return pos < 0.0 ? 0.0 : pos;
-			}
-			double decoderPos = s.inputFile->getPosition();
-			// Buffered span is OUTPUT samples; convert to INPUT-file time
-			// using the SLOT'S speed factor (per-channel FxPanel speed
-			// differs from the Sampler global m_speedFactor). The earlier
-			// global-only fallback undercounted the lag on sped-up slots
-			// and made the cursor read ahead of the audible audio.
-			double sf = (double)s.inputFile->getSpeedFactor();
-			if (sf <= 0.0) sf = 1.0;
-			double bufferedSec = s.sbPlayback.avail() / 48000.0 * sf;
-			double audible = decoderPos - bufferedSec;
-			return audible < 0.0 ? 0.0 : audible;
-		}
-	}
-	return 0.0;
+	// Lock-free: the audio thread refreshes cachedPositionSec inside
+	// fetchInputSamples once per cycle (~50 Hz). The GUI's 30 Hz timer
+	// reads this atomic directly so it never contends with the audio
+	// mutex - previously a system-wide lag source under the Leia engine.
+	if (slot < 0 || slot >= MAX_SLOTS) return 0.0;
+	PlaybackSlot &s = m_slots[slot];
+	if (s.state.load(std::memory_order_relaxed) == eSILENT) return 0.0;
+	return s.cachedPositionSec.load(std::memory_order_relaxed);
 }
 
 
@@ -1073,14 +1155,11 @@ double Sampler::getPosition(int slot)
 //---------------------------------------------------------------
 double Sampler::getLength(int slot)
 {
-	std::lock_guard<std::mutex> Lock(m_mutex);
-	if (slot >= 0 && slot < MAX_SLOTS)
-	{
-		PlaybackSlot &s = m_slots[slot];
-		if (s.inputFile && s.state != eSILENT)
-			return s.inputFile->getLength();
-	}
-	return 0.0;
+	// Lock-free, same rationale as getPosition above.
+	if (slot < 0 || slot >= MAX_SLOTS) return 0.0;
+	PlaybackSlot &s = m_slots[slot];
+	if (s.state.load(std::memory_order_relaxed) == eSILENT) return 0.0;
+	return s.cachedLengthSec.load(std::memory_order_relaxed);
 }
 
 

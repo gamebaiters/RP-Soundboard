@@ -1,3 +1,116 @@
+GameBaiters Soundboard v2.2.6
+=============================
+
+Performance and audio-quality release on top of v2.2.5. Eliminates
+GUI lag at idle and during slider drags, fixes the residual frying
+buzz on the Leia engine for complex audio, restores the strength of
+the Classic 8D rotating engine, and reworks the ini-save policy so
+settings are persisted on user events instead of a background timer
+that itself caused recurring lag. New: the audio sandbox remembers
+the chosen movement engine across sessions.
+
+---------------------------------------------------------------------
+PERFORMANCE
+---------------------------------------------------------------------
+* Fixed: system-wide GUI lag when the soundboard was loaded.
+  Position polling now runs at 30 Hz instead of 60 Hz, skips
+  silent slots via a lock-free atomic, and reads its data from a
+  lock-free position cache updated by the audio thread - no
+  mutex contention against the audio block.
+* Fixed: any slider in the UI lagging behind the cursor while
+  dragging. Every model setter used to perform a synchronous
+  full-ini disk write on each valueChanged tick. Saves are now
+  event-driven (see PERSISTENCE below).
+* Fixed: 1-second audio + GUI freeze the first time the user
+  picked the Leia engine. The SOFA file load + FFT plan build +
+  noise probe calibration ran inside the audio mutex; it now
+  runs outside the lock so audio keeps flowing through the
+  Classic fallback while Leia initialises.
+* Fixed: the audio thread holding m_mutex through fetchSamples
+  at idle. Both audio paths now bail lock-free when no slot is
+  playing, so the GUI sees the mutex completely uncontended
+  with nothing happening.
+
+---------------------------------------------------------------------
+SPATIAL AUDIO
+---------------------------------------------------------------------
+* Fixed: residual frying buzz on the Leia engine with complex
+  (broadband, high-peak) material like full songs. Three causes
+  addressed together:
+  - HRIR lookups widened from 0.5 deg to 3 deg deadband (well
+    above the SOFA grid) so the audio thread no longer pays a
+    full IR-FFT per block under rotation.
+  - The live HRIR is now smoothed toward the latest lookup at
+    a much slower rate (~270 ms to 95% vs the previous 27 ms).
+    Each block's IR differs from the previous by a tiny amount
+    so the OLA overlap adds nearly-coherently with the new
+    convolution - the per-block click train that summed to a
+    ~187 Hz tone is now well below the audible floor.
+  - The post-Leia limiter no longer pumps on every rotational
+    peak. Its ceiling was raised to 1.4 (SlotDsp's outer soft
+    limiter at 1.0 still catches real overshoots), so the
+    rotation-rate amplitude modulation that read as frying on
+    complex material is gone.
+* Fixed: rotating Leia sources also showed a finer "buzz" from
+  the early-reflections engine. ShoeboxRoom now uses a per-
+  sample fractional delay-line read that lerps the delay from
+  the previous block to the new one across the block, instead
+  of jumping the read offset stepwise every block (which was a
+  zipper noise riding the reflection signal at block rate).
+* Fixed: the Classic parametric 8D engine became significantly
+  quieter after the v2.2.4 "boombox bass bump" fix. Rotating
+  modes (3D Rotate, 8D preset) now use a wider-than-unity
+  width compensation curve (1.4 at width 0 tapering to 1.0 at
+  >=90 deg) - actually louder than the original pre-fix
+  loudness, without the bass bump returning. 3D Manual keeps
+  the original 0.5..1.0 curve since the bass bump only
+  appeared on static, narrow-width sources.
+
+---------------------------------------------------------------------
+PERSISTENCE
+---------------------------------------------------------------------
+* Reworked: ini saves are now event-triggered rather than
+  running on a background timer. The model is marked dirty
+  on each setter call and the disk write fires from concrete
+  user events:
+  - Start of playback (sound, hotkey, preview)
+  - Closing the soundboard window (Mainpage or legacy)
+  - Hiding the soundboard window (TS3 tab switch)
+  - Switching between the 4 soundboard profiles
+  - Server disconnect
+  - Plugin shutdown (TeamSpeak quit, plugin unload)
+* Closing the soundboard window without quitting TS3 does NOT
+  reset state - it flushes the in-memory model so the next
+  open finds the most recent settings.
+* The previous 250 ms auto-debouncer was itself a recurring
+  lag source on slider drags (one disk write a few hundred
+  milliseconds after every drag). The new policy issues at
+  most one write per concrete user event.
+* The model's destructor and an explicit "specific path"
+  branch ensure no save is silently dropped on plugin teardown.
+
+---------------------------------------------------------------------
+SANDBOX
+---------------------------------------------------------------------
+* New: the audio sandbox now remembers the chosen movement
+  engine (Classic / Leia) across sessions. Picking an engine
+  in any channel's sandbox dialog persists the choice to a
+  global QSettings key; freshly-added channels default to that
+  engine instead of falling back to Classic. Per-channel
+  persistence (when enabled in Settings) still overrides this
+  on restore for that specific channel.
+
+---------------------------------------------------------------------
+METER
+---------------------------------------------------------------------
+* Fixed: the peak-hold marker on the channel meter no longer
+  freezes mid-fall when a sound stops. The v2.2.5 silent-slot
+  optimisation drained the meter exactly once on the falling
+  edge instead of letting the marker animate back to floor.
+  The 25 Hz meter timer now pumps every tick; the meter's own
+  change-detect kills paints once the marker reaches rest.
+
+=====================================================================
 GameBaiters Soundboard v2.2.5
 =============================
 

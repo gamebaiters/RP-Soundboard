@@ -2,7 +2,7 @@
 #include "../SoundButton.h"
 #include "theme.h"
 #include "channel_meter.h"
-#include "channel_sandbox_dialog.h"
+#include "channel_sandbox_dialog.h"   // SandboxEnginePref
 #include "icon_factory.h"
 
 // Defined in SoundButton.cpp (not exposed via header).
@@ -67,6 +67,12 @@ Channel::Channel(int channelId, QWidget *parent)
     , m_removeBtn(new QPushButton(this))
     , m_titleEdit(new QLineEdit(this))
 {
+    // Seed the per-channel sandbox state with the user's most recently
+    // chosen engine (Classic / Leia). Per-channel persistence, when the
+    // user has it enabled, overrides this on restore via applyState();
+    // without persistence this is what survives sessions.
+    m_sandbox.spatialEngine = SandboxEnginePref::load();
+
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
     setAcceptDrops(true);
 

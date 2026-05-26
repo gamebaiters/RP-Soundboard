@@ -182,6 +182,11 @@ int sb_playFile(const SoundInfo &sound)
 {
 	if (activeServerId == 0)
 		return 2;
+	// Persist any pending model changes (volume, pitch, theme...)
+	// before starting playback. The save model is event-triggered now:
+	// every "user does something concrete" hook flushes the dirty
+	// model, so users don't have to wait for an automatic timer.
+	ConfigModel::flushPendingWrite();
 	return sampler->playFile(sound) ? 0 : 1;
 }
 
@@ -317,12 +322,20 @@ CAPI void sb_init()
 
 CAPI void sb_saveConfig()
 {
-	configModel->writeConfig();
+	// Public save entry: bypass the debouncer so the caller gets an
+	// on-disk file before this returns.
+	configModel->writeConfigImmediate();
 }
 
 
 CAPI void sb_kill()
 {
+	// Flush any debounced config write so the last slider position the
+	// user set in the seconds before quit is persisted. writeConfig()
+	// schedules on a 250 ms timer; without this flush, fast-close TS3
+	// drops anything still pending in that window.
+	ConfigModel::flushPendingWrite();
+
 	// Tear down the TalkStateManager active server FIRST so the watchdog
 	// timer stops and any in-flight queued setTalkTransMode calls skip
 	// their ts3Functions invocations. By the time TS3 calls
@@ -383,7 +396,10 @@ CAPI void sb_kill()
 
 	if (configModel)
 	{
-		configModel->writeConfig();
+		// flushPendingWrite() at the top of sb_kill already drained the
+		// debouncer; bypass it here as a belt-and-braces final save so
+		// the on-disk state matches the in-memory model before deletion.
+		configModel->writeConfigImmediate();
 		delete configModel;
 		configModel = NULL;
 	}
@@ -596,6 +612,10 @@ CAPI void sb_onConnectStatusChange(uint64 serverConnectionHandlerID, int newStat
 	{
 		if (newStatus == STATUS_DISCONNECTED)
 		{
+			// Persist any dirty model state before the disconnect path
+			// runs (event-triggered save policy).
+			ConfigModel::flushPendingWrite();
+
 			// Invalidate the talk state BEFORE stopping playback. The
 			// stop emits queued onStopPlaying signals; without the
 			// invalidation those would run setTalkTransMode -> ts3Functions

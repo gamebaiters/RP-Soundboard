@@ -42,8 +42,10 @@
 #include <QTimer>
 #include <QCheckBox>
 #include <QHash>
+#include <QVector>
 #include <QDateTime>
 #include <cmath>
+#include <memory>
 
 namespace {
 
@@ -1246,17 +1248,39 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         model->addObserver(s_observer);
     }
 
-    // 60 Hz playback position poll for waveform overlay + time labels.
-    // 20 Hz produced stair-step jumps on short audios where ~50 ms of
-    // play translated to several pixels of cursor motion; 60 Hz matches
-    // typical display refresh and feels smooth without measurable cost.
+    // ~30 Hz playback position poll for waveform overlay + time labels.
+    // Lower than the old 60 Hz: at 60 Hz, the loop took 2 mutex-bearing
+    // getPosition / getLength calls + a forced widget update PER channel
+    // PER tick. With N idle channels that was 120N locks/sec + 60N
+    // queued paint events fighting scroll repaints on the GUI thread -
+    // a measurable system-wide lag (worse with the Leia engine, which
+    // also holds m_mutex inside the audio block). 30 Hz still feels
+    // smooth for the cursor and halves the GUI thread workload.
+    //
+    // Silent slots are skipped via the lock-free getState() atomic;
+    // clearPlayback() is only emitted on the playing -> silent edge,
+    // so an idle channel costs one atomic load per tick. Active slots
+    // keep the original mutex-bearing pos/length read.
     if (sampler) {
+        auto wasActive = std::make_shared<QVector<bool>>();
         auto *posTimer = new QTimer(page);
-        posTimer->setInterval(16);
-        QObject::connect(posTimer, &QTimer::timeout, page, [page, sampler]{
-            for (int i = 0; i < page->channels().size(); ++i) {
+        posTimer->setInterval(33);
+        QObject::connect(posTimer, &QTimer::timeout, page, [page, sampler, wasActive]{
+            const int n = page->channels().size();
+            if (wasActive->size() < n) wasActive->resize(n);
+            for (int i = 0; i < n; ++i) {
+                Sampler::state_e st = sampler->getState(i);
+                if (st == Sampler::ePLAYING_PREVIEW) continue;
+                bool active = (st == Sampler::ePLAYING || st == Sampler::ePAUSED);
                 auto *ch = page->channels().at(i);
-                if (sampler->getState(i) == Sampler::ePLAYING_PREVIEW) continue;
+                if (!active) {
+                    if ((*wasActive)[i]) {
+                        ch->waveform()->clearPlayback();
+                        (*wasActive)[i] = false;
+                    }
+                    continue;
+                }
+                (*wasActive)[i] = true;
                 double pos = sampler->getPosition(i);
                 double len = sampler->getLength(i);
                 if (len > 0.0) {
@@ -1264,6 +1288,7 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                     ch->waveform()->setPosition(pos, len);
                 } else {
                     ch->waveform()->clearPlayback();
+                    (*wasActive)[i] = false;
                 }
             }
         });
@@ -1437,15 +1462,26 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     // the checkbox after a TS3 restart".
 
     // 25 Hz meter poll: read atomic peak L/R from each slot, push to
-    // its channel's ChannelMeter widget.
+    // its channel's ChannelMeter widget. ChannelMeter::setPeak handles
+    // its own change-detect, so idle channels (peak == hold == 0) cost
+    // a setPeak comparison but skip the actual paint. Pumping every
+    // tick is required for the peak-hold marker animation to decay
+    // back to floor after a sound stops - the earlier single-drain
+    // pattern froze the marker mid-decay once playback ended.
     if (sampler) {
         auto *meterTimer = new QTimer(page);
         meterTimer->setInterval(40);
         QObject::connect(meterTimer, &QTimer::timeout, page, [page, sampler, model](){
             if (!model->getAudioMeterVisible()) return;
-            for (int i = 0; i < page->channels().size(); ++i) {
+            const int n = page->channels().size();
+            for (int i = 0; i < n; ++i) {
+                Sampler::state_e st = sampler->getState(i);
+                bool active = (st == Sampler::ePLAYING || st == Sampler::ePAUSED);
                 float l = 0.0f, r = 0.0f;
-                sampler->getSlotPeak(i, l, r);
+                if (active) sampler->getSlotPeak(i, l, r);
+                // Silent slots pass through (0, 0). setPeak's hold path
+                // keeps decaying multiplicatively until it reaches the
+                // floor, then change-detect kills the paint events.
                 page->channels().at(i)->setMeterPeak(l, r);
             }
         });

@@ -59,9 +59,28 @@ public:
 
 public:
 	ConfigModel();
+	// Clears the static dirty-state pointer if it still references this
+	// instance, so a stale flushPendingWrite() after delete cannot reach
+	// freed memory. Plugin teardown order is the obvious caller but the
+	// guard also covers any future hot-reload / re-init path.
+	~ConfigModel();
 
 	void readConfig(const QString &file = QString());
+    // Default-path saves are now event-triggered: writeConfig() only
+    // marks the model dirty; actual disk I/O fires from event hooks
+    // (play start, soundboard window close, server disconnect, plugin
+    // shutdown). This avoids the lag-per-slider-tick the old auto-save
+    // produced. Specific-path saves still write immediately.
     void writeConfig(const QString &file = QString());
+    // Synchronous full-file write. Used by flushPendingWrite() and by
+    // callers that need predictable on-disk state (config_io export /
+    // import paths, explicit "save" menu).
+    void writeConfigImmediate(const QString &file = QString());
+    // Persist the default-path ini now if any setter has marked it
+    // dirty since the last write. Cheap no-op when clean. Call from
+    // play-start, dialog close, server disconnect, plugin shutdown.
+    static void flushPendingWrite();
+    static bool hasPendingWrite();
 
 	void notifyAllEvents();
 	

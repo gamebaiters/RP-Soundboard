@@ -73,7 +73,8 @@ private:
 
     struct ReflectionTap {
         RingBuffer buffer;
-        int   delaySamples  = 0;
+        float delaySamples  = 0.0f;   // target delay, recomputed per block
+        float prevDelaySamples = -1.0f;  // previous block's delay; <0 = first use
         float gain          = 1.0f;
         float azimuthDeg    = 0.0f;
         float elevationDeg  = 0.0f;
@@ -84,6 +85,9 @@ private:
     std::vector<float> m_monoScratch;
     std::vector<float> m_leftScratch;
     std::vector<float> m_rightScratch;
+    // Per-frame fractional delay ramp fed to RingBuffer::readFractional.
+    // Sized to blockSize at init.
+    std::vector<float> m_delayRamp;
 
     // ---- Room presets -------------------------------------------------------
     struct RoomPreset {

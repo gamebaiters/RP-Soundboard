@@ -43,6 +43,19 @@ public:
     void reset();
     void applyState(const SandboxState &s);
 
+    // GUI-thread-only Leia bring-up. Calls SpatialLeia::ensureInit on
+    // both playback + capture paths. The first call hits disk (SOFA
+    // load), builds the FFT plan, and runs a noise probe for the
+    // makeup-gain calibration - typically ~1 second the FIRST time
+    // the user picks Leia. After that it is a cached early-return.
+    //
+    // It must be called OUTSIDE the Sampler's audio mutex - the heavy
+    // work used to run inside applyState() while m_mutex was held, so
+    // engine swap froze both the audio callback and the GUI thread for
+    // the whole init duration. Doing it here first means applyState's
+    // own ensureInit call inside hot DSP setup degenerates to a no-op.
+    void prepareLeia(double fs);
+
     bool isActive() const { return m_active; }
     const SandboxState &state() const { return m_state; }
 

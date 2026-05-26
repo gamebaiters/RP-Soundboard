@@ -240,6 +240,11 @@ void ConfigQt::onLoadModel()
 void ConfigQt::closeEvent(QCloseEvent *)
 {
 	m_model->setWindowSize(size().width(), size().height());
+	// Event-triggered save: closing the soundboard window flushes any
+	// dirty model state, so the user's volume / theme / sandbox state
+	// persists even when they only close the window without quitting
+	// TS3 (the user explicitly asked the window-close path to save).
+	ConfigModel::flushPendingWrite();
 }
 
 //---------------------------------------------------------------

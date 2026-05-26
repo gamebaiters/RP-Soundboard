@@ -18,9 +18,67 @@
 #include "plugin.h"
 
 
+// Event-triggered save policy.
+//
+// The original setters called writeConfig() on every change, including
+// every slider valueChanged tick - that meant a synchronous full-ini
+// write (~50 keys + every sound's metadata) per pixel of slider movement
+// and was the dominant source of the GUI lag the user kept reporting.
+// A 250 ms debouncer reduced the symptom but still issued a fresh write
+// shortly after every drag.
+//
+// The setting now uses an explicit dirty-flag model: writeConfig() with
+// the default path only marks the model dirty; the actual file write is
+// triggered from concrete user-facing events that already imply "the
+// user is pausing or leaving" - playback start, soundboard window close,
+// server disconnect, plugin shutdown. Closing the soundboard window
+// without quitting TS3 also flushes, so state is never lost there.
+//
+// Specific-path writes (export, import, "save as", explicit save menu)
+// still go through writeConfigImmediate for predictable semantics.
+namespace {
+struct DirtyState {
+    ConfigModel *model = nullptr;
+    bool         dirty = false;
+};
+DirtyState &dirtyState() { static DirtyState s; return s; }
+} // namespace
+
+void ConfigModel::flushPendingWrite()
+{
+    auto &s = dirtyState();
+    if (s.dirty && s.model) {
+        s.model->writeConfigImmediate(QString());
+        s.dirty = false;
+    }
+}
+
+bool ConfigModel::hasPendingWrite()
+{
+    return dirtyState().dirty;
+}
+
+
+
+ConfigModel::~ConfigModel()
+{
+	auto &s = dirtyState();
+	if (s.model == this) {
+		// One last best-effort flush: if a setter has marked the model
+		// dirty after the last event-hook flush (e.g. between sb_kill's
+		// flushPendingWrite call and the model-delete site), persist
+		// the latest state before the static pointer is invalidated.
+		if (s.dirty) {
+			writeConfigImmediate(QString());
+		}
+		s.model = nullptr;
+		s.dirty = false;
+	}
+}
+
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 ConfigModel::ConfigModel()
 {
@@ -165,11 +223,32 @@ void ConfigModel::readConfig(const QString &file)
 //---------------------------------------------------------------
 void ConfigModel::writeConfig(const QString &file)
 {
+    // Default-path saves: just mark dirty - real disk write fires from
+    // event hooks (play, dialog close, disconnect, shutdown). Avoids
+    // the per-slider-tick lag the old auto-write produced.
+    if (file.isEmpty()) {
+        auto &s = dirtyState();
+        s.model = this;
+        s.dirty = true;
+        return;
+    }
+    // Caller asked for a specific path (export, import, snapshot) - write
+    // immediately so the saved file matches the caller's expectation.
+    writeConfigImmediate(file);
+}
+
+void ConfigModel::writeConfigImmediate(const QString &file)
+{
     QString path;
-    if (file.isEmpty())
+    if (file.isEmpty()) {
         path = GetFullConfigPath();
-    else
+        // We just persisted the default-path ini - clear any pending
+        // dirty flag so the next flushPendingWrite is a no-op until a
+        // setter marks the model dirty again.
+        dirtyState().dirty = false;
+    } else {
         path = file;
+    }
 
     QSettings settings(path, QSettings::IniFormat);
 
@@ -266,6 +345,11 @@ void ConfigModel::writeConfiguration(QSettings & settings, const QString &name, 
 
 void ConfigModel::setConfiguration(int config)
 {
+	// Profile switch = "user is leaving this profile's edit context".
+	// Flush any pending dirty changes from the outgoing profile before
+	// activating the new one so we never silently drop them if the user
+	// crashes / quits TS3 from inside the new profile.
+	flushPendingWrite();
 	m_activeConfig = config;
 
     /* Tell observers that our data changed */

@@ -77,6 +77,10 @@ signals:
 
 protected:
     void resizeEvent(class QResizeEvent *e) override;
+    // Window close = "user is putting the soundboard away". Persist
+    // any dirty model state so the next open finds the latest settings.
+    void closeEvent(class QCloseEvent *e) override;
+    void hideEvent (class QHideEvent  *e) override;
 
 private:
     SearchBar          *m_search;

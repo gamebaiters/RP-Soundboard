@@ -63,8 +63,18 @@ private:
 
     std::vector<float> m_irLeft;         // current left  HRIR (time, filterLength)
     std::vector<float> m_irRight;        // current right HRIR (time, filterLength)
-    std::vector<float> m_irLeftFreq;     // left  HRIR in freq domain  (fftSize+2)
+    std::vector<float> m_irLeftFreq;     // left  HRIR in freq domain  (fftSize+2)  - SMOOTHED, used by convolution
     std::vector<float> m_irRightFreq;    // right HRIR in freq domain  (fftSize+2)
+    // Target IRs - written by lookupHRIR, lerped toward by process()
+    // each block to eliminate the per-block-boundary transients that
+    // produced an audible frying buzz when 8D rotation crossed SOFA
+    // grid cells (or any other rapid direction change on complex
+    // material). With this smoothing the convolution IR evolves
+    // gradually over ~5-10 blocks, so each block's convolution result
+    // is nearly continuous with the previous one.
+    std::vector<float> m_irLeftFreqTarget;
+    std::vector<float> m_irRightFreqTarget;
+    bool               m_irTargetValid = false;
 
     std::vector<float> m_convLeft;       // left  conv result (freq)   (fftSize+2)
     std::vector<float> m_convRight;      // right conv result (freq)   (fftSize+2)

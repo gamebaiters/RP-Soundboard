@@ -242,6 +242,11 @@ void SoundView::setSound( const SoundInfo &sound )
 //---------------------------------------------------------------
 void SoundView::setPlaybackPosition(double fraction)
 {
+	// Change-detect: the position poll fires at ~30 Hz for every active
+	// slot; on widgets whose width is small (~200 px) two consecutive
+	// fractions land on the same cursor pixel, so an unconditional
+	// update() forwarded a redundant paint event ~half the time.
+	if (m_playbackPosition == fraction) return;
 	m_playbackPosition = fraction;
 	update();
 }
@@ -252,6 +257,12 @@ void SoundView::setPlaybackPosition(double fraction)
 //---------------------------------------------------------------
 void SoundView::clearPlayback()
 {
+	// Fast path when the view is already cleared - the position poll
+	// used to call this every tick on every silent channel, which
+	// queued a forced update() per idle row and stalled scroll repaints.
+	if (!m_active && m_playbackPosition < 0.0 && m_drawnBins == 0
+		&& m_cropStart == 0.0 && m_cropEnd < 0.0 && m_totalLength == 0.0)
+		return;
 	m_active = false;
 	m_playbackPosition = -1.0;
 	m_drawnBins = 0;

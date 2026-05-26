@@ -203,6 +203,15 @@ void SlotDsp::feedStretchShort(const short *interleaved, int frames, bool isCapt
     s.ps.setWindowMs(m_state.stretchWindowMs);
 }
 
+void SlotDsp::prepareLeia(double fs) {
+    if (fs <= 0.0) fs = m_fs > 0.0 ? m_fs : 48000.0;
+    // ensureInit is idempotent after the first successful call (atomic
+    // ready flag short-circuits). The two-path init runs only the FIRST
+    // time Leia is selected; subsequent calls are a few atomic loads.
+    m_play.leia.ensureInit(fs);
+    m_cap.leia.ensureInit(fs);
+}
+
 void SlotDsp::applyState(const SandboxState &s) {
     int oldMode = m_state.spatialMode;
     int oldEngine = m_state.spatialEngine;
@@ -425,14 +434,35 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
                     p.posL.process(l, ll, lr);
                     p.posR.process(r, rl, rr);
                     float wetL = ll + rl, wetR = lr + rr;
-                    // Each ear re-sums both virtual speakers. When the
-                    // speakers coincide (narrow width - e.g. the width-0
-                    // 8D preset) that doubles mono/bass content, the
-                    // "boombox" bass bump the user heard. Halve the sum
-                    // at zero width and ease back to unity as the
-                    // speakers spread past 90 deg.
-                    float wScale = 0.5f + 0.5f * std::min(1.0f,
-                        m_state.stereoWidthDeg / 90.0f);
+                    // Width-dependent dual-speaker sum normalisation.
+                    //
+                    // In 3DManual the two virtual speakers are stationary,
+                    // so when they sit at the same point (width 0) summing
+                    // both ears doubles mono content - the "boombox" bass
+                    // bump fix shipped earlier. In Spatial_3DRotate /
+                    // Spatial_8DPreset the speakers orbit the head, so the
+                    // perceived loudness comes from the rotation envelope,
+                    // not from speaker separation. The user reported the
+                    // 8D effect (rotateRpm + width 0) felt anaemic after
+                    // the earlier fix; halving the rotating sum was the
+                    // reason. Keep the narrow-width attenuation on the
+                    // static modes only; rotating modes get full strength
+                    // with a small overdrive guard (1.4x at width 0,
+                    // tapering to unity at >=90 deg) to actually exceed
+                    // the original pre-fix loudness without the bass bump
+                    // returning (rotation modulates spectrum away from
+                    // sustained mono LF content, so the doubling fix is
+                    // not needed there).
+                    bool rotating = (m_state.spatialMode == SandboxState::Spatial_3DRotate ||
+                                      m_state.spatialMode == SandboxState::Spatial_8DPreset);
+                    float wScale;
+                    if (rotating) {
+                        float spread = std::min(1.0f, m_state.stereoWidthDeg / 90.0f);
+                        wScale = 1.4f - 0.4f * spread;  // 1.4 .. 1.0
+                    } else {
+                        wScale = 0.5f + 0.5f * std::min(1.0f,
+                            m_state.stereoWidthDeg / 90.0f);
+                    }
                     wetL *= wScale; wetR *= wScale;
                     float w = m_state.spatialMix;
                     if (w < 0.0f) w = 0.0f; else if (w > 1.0f) w = 1.0f;

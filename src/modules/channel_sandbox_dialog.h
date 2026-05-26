@@ -16,6 +16,15 @@ class QLineEdit;
 class PositionalPad;
 class ExpandableSection;
 
+// Cross-channel persistence of the user's preferred sandbox engine
+// (Classic / Leia). Written from the sandbox dialog's engine combo and
+// read from Channel ctor so a freshly-added channel defaults to the
+// engine the user picked most recently rather than always to Classic.
+namespace SandboxEnginePref {
+    int load();           // returns SandboxState::Engine_* (defaults to Classic)
+    void save(int engine);
+}
+
 // Per-channel "Audio Sandbox" dialog. Hosts every DSP knob the user can
 // tweak for one slot: Spatial (Off / L-R Pan / 3D HRTF / Rotate /
 // 8D preset), Paulstretch, 16-band ISO EQ. Master volume, playback

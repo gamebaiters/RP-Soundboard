@@ -528,7 +528,30 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 				posSec = decoderPos - bufferedSec;
 				if (posSec < 0.0) posSec = 0.0;
 			}
-			slot.cachedPositionSec.store(posSec, std::memory_order_relaxed);
+			// Rate-limit + monotonic guard. Live speed / pitch changes
+			// recompute bufferedSec with the new sf against the buffer
+			// content produced at the OLD sf, so the raw position can
+			// jump backward (cursor "bounce") or jump forward by several
+			// seconds when the user drags a slider. We keep the cursor
+			// monotonic and cap the per-cycle forward advance at a
+			// value comfortably above real playback rate at the highest
+			// supported speed (3x) so normal play is never throttled.
+			{
+				double prev = slot.cachedPositionSec.load(std::memory_order_relaxed);
+				double accepted = posSec;
+				if (slot.posCacheValid) {
+					if (accepted < prev) {
+						accepted = prev;
+					} else {
+						constexpr double kMaxFwdPerCycle = 0.20;
+						if (accepted > prev + kMaxFwdPerCycle)
+							accepted = prev + kMaxFwdPerCycle;
+					}
+				} else {
+					slot.posCacheValid = true;
+				}
+				slot.cachedPositionSec.store(accepted, std::memory_order_relaxed);
+			}
 			slot.cachedLengthSec.store(lenSec, std::memory_order_relaxed);
 		}
 
@@ -558,6 +581,12 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 					}
 					if (slot.dsp) slot.dsp->reset();
 					slot.stretchBaseTime = 0.0;
+					// Loop restart: drop the rate-limiter anchor + snap
+					// the cache to cropStart so the cursor jumps back to
+					// the loop point instead of being held forward by
+					// the monotonic guard.
+					slot.cachedPositionSec.store(slot.cropStart, std::memory_order_relaxed);
+					slot.posCacheValid = false;
 				} else {
 					slot.state = eSILENT;
 					slot.peakL.store(0.0f);
@@ -932,6 +961,12 @@ void Sampler::stopSlotInternal(int slot)
 		s.peakL.store(0.0f);
 		s.peakR.store(0.0f);
 
+		// Stop also resets the rate-limiter anchor so the next play
+		// starts the cursor from a clean state.
+		s.cachedPositionSec.store(0.0, std::memory_order_relaxed);
+		s.cachedLengthSec.store(0.0, std::memory_order_relaxed);
+		s.posCacheValid = false;
+
 		emit onStopPlaying(slot);
 	}
 }
@@ -1035,6 +1070,10 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &sound, bool preview)
 	// a previous slot owner.
 	s.cachedPositionSec.store(s.cropStart, std::memory_order_relaxed);
 	s.cachedLengthSec.store(s.inputFile->getLength(), std::memory_order_relaxed);
+	// Fresh playback: invalidate the rate-limiter anchor so the first
+	// audio-thread cache refresh snaps to the actual decoder position
+	// instead of being clamped against a stale previous-playback value.
+	s.posCacheValid = false;
 	s.slotDbLocal = m_globalDbSettingLocal;
 	s.slotDbRemote = m_globalDbSettingRemote;
 	double localDb = m_multiMode ? s.slotDbLocal : m_globalDbSettingLocal;
@@ -1227,6 +1266,11 @@ void Sampler::seek(double seconds, int slot)
 
 			if (s.dsp) s.dsp->reset();
 			s.stretchBaseTime = seconds;
+			// Explicit seek: snap cache to target + invalidate anchor
+			// so the rate-limiter does not reject the user-requested
+			// backward jump.
+			s.cachedPositionSec.store(seconds, std::memory_order_relaxed);
+			s.posCacheValid = false;
 		}
 	}
 }

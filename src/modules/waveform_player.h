@@ -81,4 +81,10 @@ private:
     bool         m_paused;
     bool         m_looping;
     QString      m_fullPath;   // unstripped path, returned by filename()
+    // Mirror of the crop range so setPosition() can render the time
+    // label in crop-relative form ("X / cropDur") instead of full-file
+    // form when a trim is active - matches what the cursor visually
+    // expresses now that everything ends at cropEnd consistently.
+    double       m_cropStart = 0.0;
+    double       m_cropEnd   = -1.0;
 };

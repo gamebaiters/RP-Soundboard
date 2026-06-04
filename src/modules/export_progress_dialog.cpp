@@ -4,13 +4,114 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QProgressBar>
 #include <QPushButton>
 #include <QFrame>
 #include <QFileInfo>
 #include <QFont>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPaintEvent>
 #include <QCloseEvent>
 #include <QKeyEvent>
+#include <QTimer>
+#include <QElapsedTimer>
+
+#include <algorithm>
+
+// Custom-painted progress bar. The previous implementation used a
+// QProgressBar styled via QSS; on the Windows native style the chunk
+// fill repaints were unreliable - sometimes the bar stuck at 0%, the
+// chunk-painted rect leaked outside the rounded background, or the
+// terminal "100% green / red" never showed. Painting it ourselves
+// (rounded background, single rounded fill clipped to width * target)
+// removes the QSS round-trip entirely and the bar is always correct.
+// Animation: a 60 Hz QTimer easing m_drawValue toward m_targetValue
+// gives smooth motion without requiring Q_OBJECT on the bar itself.
+namespace {
+
+class ExportBar : public QWidget {
+public:
+    explicit ExportBar(QWidget *parent = nullptr) : QWidget(parent) {
+        setMinimumHeight(14);
+        setMaximumHeight(14);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+
+        m_anim = new QTimer(this);
+        m_anim->setInterval(16);    // 60 Hz
+        QObject::connect(m_anim, &QTimer::timeout, this, [this]{ tick(); });
+    }
+
+    void setTarget(qreal v) {
+        v = std::max(0.0, std::min(1.0, v));
+        if (qFuzzyCompare(m_target, v)) return;
+        m_target = v;
+        if (!m_anim->isActive()) m_anim->start();
+    }
+
+    // Snap the bar to a value immediately (no animation). Used for the
+    // terminal success/failure state so the bar lands at exactly 100%.
+    void snapTo(qreal v) {
+        v = std::max(0.0, std::min(1.0, v));
+        m_target = v;
+        m_drawn  = v;
+        m_anim->stop();
+        update();
+    }
+
+    void setFillColor(const QColor &c)   { m_fill = c;   update(); }
+    void setTrackColor(const QColor &c)  { m_track = c;  update(); }
+    void setBorderColor(const QColor &c) { m_border = c; update(); }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+
+        const qreal r = height() / 2.0;
+        const QRectF full(0.5, 0.5, width() - 1.0, height() - 1.0);
+
+        QPainterPath base;
+        base.addRoundedRect(full, r, r);
+
+        p.fillPath(base, m_track);
+        p.setPen(QPen(m_border, 1.0));
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(base);
+
+        if (m_drawn > 0.0) {
+            p.save();
+            p.setClipPath(base);
+            const qreal fillW = full.width() * m_drawn;
+            QRectF fillRect(full.left(), full.top(), fillW, full.height());
+            p.setPen(Qt::NoPen);
+            p.setBrush(m_fill);
+            p.drawRect(fillRect);
+            p.restore();
+        }
+    }
+
+private:
+    void tick() {
+        constexpr qreal kSlew = 0.18;  // ~5 frames to 95% (~80 ms)
+        const qreal diff = m_target - m_drawn;
+        if (std::abs(diff) < 1e-4) {
+            m_drawn = m_target;
+            m_anim->stop();
+        } else {
+            m_drawn += diff * kSlew;
+        }
+        update();
+    }
+
+    qreal   m_target = 0.0;
+    qreal   m_drawn  = 0.0;
+    QTimer *m_anim   = nullptr;
+    QColor  m_fill   = QColor(0x3f, 0xb0, 0xe0);
+    QColor  m_track  = QColor(40, 40, 50);
+    QColor  m_border = QColor(60, 60, 70);
+};
+
+} // namespace
 
 ExportProgressDialog::ExportProgressDialog(const QString &outputFile, QWidget *parent)
     : QDialog(parent)
@@ -20,16 +121,13 @@ ExportProgressDialog::ExportProgressDialog(const QString &outputFile, QWidget *p
     setProperty("isGBSoundboard", true);
     setModal(false);
     setAttribute(Qt::WA_DeleteOnClose, false);
-    // Frameless + drop shadow vibe so the dialog reads as a floating
-    // card rather than a stock OS window.
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
     setFixedSize(440, 220);
 
     m_card = new QFrame(this);
     m_card->setObjectName("exportCard");
 
-    // Header row: glyph + title.
-    m_icon = new QLabel(QString::fromUtf8("\xE2\x9F\xB3"), m_card); // ⟳ (rotating glyph)
+    m_icon = new QLabel(QString::fromUtf8("\xE2\x9F\xB3"), m_card);
     QFont iconFont = m_icon->font();
     iconFont.setPointSize(28);
     iconFont.setBold(true);
@@ -49,8 +147,6 @@ ExportProgressDialog::ExportProgressDialog(const QString &outputFile, QWidget *p
     headerRow->addWidget(m_icon, 0, Qt::AlignVCenter);
     headerRow->addWidget(m_title, 1, Qt::AlignVCenter);
 
-    // Filename row - elided in style sheet so long paths don't break
-    // the card layout.
     QFileInfo fi(m_outputFile);
     m_filename = new QLabel(fi.fileName(), m_card);
     m_filename->setToolTip(m_outputFile);
@@ -59,17 +155,8 @@ ExportProgressDialog::ExportProgressDialog(const QString &outputFile, QWidget *p
     m_filename->setFont(fnFont);
     m_filename->setStyleSheet("QLabel { color: rgba(255,255,255,0.65); }");
 
-    // Progress bar - flat, themed via Theme::derive accent. We force
-    // setFormat("") + setTextVisible(false) because some Windows
-    // styles still draw the percent label on top of a styled chunk
-    // and that leaks through as a phantom grey rectangle in the
-    // middle of the bar.
-    m_bar = new QProgressBar(m_card);
-    m_bar->setRange(0, 100);
-    m_bar->setValue(0);
-    m_bar->setTextVisible(false);
-    m_bar->setFormat(QString());
-    m_bar->setFixedHeight(12);
+    auto *bar = new ExportBar(m_card);
+    m_barWidget = bar;
 
     m_status = new QLabel(tr("Starting…"), m_card);
     m_status->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -77,7 +164,6 @@ ExportProgressDialog::ExportProgressDialog(const QString &outputFile, QWidget *p
     statusFont.setPointSize(9);
     m_status->setFont(statusFont);
 
-    // Action row.
     m_cancel = new QPushButton(tr("Cancel"), m_card);
     m_cancel->setFixedHeight(30);
     m_cancel->setMinimumWidth(96);
@@ -107,7 +193,7 @@ ExportProgressDialog::ExportProgressDialog(const QString &outputFile, QWidget *p
     cardLay->setSpacing(12);
     cardLay->addLayout(headerRow);
     cardLay->addWidget(m_filename);
-    cardLay->addWidget(m_bar);
+    cardLay->addWidget(bar);
     cardLay->addWidget(m_status);
     cardLay->addStretch(1);
     cardLay->addLayout(btnRow);
@@ -140,12 +226,11 @@ void ExportProgressDialog::applyTheme() {
         .arg(d.borderStrong.name()));
     m_icon->setStyleSheet(QString("QLabel { color: %1; }").arg(accent));
 
-    m_bar->setStyleSheet(QString(
-        "QProgressBar { background-color: %1; border: 1px solid %2;"
-        " border-radius: 6px; text-align: center; color: transparent; }"
-        "QProgressBar::chunk { background-color: %3; border-radius: 5px;"
-        " margin: 0px; }")
-        .arg(surfaceAlt, border, accent));
+    if (auto *bar = static_cast<ExportBar*>(m_barWidget)) {
+        bar->setFillColor(d.accent);
+        bar->setTrackColor(d.surfaceAlt);
+        bar->setBorderColor(d.borderStrong);
+    }
 
     const QString btnQss = QString(
         "QPushButton { background-color: %1; color: %2;"
@@ -160,9 +245,9 @@ void ExportProgressDialog::applyTheme() {
 
 void ExportProgressDialog::setProgress(int percent) {
     if (m_finished) return;
-    if (percent < 0) percent = 0;
-    if (percent > 100) percent = 100;
-    m_bar->setValue(percent);
+    percent = std::max(0, std::min(100, percent));
+    if (auto *bar = static_cast<ExportBar*>(m_barWidget))
+        bar->setTarget(percent / 100.0);
     m_status->setText(tr("Encoding… %1%").arg(percent));
 }
 
@@ -173,36 +258,25 @@ void ExportProgressDialog::setFinished(bool ok, const QString &error) {
     m_dismiss->setDefault(true);
     m_dismiss->setFocus();
 
-    Theme::Derived d = Theme::derive(Theme::colors());
-    const QString okColor   = "#4caf50";   // green
-    const QString failColor = "#e04141";   // red
-    const QString accent    = ok ? okColor : failColor;
+    const QColor okColor(0x4c, 0xaf, 0x50);
+    const QColor failColor(0xe0, 0x41, 0x41);
+    const QColor accent = ok ? okColor : failColor;
 
     if (ok) {
-        m_icon->setText(QString::fromUtf8("\xE2\x9C\x93"));   // ✓
+        m_icon->setText(QString::fromUtf8("\xE2\x9C\x93"));
         m_title->setText(tr("Export completed"));
         m_status->setText(tr("Saved to %1").arg(m_outputFile));
         m_dismiss->setText(tr("OK"));
     } else {
-        m_icon->setText(QString::fromUtf8("\xE2\x9C\x95"));   // ✕
+        m_icon->setText(QString::fromUtf8("\xE2\x9C\x95"));
         m_title->setText(tr("Export failed"));
         m_status->setText(error.isEmpty() ? tr("Unknown error") : error);
         m_dismiss->setText(tr("Close"));
     }
 
-    m_icon->setStyleSheet(QString("QLabel { color: %1; }").arg(accent));
-    // Apply new stylesheet BEFORE the value flip so the chunk paints
-    // with the final colour in one repaint and the bar ends fully
-    // filled (the previous code reset value=100 first, then the QSS
-    // change kicked a fresh layout pass that briefly redrew the
-    // chunk at the now-stale intermediate width).
-    m_bar->setStyleSheet(QString(
-        "QProgressBar { background-color: %1; border: 1px solid %2;"
-        " border-radius: 6px; text-align: center; color: transparent; }"
-        "QProgressBar::chunk { background-color: %3; border-radius: 5px;"
-        " margin: 0px; }")
-        .arg(d.surfaceAlt.name(), d.borderStrong.name(), accent));
-    m_bar->setRange(0, 100);
-    m_bar->setValue(100);
-    m_bar->update();
+    m_icon->setStyleSheet(QString("QLabel { color: %1; }").arg(accent.name()));
+    if (auto *bar = static_cast<ExportBar*>(m_barWidget)) {
+        bar->setFillColor(accent);
+        bar->snapTo(1.0);
+    }
 }

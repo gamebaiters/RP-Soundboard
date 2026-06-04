@@ -62,7 +62,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ffmpeg-static
-          key: ffmpeg-static-msvc-x64-n6.1.1-v4-pcm
+          key: ffmpeg-static-msvc-x64-n6.1.1-v5-enc
 
       - name: Build static FFmpeg with MSVC toolchain
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -80,7 +80,9 @@ jobs:
               --disable-programs --disable-doc --disable-debug \
               --disable-everything \
               --enable-decoder=mp3,mp3float,aac,vorbis,opus,flac,pcm_s16le,pcm_s16be,pcm_u16le,pcm_u16be,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le,pcm_u8,pcm_alaw,pcm_mulaw,wmav2,wmapro,ac3,eac3 \
+              --enable-encoder=pcm_s16le,flac,vorbis,aac \
               --enable-demuxer=mp3,wav,ogg,flac,mov,matroska,avi,aac,asf,flv \
+              --enable-muxer=wav,flac,ogg,ipod,mp4 \
               --enable-protocol=file \
               --enable-parser=mpegaudio,vorbis,opus,flac,aac,ac3 \
               --enable-filter=aresample,aformat,aeval,anull,silenceremove,atempo,asetrate
@@ -134,7 +136,12 @@ jobs:
 
   # ---------------- LINUX x86_64 ----------------
   build-linux:
-    runs-on: ubuntu-22.04
+    # ubuntu-24.04 ships FFmpeg 6.1 in the system repos, which the
+    # multi-format export path needs (swr_alloc_set_opts2,
+    # av_channel_layout_default, AVFrame::ch_layout were added in
+    # 5.1). ubuntu-22.04 was on FFmpeg 4.4 and would not compile the
+    # new encoder bridge.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 

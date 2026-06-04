@@ -31,6 +31,8 @@ void WaveformPlayer::notifySeek() {
 }
 
 void WaveformPlayer::setCropRange(double startSeconds, double endSeconds) {
+    m_cropStart = startSeconds;
+    m_cropEnd   = endSeconds;
     m_wave->setCropRange(startSeconds, endSeconds);
 }
 
@@ -167,7 +169,27 @@ void WaveformPlayer::setFilename(const QString &name) {
 }
 
 void WaveformPlayer::setPosition(double seconds, double total) {
-    m_timeLabel->setText(fmtTime(seconds) + " / " + fmtTime(total));
+    // Express progress against the ACTIVE region. With a crop active
+    // the label reads "(seconds - cropStart) / (cropEnd - cropStart)"
+    // so it lines up with what the cursor shows and what the audio
+    // actually plays; with no crop it falls back to the full file
+    // length. Without this the user saw the elapsed seconds run past
+    // the visible end of the bar and the "total" number was the file
+    // length, not the played duration.
+    const bool cropActive = (m_cropStart > 0.0)
+                         || (m_cropEnd   > 0.0 && m_cropEnd < total);
+    double labelPos = seconds;
+    double labelTot = total;
+    if (cropActive && total > 0.0) {
+        const double start = (m_cropStart > 0.0) ? m_cropStart : 0.0;
+        const double end   = (m_cropEnd   > 0.0) ? m_cropEnd   : total;
+        labelPos = seconds - start;
+        if (labelPos < 0.0)    labelPos = 0.0;
+        labelTot = end - start;
+        if (labelTot < 0.0)    labelTot = 0.0;
+        if (labelPos > labelTot) labelPos = labelTot;
+    }
+    m_timeLabel->setText(fmtTime(labelPos) + " / " + fmtTime(labelTot));
     // Feed the real decoded duration to the waveform so crop-marker
     // fractions are computed against an accurate, per-channel length.
     m_wave->setTotalLength(total);

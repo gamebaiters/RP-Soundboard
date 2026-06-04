@@ -162,6 +162,8 @@ set(sources
 	src/modules/preset_manager.cpp
 	src/modules/audio_exporter.h
 	src/modules/audio_exporter.cpp
+	src/modules/audio_encoder_ffmpeg.h
+	src/modules/audio_encoder_ffmpeg.cpp
 	src/modules/export_progress_dialog.h
 	src/modules/export_progress_dialog.cpp
 	src/modules/pipeline_widget.h

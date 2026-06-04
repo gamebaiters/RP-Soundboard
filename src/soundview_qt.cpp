@@ -65,13 +65,39 @@ void SoundView::paintEvent(QPaintEvent *evt)
 	painter.setBrush(bgFill);
 	painter.drawRect(QRect(0, 0, width() - 1, height() - 1));
 
+	// Cursor / played-tint clamp range. Without this the cursor visually
+	// escapes past the start/end crop markers when speed or pitch is
+	// modified - the position fraction is computed against the full file
+	// length (so the cursor maps 0..fullLen onto 0..widget-width), but
+	// the crop overlay only allows the active region to be visible. The
+	// cursor must not paint outside [cropStart, cropEnd]. Compute once
+	// here and reuse for both the played-tint and the cursor line.
+	int cursorMinX = 0;
+	int cursorMaxX = width() - 1;
+	if (m_showCropMarkers && m_totalLength > 0.0)
+	{
+		const int w1 = width() - 1;
+		double clipStart = (m_cropStart > 0.0) ? m_cropStart : 0.0;
+		double clipEnd   = (m_cropEnd   > 0.0) ? m_cropEnd   : m_totalLength;
+		if (clipStart > m_totalLength) clipStart = m_totalLength;
+		if (clipEnd   > m_totalLength) clipEnd   = m_totalLength;
+		cursorMinX = int(clipStart / m_totalLength * w1);
+		cursorMaxX = int(clipEnd   / m_totalLength * w1);
+		if (cursorMinX < 0) cursorMinX = 0;
+		if (cursorMaxX > w1) cursorMaxX = w1;
+	}
+
 	// Draw played portion background
 	if (m_playbackPosition > 0.0 && m_playbackPosition <= 1.0)
 	{
 		int posX = (int)(m_playbackPosition * (width() - 1));
-		painter.setPen(Qt::NoPen);
-		painter.setBrush(playedTint);
-		painter.drawRect(1, 1, posX - 1, height() - 2);
+		if (posX > cursorMaxX) posX = cursorMaxX;
+		int x0 = std::max(1, cursorMinX);
+		if (posX > x0) {
+			painter.setPen(Qt::NoPen);
+			painter.setBrush(playedTint);
+			painter.drawRect(x0, 1, posX - x0, height() - 2);
+		}
 	}
 
 	// Draw waveform
@@ -145,6 +171,8 @@ void SoundView::paintEvent(QPaintEvent *evt)
 	if (m_playbackPosition >= 0.0 && m_playbackPosition <= 1.0)
 	{
 		int posX = (int)(m_playbackPosition * (width() - 1));
+		if (posX < cursorMinX) posX = cursorMinX;
+		if (posX > cursorMaxX) posX = cursorMaxX;
 		painter.setPen(QPen(QColor(255, 200, 0), 2));
 		painter.drawLine(posX, 0, posX, height() - 1);
 	}

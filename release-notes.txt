@@ -1,3 +1,78 @@
+GameBaiters Soundboard v2.2.7
+=============================
+
+Waveform-cursor coherency release on top of v2.2.6. Fixes a cluster of
+bugs around how the playback cursor, crop markers, time label, and
+end-of-playback interact when pitch / speed / loop are combined with a
+start/end trim. New: multi-format export (WAV / FLAC / OGG Vorbis /
+AAC-M4A). The export progress dialog was rewritten from scratch.
+
+---------------------------------------------------------------------
+WAVEFORM CURSOR & PLAYBACK COHERENCY
+---------------------------------------------------------------------
+* Fixed: cursor visually escaped the start/end crop markers when
+  pitch or speed was modified. The cursor's pixel position is
+  computed against the full file length; with a crop active the
+  marker overlay covers the trimmed edges, but the cursor line
+  itself was drawn unclipped, so it tracked past the visible end.
+  The cursor and the played-portion tint are now clamped to the
+  [cropStart, cropEnd] pixel range that the marker overlay defines.
+* Fixed: cursor jumped forward / backward while the user dragged
+  the speed slider during playback. Live speed changes recompute
+  bufferedSec with the new speedFactor against samples that were
+  produced at the OLD factor; the raw position therefore jumped
+  on every tick. The cache refresh is now monotonic (rejects
+  backward jumps from this artefact) and rate-limited to a
+  comfortably-above-real-time forward advance per audio cycle.
+  Explicit seeks / play / loop restarts invalidate the anchor so
+  legitimate position jumps (user-driven backward seek, loop wrap)
+  still snap immediately.
+* Fixed: with loop + non-1.0 speed + a crop range, the cursor
+  reached cropEnd and froze while the audio kept playing past it.
+  InputFileFFmpeg::setMaxPlayTime stored its bound in OUTPUT
+  samples but the input-to-output sample ratio depends on
+  speedFactor, so a 10-second crop at speed 2 actually decoded
+  20 seconds of input. The bound is now stored in INPUT-file
+  seconds and compared against m_filePosition (which is also in
+  input-time), so the decoder stops at the requested input second
+  no matter how pitch / speed change during playback. Cursor,
+  audio, loop restart, and time label now all agree on where the
+  end is.
+* Fixed: the waveform time label read elapsed seconds against the
+  full file length (e.g. "12 s / 30 s") instead of against the
+  active crop range. With a crop set it now reads
+  "(pos - cropStart) / (cropEnd - cropStart)", matching what the
+  cursor visually expresses and what the audio actually plays.
+
+---------------------------------------------------------------------
+EXPORT
+---------------------------------------------------------------------
+* New: multi-format export. The Export-audio dialog now offers
+  WAV (PCM 16-bit), FLAC (lossless), OGG Vorbis, and AAC in M4A.
+  Format is detected from the filename extension (or the
+  selected filter). Unknown extensions fall back to WAV. The
+  encoder is a thin FFmpeg-backed bridge that handles channel-
+  layout / sample-format conversion via swresample so every
+  format receives the same DSP-chain-applied stereo PCM stream.
+* Fixed: the export progress dialog was broken - the bar stuck
+  at 0% on Windows native style, the chunk fill leaked outside
+  the rounded background, and the final 100% green / red state
+  did not always render. The dialog now uses a custom-painted
+  bar (rounded track, fill clipped to a rounded path, 60 Hz
+  easing toward target) instead of QProgressBar + QSS chunks,
+  so the visual is reliable across styles.
+* The FFmpeg static recipe (Windows) and CI cache key both
+  picked up new encoders / muxers (pcm_s16le, flac, vorbis,
+  aac and wav, flac, ogg, ipod, mp4 muxers). build_local.ps1
+  now writes a .recipe-version marker after each FFmpeg build
+  and force-rebuilds when the recipe id changes, so a stale
+  cached tree never silently misses new symbols.
+* The Linux runner was bumped from ubuntu-22.04 to ubuntu-24.04
+  so the system FFmpeg covers the encoder APIs the bridge
+  needs (swr_alloc_set_opts2, av_channel_layout_default,
+  AVFrame::ch_layout - all added in FFmpeg 5.1).
+
+=====================================================================
 GameBaiters Soundboard v2.2.6
 =============================
 

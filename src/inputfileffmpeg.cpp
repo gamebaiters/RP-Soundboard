@@ -411,6 +411,16 @@ private:
 	float m_reverbMix;
 	int m_abufferDeclaredRate;      // rate declared to abuffer (may differ from codec rate for pitch)
 	int64_t m_maxConvertedSamples;
+	// End-of-playback bound in INPUT-file seconds. m_maxConvertedSamples
+	// was the previous mechanism but, being in OUTPUT samples, it became
+	// inconsistent under any non-1.0 speedFactor: a 10-second crop with
+	// speed=2 stopped the decoder at 20 s of input (because 10*48000
+	// output samples * 2 = 20 s of source) instead of at the requested
+	// 10 s mark. m_maxFilePosition is compared against m_filePosition
+	// (which is tracked in input seconds) so the bound stays correct no
+	// matter how pitch / speed are adjusted during playback. 0.0 means
+	// "unbounded". When both are set m_maxFilePosition wins.
+	double  m_maxFilePosition;
 	int64_t m_nextSeekTimestamp;
 	int64_t m_skipSamples;
 
@@ -463,6 +473,7 @@ void InputFileFFmpeg::reset()
 	m_filePosition = 0.0;
 	m_abufferDeclaredRate = 0;
 	m_maxConvertedSamples = 0;
+	m_maxFilePosition = 0.0;
 	m_nextSeekTimestamp = 0;
 	m_skipSamples = 0;
 	m_freeverb.init(m_outputSamplerate, m_outputChannels);
@@ -956,14 +967,11 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 		_seek(startPosSeconds);
 
 	if(playTimeSeconds > 0.0)
-		// _seek() above advanced m_convertedSamples to the trim start, and
-		// the readSamples() limit is compared against that running counter.
-		// The limit must therefore be the ABSOLUTE end sample (start + dur).
-		// Setting it to just playTime*rate cut the clip short by the start
-		// offset — and played nothing at all when start >= playTime, which
-		// is why trimmed playback / preview "did not start".
-		m_maxConvertedSamples = (uint64_t)m_convertedSamples
-		                      + uint64_t(playTimeSeconds * (double)m_outputSamplerate + 0.5);
+		// Bound is expressed in INPUT-file seconds against m_filePosition,
+		// which is tracked in input-domain regardless of speed/pitch. The
+		// old m_maxConvertedSamples path is left at 0 (unbounded) so the
+		// two never disagree under live speed changes.
+		m_maxFilePosition = startPosSeconds + playTimeSeconds;
 
 	return 0;
 }
@@ -1116,6 +1124,30 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 							}
 						}
 
+						// Input-time cap (the one the crop UI actually feeds).
+						// Computed against m_filePosition so live speed / pitch
+						// changes never desync the end of playback from the
+						// requested input second mark.
+						if (outSamples > 0 && m_maxFilePosition > 0.0)
+						{
+							double remainSec = m_maxFilePosition - m_filePosition;
+							if (remainSec <= 0.0)
+							{
+								outSamples = 0;
+								m_done = true;
+							}
+							else
+							{
+								double sf = (m_speedFactor > 0.0f) ? (double)m_speedFactor : 1.0;
+								double maxOut = remainSec * (double)m_outputSamplerate / sf;
+								if ((double)outSamples > maxOut)
+								{
+									outSamples = (int)(maxOut + 0.5);
+									m_done = true;
+								}
+							}
+						}
+
 						if(outSamples > 0)
 						{
 							short *outPtr = ((short*)filt_frame->extended_data[0]) + (skippedSamples * m_outputChannels);
@@ -1173,6 +1205,23 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 					outSamples = 0;
 				else if (outSamples > remaining)
 					outSamples = (int)remaining;
+			}
+			// Input-time cap (see twin block above).
+			if (outSamples > 0 && m_maxFilePosition > 0.0)
+			{
+				double remainSec = m_maxFilePosition - m_filePosition;
+				if (remainSec <= 0.0)
+				{
+					outSamples = 0;
+					m_done = true;
+				}
+				else
+				{
+					double sf = (m_speedFactor > 0.0f) ? (double)m_speedFactor : 1.0;
+					double maxOut = remainSec * (double)m_outputSamplerate / sf;
+					if ((double)outSamples > maxOut)
+						outSamples = (int)(maxOut + 0.5);
+				}
 			}
 			if(outSamples > 0)
 			{
@@ -1297,10 +1346,10 @@ void InputFileFFmpeg::setReverbMix(float mix)
 void InputFileFFmpeg::setMaxPlayTime(double seconds)
 {
 	Lock lock(m_mutex);
-	if (seconds <= 0.0)
-		m_maxConvertedSamples = 0;
-	else
-		m_maxConvertedSamples = (int64_t)(seconds * (double)m_outputSamplerate + 0.5);
+	// Stored as input-time so the bound is invariant under live speed
+	// or pitch changes. Comparison happens against m_filePosition in
+	// readSamples (which is also input-time).
+	m_maxFilePosition = (seconds > 0.0) ? seconds : 0.0;
 }
 
 

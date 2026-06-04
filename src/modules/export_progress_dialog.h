@@ -8,9 +8,9 @@
 #include <QString>
 
 class QLabel;
-class QProgressBar;
 class QPushButton;
 class QFrame;
+class QWidget;
 
 class ExportProgressDialog : public QDialog {
     Q_OBJECT
@@ -32,13 +32,15 @@ private:
     void applyTheme();
 
     QString       m_outputFile;
-    QFrame       *m_card     = nullptr;
-    QLabel       *m_icon     = nullptr;
-    QLabel       *m_title    = nullptr;
-    QLabel       *m_filename = nullptr;
-    QProgressBar *m_bar      = nullptr;
-    QLabel       *m_status   = nullptr;
-    QPushButton  *m_cancel   = nullptr;
-    QPushButton  *m_dismiss  = nullptr;
-    bool          m_finished = false;
+    QFrame       *m_card       = nullptr;
+    QLabel       *m_icon       = nullptr;
+    QLabel       *m_title      = nullptr;
+    QLabel       *m_filename   = nullptr;
+    // Custom-painted bar (defined in the .cpp). Stored as plain QWidget
+    // since the concrete type is implementation-private.
+    QWidget      *m_barWidget  = nullptr;
+    QLabel       *m_status     = nullptr;
+    QPushButton  *m_cancel     = nullptr;
+    QPushButton  *m_dismiss    = nullptr;
+    bool          m_finished   = false;
 };

@@ -178,6 +178,12 @@ private:
 		// every platform we ship (x86-64, ARM64).
 		std::atomic<double> cachedPositionSec{0.0};
 		std::atomic<double> cachedLengthSec{0.0};
+		// Anchor flag for the cursor rate-limiter inside fetchInputSamples.
+		// False after a play / seek / loop-restart so the first cycle
+		// snaps the cache to the fresh truth; true thereafter so jumps
+		// from live speed/pitch changes are clamped against the prior
+		// frame. Owned by the audio thread (set/cleared under m_mutex).
+		bool posCacheValid = false;
 		// Latest FxPanel reverb value (0..1). Stored on the slot so
 		// the routing decision (decoder vs end-of-DSP reverb) can be
 		// re-applied whenever the slot's dsp is created/cleared.

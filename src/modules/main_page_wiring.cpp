@@ -1383,11 +1383,34 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                     QObject::tr("Source file no longer exists:\n%1").arg(src));
                 return;
             }
-            QString dst = QFileDialog::getSaveFileName(page, QObject::tr("Export audio with DSP"),
-                QString(), QObject::tr("WAV files (*.wav)"));
+            // Multi-format export. The selected filter is reported back
+            // by QFileDialog so we can append the right extension if the
+            // user didn't type one. AudioExporter detects the actual
+            // format from the final filename and encodes accordingly.
+            QString selectedFilter;
+            const QString filters =
+                QObject::tr("WAV (PCM 16-bit) (*.wav);;FLAC (lossless) (*.flac);;"
+                            "OGG Vorbis (*.ogg);;AAC / M4A (*.m4a);;All files (*.*)");
+            QString dst = QFileDialog::getSaveFileName(page,
+                QObject::tr("Export audio with DSP"),
+                QString(), filters, &selectedFilter);
             if (dst.isEmpty()) return;
-            if (!dst.endsWith(QStringLiteral(".wav"), Qt::CaseInsensitive))
-                dst += QStringLiteral(".wav");
+            // If the filename has no extension matching one of the
+            // supported formats, append the one implied by the selected
+            // filter (defaulting to WAV).
+            auto endsWithI = [&](const QString &s, const char *ext) {
+                return dst.endsWith(QString::fromLatin1(ext), Qt::CaseInsensitive);
+            };
+            if (!(endsWithI(dst, ".wav") || endsWithI(dst, ".flac") ||
+                  endsWithI(dst, ".ogg") || endsWithI(dst, ".oga") ||
+                  endsWithI(dst, ".m4a") || endsWithI(dst, ".mp4") ||
+                  endsWithI(dst, ".aac")))
+            {
+                if      (selectedFilter.contains(".flac")) dst += QStringLiteral(".flac");
+                else if (selectedFilter.contains(".ogg"))  dst += QStringLiteral(".ogg");
+                else if (selectedFilter.contains(".m4a"))  dst += QStringLiteral(".m4a");
+                else                                       dst += QStringLiteral(".wav");
+            }
             // Snapshot the channel's LIVE settings - same factor scaling
             // the sampler slot uses (3^(slider/100)) so the exported WAV
             // matches the audible signal. Sandbox state is taken by

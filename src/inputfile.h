@@ -11,6 +11,7 @@
 #define rpsbsrc__inputfile_H__
 
 #include <stdint.h>
+#include <atomic>
 #include "SampleSource.h"
 
 class SampleBuffer;
@@ -67,6 +68,13 @@ public:
 	// scales with file length (areverse buffers everything) so this
 	// is intended for short SFX cells, not multi-minute music.
 	virtual void setReverse(bool on) { (void)on; }
+	// Cooperative cancel token for the reverse pre-decode pass.
+	// preDecodeAndReverse polls *token every N decoded packets; if
+	// true it bails out early and open() returns -1 so the worker can
+	// discard the half-built buffer without waiting on a multi-minute
+	// file. nullptr (default) = no cancellation. Lifetime of the
+	// pointed-to atomic must outlive open().
+	virtual void setCancelToken(std::atomic<bool> *token) { (void)token; }
 	// Set BEFORE open(): when true the FFmpeg filter graph adds a
 	// `loudnorm` filter targeting -16 LUFS integrated / -1 dBTP peak
 	// so loud cells don't drown quiet ones. EBU R128 single-pass mode

@@ -143,69 +143,184 @@ void Sampler::setSlotLoop(int slot, bool on)
 void Sampler::setSlotReverse(int slot, bool on)
 {
 	if (slot < 0 || slot >= MAX_SLOTS) return;
-	std::lock_guard<std::mutex> Lock(m_mutex);
-	PlaybackSlot &s = m_slots[slot];
-	if (s.channelReverse == on) return;
-	s.channelReverse = on;
-	state_e st = s.state.load();
-	if (!((st == ePLAYING || st == ePAUSED) && s.lastSoundValid))
-		return;
 
-	// In-place direction swap. The waveform widget never sees an
-	// onStop / onStart pair so the analysed bins, the loaded filename
-	// and the channel state stay intact - no flicker, no re-analysis.
-	double resumeSec = s.cachedPositionSec.load(std::memory_order_relaxed);
-	const SoundInfo lastSound = s.lastSound;
+	// Phase 1 — snapshot the parameters the worker needs under a
+	// micro-lock. NO heavy work (no close, no open, no FFmpeg) happens
+	// here. The OLD inputFile keeps streaming through the producer
+	// thread completely undisturbed, so audio continues without a
+	// gap even for multi-minute files.
+	SoundInfo lastSound;
+	double    resumeSec   = 0.0;
+	float     pitchBase   = 1.0f;
+	float     speedFactor = 1.0f;
+	float     reverbMix   = 0.0f;
+	uint64_t  epoch       = 0;
+	std::shared_ptr<std::atomic<bool>> newCancel;
+	std::shared_ptr<std::atomic<bool>> oldCancel;
 
-	s.producerThread.setSource(NULL);
-	if (s.inputFile) {
-		s.inputFile->close();
-		delete s.inputFile;
-		s.inputFile = NULL;
-	}
 	{
-		SampleBuffer::Lock sblc(s.sbCapture.getMutex());
-		SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
-		s.sbCapture.consume(NULL, s.sbCapture.avail());
-		s.sbPlayback.consume(NULL, s.sbPlayback.avail());
-	}
-	if (s.dsp) s.dsp->reset();
+		std::lock_guard<std::mutex> Lock(m_mutex);
+		PlaybackSlot &s = m_slots[slot];
+		if (s.channelReverse == on) return;
+		s.channelReverse = on;
+		state_e st = s.state.load();
+		if (!((st == ePLAYING || st == ePAUSED) && s.lastSoundValid))
+			return;
 
-	s.inputFile = CreateInputFileFFmpeg();
-	if (lastSound.reverse || on)   s.inputFile->setReverse(true);
-	if (lastSound.autoNormalize)   s.inputFile->setAutoNormalize(true);
-	// Apply pitch / speed / reverb BEFORE open() so the filter graph
-	// (and the reverse pre-decode pass) builds with them baked in.
-	// Without this the buffer was decoded at identity and the user
-	// briefly heard the file without their FX before the deferred
-	// rebuild fired.
-	float pitchBase = (s.lastSlotPitchFactor > 0.01f)
-		? s.lastSlotPitchFactor : m_pitchFactor;
-	if (pitchBase != 1.0f) s.inputFile->setPitchFactor(pitchBase);
-	if (m_speedFactor != 1.0f) s.inputFile->setSpeedFactor(m_speedFactor);
-	if (m_reverbMix > 0.0f)    s.inputFile->setReverbMix(m_reverbMix);
+		resumeSec   = s.cachedPositionSec.load(std::memory_order_relaxed);
+		lastSound   = s.lastSound;
+		pitchBase   = (s.lastSlotPitchFactor > 0.01f)
+			? s.lastSlotPitchFactor : m_pitchFactor;
+		speedFactor = m_speedFactor;
+		reverbMix   = m_reverbMix;
+
+		// Tell any in-flight worker to give up — it shares the OLD
+		// cancel token, will see the flag flip on its next 64-packet
+		// poll inside preDecodeAndReverse and bail out within ~10-50
+		// ms. Mismatched epoch is the second-line discard for the
+		// case where the worker has already passed the cancel poll
+		// and is about to swap.
+		oldCancel = s.reverseWorkerCancel;
+		if (oldCancel) oldCancel->store(true, std::memory_order_relaxed);
+		newCancel = std::make_shared<std::atomic<bool>>(false);
+		s.reverseWorkerCancel = newCancel;
+		epoch = ++s.reverseEpoch;
+	}
+
+	// Phase 2 — wait for the previous worker (if any) to acknowledge
+	// the cancel flag and exit. We set it true in Phase 1 above; the
+	// decode loop polls every 64 packets, so this typically returns
+	// within ~10-100 ms even on multi-minute files. join() (not
+	// detach) keeps the Sampler dtor safe — every worker is owned by
+	// exactly one std::thread that we can wait on at shutdown.
+	PlaybackSlot &s = m_slots[slot];
+	if (s.reverseWorker.joinable())
+		s.reverseWorker.join();
+
+	// Phase 3 — spawn the new worker. All heavy work (CreateInputFile,
+	// open + preDecodeAndReverse for the reverse case, or just open()
+	// for the forward case) runs OUTSIDE m_mutex on this thread. GUI
+	// + audio both return / continue immediately.
+	s.reverseWorker = std::thread(
+		&Sampler::reverseWorkerProc, this,
+		slot, epoch, on, lastSound, resumeSec,
+		pitchBase, speedFactor, reverbMix, newCancel);
+}
+
+
+void Sampler::reverseWorkerProc(int slot, uint64_t epoch, bool wantReverse,
+                                 SoundInfo sound, double resumeSec,
+                                 float pitchBase, float speedFactor,
+                                 float reverbMix,
+                                 std::shared_ptr<std::atomic<bool>> cancel)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	PlaybackSlot &s = m_slots[slot];
+
+	// Build the new InputFile completely outside any lock. open() is
+	// the multi-second operation when reverse is on (full file decode
+	// + atempo + reverse-in-place); doing it here lets the audio
+	// thread keep mixing the OLD file in the meantime.
+	InputFile *newFile = CreateInputFileFFmpeg();
+	if (!newFile) return;
+
+	newFile->setCancelToken(cancel.get());
+	if (sound.reverse || wantReverse) newFile->setReverse(true);
+	if (sound.autoNormalize)           newFile->setAutoNormalize(true);
+	if (pitchBase   != 1.0f) newFile->setPitchFactor(pitchBase);
+	if (speedFactor != 1.0f) newFile->setSpeedFactor(speedFactor);
+	if (reverbMix   >  0.0f) newFile->setReverbMix(reverbMix);
+
 	int rc = -1;
 	try {
-		rc = s.inputFile->open(lastSound.filename.toUtf8(),
-		                       lastSound.getStartTime(),
-		                       lastSound.getPlayTime());
-	} catch (...) {
-		rc = -1;
-	}
-	if (rc != 0) {
-		delete s.inputFile;
-		s.inputFile = NULL;
-		s.state = eSILENT;
-		emit onStopPlaying(slot);
+		rc = newFile->open(sound.filename.toUtf8(),
+		                   sound.getStartTime(),
+		                   sound.getPlayTime());
+	} catch (...) { rc = -1; }
+
+	// Bail if the decode was cancelled mid-way (user rapid-clicked or
+	// stopped playback) or the file failed to open.
+	if (rc != 0 || (cancel && cancel->load(std::memory_order_relaxed))
+	            || m_shuttingDown.load(std::memory_order_relaxed)
+	            || s.reverseEpoch.load(std::memory_order_relaxed) != epoch) {
+		newFile->close();
+		delete newFile;
 		return;
 	}
-	// Precision seek: cached position is what the user sees, not the
-	// decoder's raw cursor which leads by ~bufferedSec. Resume there
-	// so the cursor does not visibly jump.
-	s.inputFile->seek(resumeSec);
-	s.cachedPositionSec.store(resumeSec, std::memory_order_relaxed);
-	s.posCacheValid = false;
-	s.producerThread.setSource(s.inputFile);
+
+	// Seek the new file to the live cursor BEFORE we go under the
+	// audio lock — keeps the lock-hold time microscopic.
+	newFile->seek(resumeSec);
+	// Clear the cancel token: from here on the new file is the
+	// canonical inputFile and any future cancel must come through
+	// setSlotReverse re-spawning.
+	newFile->setCancelToken(nullptr);
+
+	// Phase 4 — disconnect the producer thread from the OLD inputFile
+	// OUTSIDE m_mutex. setSource(NULL) only contends on the producer
+	// thread's own recursive mutex; meanwhile the audio thread is
+	// free to keep draining sbPlayback, so playback continues
+	// uninterrupted while we wait for the producer's current
+	// readSamples cycle to finish (typically ~1-50 ms on long
+	// streaming files).
+	s.producerThread.setSource(NULL);
+
+	// Phase 5 — micro-lock swap. m_mutex is held only for the pointer
+	// shuffle + buffer drain. The audio thread is briefly blocked
+	// here, but the inner work is microseconds (free, reset, assign)
+	// and the producer is already disconnected so no readSamples can
+	// race us on the old / new file pointer.
+	InputFile *oldFile = nullptr;
+	{
+		std::lock_guard<std::mutex> Lock(m_mutex);
+
+		// Final epoch re-check inside the lock — guards against the
+		// race where the user clicked reverse again (or stopped) in
+		// the window between our last check and the lock.
+		if (s.reverseEpoch.load(std::memory_order_relaxed) != epoch ||
+		    m_shuttingDown.load(std::memory_order_relaxed)) {
+			// Restore the old source so the slot keeps playing in its
+			// pre-click direction. Bail out cleanly.
+			if (s.inputFile)
+				s.producerThread.setSource(s.inputFile);
+			newFile->close();
+			delete newFile;
+			return;
+		}
+
+		state_e st2 = s.state.load();
+		if (!((st2 == ePLAYING || st2 == ePAUSED) && s.lastSoundValid)) {
+			// Slot was stopped while we were decoding. Drop the file
+			// (the slot has already been torn down by stopSlotInternal,
+			// so do NOT re-attach anything).
+			newFile->close();
+			delete newFile;
+			return;
+		}
+
+		oldFile = s.inputFile;
+		{
+			SampleBuffer::Lock sblc(s.sbCapture.getMutex());
+			SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
+			s.sbCapture.consume(NULL, s.sbCapture.avail());
+			s.sbPlayback.consume(NULL, s.sbPlayback.avail());
+		}
+		if (s.dsp) s.dsp->reset();
+
+		s.inputFile = newFile;
+		s.cachedPositionSec.store(resumeSec, std::memory_order_relaxed);
+		s.posCacheValid = false;
+		s.producerThread.setSource(s.inputFile);
+	}
+
+	// Close + delete the old file OUTSIDE the audio lock. Closing an
+	// FFmpeg decoder context is non-trivial (codec close + format
+	// close + filter graph teardown) — keeping it out of m_mutex
+	// frees the audio thread the moment the pointer swap is done.
+	if (oldFile) {
+		oldFile->close();
+		delete oldFile;
+	}
 }
 
 void Sampler::setSlotSandboxState(int slot, const SandboxState &s)
@@ -381,7 +496,19 @@ Sampler::Sampler() :
 //---------------------------------------------------------------
 Sampler::~Sampler()
 {
-
+	// Belt-and-braces: if shutdown() was not invoked the std::thread
+	// member of each PlaybackSlot would still be joinable, and its
+	// destructor would call std::terminate(). Signal cancel + join
+	// here so the plugin shuts down cleanly even on the error path.
+	m_shuttingDown.store(true, std::memory_order_release);
+	for (int i = 0; i < MAX_SLOTS; i++) {
+		if (m_slots[i].reverseWorkerCancel)
+			m_slots[i].reverseWorkerCancel->store(true, std::memory_order_relaxed);
+	}
+	for (int i = 0; i < MAX_SLOTS; i++) {
+		if (m_slots[i].reverseWorker.joinable())
+			m_slots[i].reverseWorker.join();
+	}
 }
 
 
@@ -407,6 +534,26 @@ void Sampler::init()
 //---------------------------------------------------------------
 void Sampler::shutdown()
 {
+	// Flip the global shutdown flag FIRST (no lock). Any reverse
+	// worker that is past its cancel check but not yet through the
+	// swap section will see this and discard its work instead of
+	// touching slot state we're about to tear down.
+	m_shuttingDown.store(true, std::memory_order_release);
+
+	// Signal every in-flight worker to cancel its decode loop, then
+	// join them OUTSIDE m_mutex. Joining inside the lock would
+	// deadlock because the worker grabs m_mutex to perform the swap.
+	for (int i = 0; i < MAX_SLOTS; i++) {
+		PlaybackSlot &slot = m_slots[i];
+		if (slot.reverseWorkerCancel)
+			slot.reverseWorkerCancel->store(true, std::memory_order_relaxed);
+	}
+	for (int i = 0; i < MAX_SLOTS; i++) {
+		PlaybackSlot &slot = m_slots[i];
+		if (slot.reverseWorker.joinable())
+			slot.reverseWorker.join();
+	}
+
 	std::lock_guard<std::mutex> Lock(m_mutex);
 
 	for (int i = 0; i < MAX_SLOTS; i++)
@@ -1142,6 +1289,15 @@ void Sampler::setVolumeDb( double decibel )
 void Sampler::stopSlotInternal(int slot)
 {
 	PlaybackSlot &s = m_slots[slot];
+	// Bump the reverse-worker epoch unconditionally so any in-flight
+	// async setSlotReverse worker discards its half-built InputFile
+	// instead of swapping it into the slot AFTER the stop. Also flip
+	// the worker's cancel token so a still-running preDecode pass
+	// (multi-minute file) bails out within ~10-50 ms instead of
+	// chewing CPU after the user has already moved on.
+	++s.reverseEpoch;
+	if (s.reverseWorkerCancel)
+		s.reverseWorkerCancel->store(true, std::memory_order_relaxed);
 	if (s.inputFile)
 	{
 		s.state = eSILENT;

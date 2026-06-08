@@ -19,6 +19,7 @@
 #include <mutex>
 #include <atomic>
 #include <memory>
+#include <thread>
 #include <vector>
 #include <cstring>
 #include <cmath>
@@ -207,9 +208,25 @@ private:
 		// Per-channel reverse-playback toggle (set from the WaveformPlayer
 		// reverse button via setSlotReverse). When ON, every new play
 		// through this slot is forced to reverse mode regardless of
-		// SoundInfo.reverse. Toggling mid-play triggers a stop + replay
-		// of the last sound with the new flag.
+		// SoundInfo.reverse. Toggling mid-play hands the heavy
+		// pre-decode + filter-graph build to reverseWorker so the GUI
+		// and audio threads never block — the OLD inputFile keeps
+		// playing in the original direction until the worker swaps a
+		// fully-built new one in under a micro-lock.
 		bool channelReverse = false;
+		// Background worker that builds the new (reverse / forward)
+		// InputFile off the audio path. Replaced on every rapid click;
+		// the prior worker is signalled via reverseWorkerCancel and
+		// detached — when it finishes, it sees its cancel flag (or the
+		// epoch mismatch) and discards its half-built buffer.
+		std::thread                        reverseWorker;
+		std::shared_ptr<std::atomic<bool>> reverseWorkerCancel;
+		// Monotonic counter bumped on every setSlotReverse /
+		// stopSlotInternal / playSoundInSlot. The async worker captures
+		// the value at spawn time and verifies it matches under the
+		// final swap lock; mismatch = "user moved on" so the worker
+		// throws away its new InputFile instead of stomping the slot.
+		std::atomic<uint64_t> reverseEpoch{0};
 		SoundInfo lastSound;
 		bool      lastSoundValid = false;
 		// Latest pitch factor pushed via setSlotPitchFactor by the
@@ -251,6 +268,16 @@ private:
 	};
 
 	void stopSlotInternal(int slot);
+	// Async reverse-toggle worker body. Runs on a detachable std::thread
+	// spawned by setSlotReverse. Builds a fresh InputFile (heavy
+	// pre-decode for reverse, plain open for forward), then takes
+	// m_mutex briefly to swap. Self-discards on epoch mismatch,
+	// m_shuttingDown true, or cancel-token true.
+	void reverseWorkerProc(int slot, uint64_t epoch, bool wantReverse,
+	                       SoundInfo sound, double resumeSec,
+	                       float pitchBase, float speedFactor,
+	                       float reverbMix,
+	                       std::shared_ptr<std::atomic<bool>> cancel);
 	int findFreeSlot() const;
 	void setVolumeDb(double decibel);
 	int fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int count, int channels, bool eraseConsumed, int ciLeft, int ciRight, bool overLeft, bool overRight, float ampThresh = 0.0f, PlaybackSlot *slot = nullptr);
@@ -274,6 +301,10 @@ private:
 	float m_intensityFactor;
 	float m_reverbMix;
 	bool m_multiMode;
+	// Set by shutdown() so any in-flight reverse worker about to swap
+	// can see "Sampler is dying" and quietly discard its work instead
+	// of touching the slot's m_mutex / inputFile after teardown.
+	std::atomic<bool> m_shuttingDown{false};
 };
 
 

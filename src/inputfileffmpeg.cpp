@@ -392,6 +392,7 @@ public:
 	void setMaxPlayTime(double seconds) override;
 	void setReverse(bool on) override { m_reverse = on; }
 	void setAutoNormalize(bool on) override { m_autoNormalize = on; }
+	void setCancelToken(std::atomic<bool> *token) override { m_cancelToken = token; }
 
 private:
 	int _close();
@@ -454,6 +455,12 @@ private:
 	// LUFS auto-normalisation toggle. Set BEFORE open(); buildFilterGraph
 	// appends a loudnorm filter targeting -16 LUFS integrated.
 	bool  m_autoNormalize = false;
+	// Cooperative cancel token for the reverse pre-decode pass. Polled
+	// inside preDecodeAndReverse's hot loop so a worker spawned by the
+	// async setSlotReverse path can be asked to give up without waiting
+	// on a multi-minute file. Lifetime owned by caller (Sampler holds a
+	// shared_ptr<atomic<bool>> per slot).
+	std::atomic<bool> *m_cancelToken = nullptr;
 	int m_abufferDeclaredRate;      // rate declared to abuffer (may differ from codec rate for pitch)
 	int64_t m_maxConvertedSamples;
 	// End-of-playback bound in INPUT-file seconds. m_maxConvertedSamples
@@ -1059,6 +1066,35 @@ int InputFileFFmpeg::preDecodeAndReverse()
 		return -1;
 	}
 
+	// Pre-reserve the destination buffer. The decoder appends in small
+	// chunks (typical AVFrame nb_samples = 1024) and the default
+	// std::vector growth strategy is amortised O(1) but still costs a
+	// realloc + memcpy on every doubling. For a 5-minute stereo file
+	// that's ~28M shorts (~57 MB) growing through ~24 reallocations.
+	// outputSamplesEstimation() gives a tight bound from the container
+	// header so one allocation covers the whole decode.
+	int channels = m_outputChannels;
+	if (channels <= 0) channels = 2;
+	int64_t estSamples = outputSamplesEstimation();
+	if (estSamples > 0) {
+		// outputSamplesEstimation is in the INPUT-time domain; reverse
+		// buffer is in the OUTPUT-rate-with-atempo domain. Divide by
+		// speedFactor (which atempo applies) to get OUT samples.
+		double speedF = (m_speedFactor > 0.0f) ? (double)m_speedFactor : 1.0;
+		int64_t expected = (int64_t)((double)estSamples / speedF) + 4096;
+		m_reverseBuf.reserve((size_t)(expected * channels));
+	}
+
+	bool cancelled = false;
+	int packetCounter = 0;
+	auto checkCancel = [&]() {
+		// Poll the cancel token every 64 packets to keep overhead
+		// negligible while still bailing within ~10-50 ms of a request.
+		if (!m_cancelToken) return false;
+		if ((++packetCounter & 63) != 0) return false;
+		return m_cancelToken->load(std::memory_order_relaxed);
+	};
+
 	auto drainSink = [&]() {
 		while (av_buffersink_get_frame(m_bufSinkCtx, filt_frame) >= 0) {
 			int outSamples = filt_frame->nb_samples;
@@ -1087,29 +1123,47 @@ int InputFileFFmpeg::preDecodeAndReverse()
 			}
 		}
 		av_packet_unref(packet);
+		if (checkCancel()) { cancelled = true; break; }
 	}
 
-	avcodec_send_packet(m_codecCtx, NULL);
-	while (avcodec_receive_frame(m_codecCtx, frame) == 0) {
-		av_buffersrc_add_frame_flags(m_bufSrcCtx, frame,
-		                              AV_BUFFERSRC_FLAG_KEEP_REF);
+	if (!cancelled) {
+		avcodec_send_packet(m_codecCtx, NULL);
+		while (avcodec_receive_frame(m_codecCtx, frame) == 0) {
+			av_buffersrc_add_frame_flags(m_bufSrcCtx, frame,
+			                              AV_BUFFERSRC_FLAG_KEEP_REF);
+			drainSink();
+			av_frame_unref(frame);
+		}
+		av_buffersrc_add_frame_flags(m_bufSrcCtx, NULL, 0);
 		drainSink();
-		av_frame_unref(frame);
 	}
-	av_buffersrc_add_frame_flags(m_bufSrcCtx, NULL, 0);
-	drainSink();
 
 	av_frame_free(&frame);
 	av_frame_free(&filt_frame);
 	av_packet_free(&packet);
 
-	int channels = m_outputChannels;
-	if (channels <= 0) channels = 2;
+	if (cancelled) {
+		m_reverseBuf.clear();
+		m_reverseBuf.shrink_to_fit();
+		dbgLog("  preDecodeAndReverse cancelled");
+		return -1;
+	}
+
 	int64_t totalSamples = (int64_t)m_reverseBuf.size() / channels;
-	for (int64_t i = 0, j = totalSamples - 1; i < j; ++i, --j) {
-		for (int c = 0; c < channels; ++c) {
-			std::swap(m_reverseBuf[i * channels + c],
-			          m_reverseBuf[j * channels + c]);
+	// In-place buffer reverse. Stereo fast-path swaps interleaved
+	// pairs as one uint32 each, halving the loop body's instruction
+	// count vs the per-channel std::swap. Mono / other layouts fall
+	// back to the generic path.
+	if (channels == 2 && totalSamples > 1) {
+		uint32_t *p32 = reinterpret_cast<uint32_t*>(m_reverseBuf.data());
+		for (int64_t i = 0, j = totalSamples - 1; i < j; ++i, --j)
+			std::swap(p32[i], p32[j]);
+	} else {
+		for (int64_t i = 0, j = totalSamples - 1; i < j; ++i, --j) {
+			for (int c = 0; c < channels; ++c) {
+				std::swap(m_reverseBuf[i * channels + c],
+				          m_reverseBuf[j * channels + c]);
+			}
 		}
 	}
 

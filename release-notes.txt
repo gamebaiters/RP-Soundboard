@@ -1,3 +1,76 @@
+GameBaiters Soundboard v2.2.9
+=============================
+
+Instant reverse-toggle release on top of v2.2.8. The Reverse button on
+the waveform player no longer freezes TeamSpeak while the file is
+decoded — the heavy pre-decode + filter-graph rebuild moved off the
+audio mutex and the GUI thread onto a per-slot background worker, so
+clicking Reverse mid-playback now returns immediately and the
+direction flips as soon as the new buffer is ready (sub-second for
+short SFX, a few seconds for multi-minute music, but in either case
+WITHOUT a frozen client).
+
+What changed under the hood
+---------------------------
+
+- Async reverse worker
+  setSlotReverse now snapshots the slot state under a microsecond
+  lock, hands the full close / re-open / pre-decode / re-reverse pass
+  to a std::thread per slot, and returns. The OLD inputFile keeps
+  streaming through the producer thread for the entire decode window
+  — audio never goes silent and the GUI cursor never stops moving.
+- Micro-lock swap
+  When the worker finishes, it disconnects the producer thread from
+  the old file OUTSIDE the audio lock, then acquires the Sampler
+  mutex only for the pointer shuffle + buffer drain (microseconds
+  instead of seconds). The old InputFile is closed + freed AFTER the
+  lock is released so the audio thread is held up just long enough
+  to publish the new pointer.
+- Cooperative cancellation
+  Rapid Reverse-button mashing no longer queues up multi-second
+  decode jobs. A shared_ptr<atomic<bool>> cancel token per worker is
+  polled inside the FFmpeg pre-decode loop every 64 packets, so a
+  superseded worker aborts within ~10-100 ms. The same token fires
+  on Stop and on plugin shutdown so a long file never wedges TS3
+  during teardown.
+- Faster pre-decode itself
+  m_reverseBuf now pre-reserves the full expected sample count from
+  the container header (one allocation instead of ~24 amortised
+  reallocs on a 5-minute file). The in-place buffer reverse uses a
+  32-bit swap on stereo material, halving the swap-loop instruction
+  count.
+- Epoch-checked safety nets
+  stopSlotInternal and Sampler::shutdown both bump the worker epoch
+  + set the cancel flag, so an in-flight worker that has already
+  passed the cancel checkpoint sees the epoch mismatch under the
+  final lock and quietly throws away its new InputFile instead of
+  swapping it into a slot that no longer wants it.
+
+What you experience
+-------------------
+
+- Click Reverse on a 10-second SFX: indistinguishable from instant
+  (decode is a few ms, swap is microseconds, audio just flips).
+- Click Reverse on a 5-minute song: TS3 stays fully responsive while
+  the new buffer builds in the background; you hear the song
+  continue forward for a moment, then the direction flips when the
+  buffer is ready (no freeze, no audio gap on the swap).
+- Click Reverse twice quickly: the first worker is cancelled within
+  ~50 ms, the second one takes over without queueing the first
+  decode to completion.
+- Stop a long reverse playback that is still pre-decoding: the
+  decode aborts within ~50 ms instead of running to completion in
+  the background.
+
+Compatibility
+-------------
+
+- No save format / preset / settings file changes. Existing INIs and
+  sandbox presets load unchanged.
+- The reverse output is bit-identical to v2.2.8 for the same source +
+  pitch / speed settings — only the build path moved threads.
+
+
 GameBaiters Soundboard v2.2.8
 =============================
 

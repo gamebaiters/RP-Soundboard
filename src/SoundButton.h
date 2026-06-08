@@ -34,6 +34,13 @@ public:
 	// path clears it. The label is redrawn over the image with a
 	// translucent black backdrop so the text stays readable.
 	void setBackgroundImage(const QString &path);
+	// Audio file path used for lazy tooltip-on-hover (FileMetadata).
+	// Stored, not decoded - probing happens on enterEvent so opening the
+	// soundboard does not pay the cost for every cell.
+	void setSoundFilePath(const QString &path);
+
+protected:
+	virtual void enterEvent(QEvent *evt) override;
 
 signals:
 	void fileDropped(const QList<QUrl>&);
@@ -50,6 +57,11 @@ private:
 	bool hasOwnStyle;
 	QString backgroundImagePath;
 	QPixmap backgroundPixmap;
+	QString soundFilePath;
+	// True once the lazy tooltip has been populated from FileMetadata
+	// for `soundFilePath`. Cleared on setSoundFilePath() so a path
+	// swap re-probes on the next hover.
+	bool    tooltipPrimed;
 };
 
 #endif // SOUNDBUTTON_H

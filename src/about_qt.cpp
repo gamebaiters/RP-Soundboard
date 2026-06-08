@@ -8,11 +8,13 @@
 
 #include "about_qt.h"
 #include "buildinfo.h"
+#include "main.h"
 #include "modules/theme.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPushButton>
 #include <QPainter>
 #include <QPaintEvent>
 #include <QMouseEvent>
@@ -140,9 +142,26 @@ AboutQt::AboutQt(QWidget *parent) :
         "hear) and a <b>Remote</b> volume (what others hear).<br>"
         "&bull;&nbsp; <b>Stop all</b> / <b>Pause all</b> control every "
         "channel at once.<br>"
-        "&bull;&nbsp; For the complete guide open the Plugins menu and "
-        "choose <b>How to use the soundboard</b>."));
+        "&bull;&nbsp; For the complete guide click <b>How to use the "
+        "soundboard</b> below."));
     root->addWidget(basics);
+
+    // Full user guide moved out of the TS3 plugin menu into the About
+    // dialog so the menu stays short and the guide lives next to the
+    // quick-start it complements.
+    auto *howToRow = new QHBoxLayout;
+    howToRow->addStretch(1);
+    auto *howToBtn = new QPushButton(tr("How to use the soundboard"), this);
+    howToBtn->setCursor(Qt::PointingHandCursor);
+    howToBtn->setStyleSheet(
+        "QPushButton { background-color: #2d5fb6; color: white;"
+        " border: 1px solid #1d3f80; border-radius: 5px;"
+        " padding: 6px 14px; font-weight: bold; }"
+        "QPushButton:hover { background-color: #3d77d6; }");
+    howToRow->addWidget(howToBtn);
+    howToRow->addStretch(1);
+    root->addLayout(howToRow);
+    connect(howToBtn, &QPushButton::clicked, this, []{ sb_openHowTo(); });
 
     root->addSpacing(4);
 

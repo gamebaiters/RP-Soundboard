@@ -23,4 +23,36 @@ void logMessage(const char *msg, LogLevel level,  ...);
 
 UINT checkError(UINT code, const char *msg, ...);
 
+#ifdef __cplusplus
+#include <QString>
+#include <QVector>
+
+// Snapshot of the in-memory log ring used by the in-app log viewer.
+// Each entry carries the level (LogLevel_*) and the message text
+// already prefixed with an ISO-ish timestamp. Bounded to ~1000 lines
+// so the snapshot copy stays cheap. Thread-safe.
+struct LogRingEntry {
+    int     level;
+    QString text;
+};
+
+QVector<LogRingEntry> logRingSnapshot();
+void logRingClear();
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+// Pushes a pre-formatted debug-log line into the in-memory ring used by
+// the in-app log viewer. Callsites are the static dbgLog/sdbgLog
+// helpers in inputfileffmpeg.cpp and samples.cpp - so the viewer
+// mirrors exactly what gets written to the physical rpsb_debug.log
+// when the user has the "Write debug log file" setting enabled.
+// `line` should be the same text the file got, without a trailing
+// newline.
+void rpsbDebugRingPush(const char *line);
+#ifdef __cplusplus
+}
+#endif
+
 #endif // rpsbsrc__ts3log_H__

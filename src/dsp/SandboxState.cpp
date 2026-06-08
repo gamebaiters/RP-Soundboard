@@ -118,6 +118,10 @@ QJsonObject SandboxState::toJson() const
 
     o["genLossEnabled"]     = genLossEnabled;
     o["genLossGenerations"] = genLossGenerations;
+    o["randomEnabled"]      = randomEnabled;
+    o["randomPitchCents"]   = randomPitchCents;
+    o["duckSource"]         = duckSource;
+    o["duckOthersDb"]       = static_cast<double>(duckOthersDb);
 
     // Key is versioned: the DspStage enum was renumbered (Mono dropped,
     // Paulstretch added). Old "pipelineOrder" arrays carry stale indices
@@ -229,6 +233,10 @@ SandboxState SandboxState::fromJson(const QJsonObject &o)
 
     s.genLossEnabled     = o.value("genLossEnabled").toBool(false);
     s.genLossGenerations = o.value("genLossGenerations").toInt(1);
+    s.randomEnabled      = o.value("randomEnabled").toBool(false);
+    s.randomPitchCents   = o.value("randomPitchCents").toInt(0);
+    s.duckSource         = o.value("duckSource").toBool(false);
+    s.duckOthersDb       = static_cast<float>(o.value("duckOthersDb").toDouble(-12.0));
 
     QJsonArray pipe = o.value("pipelineOrderV2").toArray();
     if (pipe.size() >= 1 && pipe.size() <= Stage_COUNT) {

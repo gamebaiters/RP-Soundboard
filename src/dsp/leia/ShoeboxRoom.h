@@ -60,6 +60,15 @@ private:
     // Wall absorption (6 walls: +X, -X, +Y, -Y, +Z ceiling, -Z floor) --------
     float m_absorption[6] = { 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f };
 
+    // Active preset character bias. setRoomType copies these from the
+    // selected RoomPreset so the per-block computeReflections + late
+    // tail can shape the sound beyond what raw absorption can express.
+    float m_presetLateFeedback = 0.55f;
+    float m_presetLateDamp     = 0.45f;
+    float m_presetLateMix      = 0.30f;
+    float m_presetTapLpHz      = 16000.0f;
+    float m_presetErDelayScale = 1.0f;
+
     // IIR smoothers for interpolating room dimensions -------------------------
     IIRSmoother m_smoothWidth;
     IIRSmoother m_smoothHeight;
@@ -73,13 +82,50 @@ private:
 
     struct ReflectionTap {
         RingBuffer buffer;
-        float delaySamples  = 0.0f;   // target delay, recomputed per block
-        float prevDelaySamples = -1.0f;  // previous block's delay; <0 = first use
+        float delaySamples  = 0.0f;
+        float prevDelaySamples = -1.0f;
         float gain          = 1.0f;
         float azimuthDeg    = 0.0f;
         float elevationDeg  = 0.0f;
+        // Per-tap one-pole low-pass simulating frequency-dependent
+        // wall absorption. Hard surfaces keep HF; absorbent surfaces
+        // cut HF more. Cutoff derived from absorption per block.
+        float lpStateL      = 0.0f;
+        float lpStateR      = 0.0f;
+        float lpCoef        = 0.5f;
+        // Per-sample-ramped stereo gains. The pan + tap gain are
+        // smoothed across the block instead of step-changing at every
+        // block boundary - that step was the rotation-rate clicking
+        // the user was hearing on rotating sources.
+        float prevGainL     = 0.0f;
+        float prevGainR     = 0.0f;
     };
     ReflectionTap m_taps[kNumWalls];
+
+    // ---- Schroeder diffuse late tail ---------------------------------------
+    // Four parallel comb filters with damped feedback + two series
+    // allpasses. Topology lifted from Freeverb (Jezar) but with the
+    // gains/delays tuned for a "spatial room tail" sound, not a generic
+    // reverb. Produces the smooth diffuse decay the discrete image-source
+    // taps cannot supply - they only give the first 6 echoes.
+    static constexpr int kNumCombs    = 4;
+    static constexpr int kNumAllpass  = 2;
+    struct CombFilter {
+        std::vector<float> bufL, bufR;
+        int   idx     = 0;
+        float dampL   = 0.0f;
+        float dampR   = 0.0f;
+        float feedback = 0.5f;
+        float damp    = 0.2f;  // per-sample HF damping inside the loop
+    };
+    struct AllPass {
+        std::vector<float> bufL, bufR;
+        int   idx      = 0;
+        float feedback = 0.5f;
+    };
+    CombFilter m_combs[kNumCombs];
+    AllPass    m_allpass[kNumAllpass];
+    float      m_lateLevel = 0.6f;   // late-tail send relative to early ER level
 
     // Scratch buffers ---------------------------------------------------------
     std::vector<float> m_monoScratch;
@@ -90,9 +136,19 @@ private:
     std::vector<float> m_delayRamp;
 
     // ---- Room presets -------------------------------------------------------
+    // Each preset bundles its own absorption AND a full "character"
+    // signature so radically different surfaces (Bathroom, Underwater,
+    // Outdoor, Cathedral, ...) actually sound radically different. Pure
+    // absorption alone could not capture e.g. underwater's LP-heavy
+    // muffle or bathroom's bright ring.
     struct RoomPreset {
         const char* name;
         float       absorption[6];
+        float       lateFeedback;    // 0..0.95
+        float       lateDamp;        // 0..0.85
+        float       lateMix;         // 0..1   final wet send
+        float       tapLpHz;         // global LP cutoff bias for early refl
+        float       erDelayScale;    // multiplier on image-source distance
     };
     static const RoomPreset kPresets[];
     static const int        kNumPresets;

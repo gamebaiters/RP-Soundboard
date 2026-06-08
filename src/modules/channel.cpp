@@ -201,6 +201,18 @@ Channel::Channel(int channelId, QWidget *parent)
     connect(m_sandboxBtn,&QPushButton::clicked, this, [this]{ openSandboxDialog(); });
 }
 
+void Channel::setChannelId(int newId)
+{
+    if (m_id == newId) return;
+    m_id = newId;
+    if (m_sandboxDialog) {
+        // The dialog's title shows "Channel N - Audio Sandbox" derived
+        // from its own m_channelId. Push the new id + title so a moved
+        // channel does not lie about which row it is.
+        m_sandboxDialog->setChannelTitle(title());
+    }
+}
+
 void Channel::setSandboxState(const SandboxState &s) {
     m_sandbox = s;
     if (m_sandboxEnableCheck) {
@@ -289,6 +301,21 @@ void Channel::setExportVisible(bool on) {
 
 void Channel::pushTitleToSandboxDialog() {
     if (m_sandboxDialog) m_sandboxDialog->setChannelTitle(title());
+}
+
+void Channel::pushSandboxCpu(double pct) {
+    if (m_sandboxDialog && m_sandboxDialog->isVisible())
+        m_sandboxDialog->setCpuPercent(pct);
+}
+
+void Channel::pushSandboxLevel(float l, float r) {
+    if (m_sandboxDialog && m_sandboxDialog->isVisible())
+        m_sandboxDialog->pushAudioLevel(l, r);
+}
+
+void Channel::pushSandboxEqLevels(const float bands[16]) {
+    if (m_sandboxDialog && m_sandboxDialog->isVisible())
+        m_sandboxDialog->pushEqBandLevels(bands);
 }
 
 void Channel::setRemovable(bool on) {

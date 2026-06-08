@@ -153,6 +153,16 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     m_fxGroup->setChecked(false);
     auto *fxLay = new QVBoxLayout(m_fxGroup);
     fxLay->addWidget(m_fx);
+    m_reverseChk = new QCheckBox(tr("Reverse playback"), m_fxGroup);
+    m_reverseChk->setToolTip(tr(
+        "Play the sample back-to-front. Best on short cells; very long\n"
+        "files use more memory."));
+    fxLay->addWidget(m_reverseChk);
+    m_normalizeChk = new QCheckBox(tr("Auto-normalize loudness (EBU R128)"), m_fxGroup);
+    m_normalizeChk->setToolTip(tr(
+        "Bring the cell to a consistent loudness so loud samples don't\n"
+        "drown quiet ones."));
+    fxLay->addWidget(m_normalizeChk);
 
     auto *hotkeyBox = new QGroupBox(tr("Hotkey"), this);
     auto *hotkeyLay = new QHBoxLayout(hotkeyBox);
@@ -253,6 +263,8 @@ void ButtonAdvancedPanel::setSoundInfo(const SoundInfo &info) {
     m_fx->setSpeed(info.fxSpeed);
     m_fx->setReverb(info.fxReverb);
     m_fx->setSync(info.fxSyncPitchSpeed);
+    if (m_reverseChk)   m_reverseChk->setChecked(info.reverse);
+    if (m_normalizeChk) m_normalizeChk->setChecked(info.autoNormalize);
     refreshSoundView();
 }
 
@@ -276,6 +288,8 @@ SoundInfo ButtonAdvancedPanel::soundInfo() const {
     // When false, slider values stay on disk but are ignored at playback.
     s.fxRemember       = m_fxGroup->isChecked();
     s.imagePath        = m_imagePath->text();
+    s.reverse          = m_reverseChk   && m_reverseChk->isChecked();
+    s.autoNormalize    = m_normalizeChk && m_normalizeChk->isChecked();
     return s;
 }
 

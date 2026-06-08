@@ -62,6 +62,16 @@ public:
 	// Lets the waveform right-click crop editor truncate the active
 	// playback without restarting the slot.
 	virtual void setMaxPlayTime(double seconds) { (void)seconds; }
+	// Set BEFORE open(): when true the FFmpeg filter graph adds an
+	// `areverse` filter so the file plays back-to-front. Memory cost
+	// scales with file length (areverse buffers everything) so this
+	// is intended for short SFX cells, not multi-minute music.
+	virtual void setReverse(bool on) { (void)on; }
+	// Set BEFORE open(): when true the FFmpeg filter graph adds a
+	// `loudnorm` filter targeting -16 LUFS integrated / -1 dBTP peak
+	// so loud cells don't drown quiet ones. EBU R128 single-pass mode
+	// (good enough for live playback; not the offline two-pass quality).
+	virtual void setAutoNormalize(bool on) { (void)on; }
 };
 
 extern InputFile *CreateInputFileFFmpeg(InputFileOptions options = InputFileOptions());

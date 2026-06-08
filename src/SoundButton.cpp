@@ -2,6 +2,7 @@
 #include "main.h"
 #include "ConfigModel.h"
 #include "modules/theme.h"
+#include "modules/file_metadata.h"
 
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -13,6 +14,7 @@
 #include <QPainter>
 #include <QFontMetrics>
 #include <QFileInfo>
+#include <QEvent>
 
 
 const QString &getButtonMime()
@@ -27,7 +29,8 @@ SoundButton::SoundButton(QWidget *parent) :
 	pressing(false),
 	dragging(false),
 	macroDecoration(false),
-	hasOwnStyle(false)
+	hasOwnStyle(false),
+	tooltipPrimed(false)
 {
 	setAcceptDrops(true);
 	setProperty("buttonVariant", QVariant(QString("audio")));
@@ -182,6 +185,32 @@ void SoundButton::mouseReleaseEvent(QMouseEvent *evt)
 	QPushButton::mouseReleaseEvent(evt);
 }
 
+
+void SoundButton::setSoundFilePath(const QString &path)
+{
+	if (soundFilePath == path) return;
+	soundFilePath = path;
+	tooltipPrimed = false;
+	// Empty path -> wipe any prior metadata tooltip so the cell does not
+	// keep advertising the previous file. Real probe happens lazily on
+	// the next hover.
+	if (path.isEmpty())
+		setToolTip(QString());
+}
+
+void SoundButton::enterEvent(QEvent *evt)
+{
+	if (!tooltipPrimed && !soundFilePath.isEmpty()) {
+		QString tip = FileMetadata::tooltipFor(soundFilePath);
+		if (!tip.isEmpty()) setToolTip(tip);
+		// Mark primed even on probe failure so we do not hammer FFmpeg
+		// on every hover for a truly unreadable file. FileMetadata's
+		// internal cache will short-circuit anyway, but this avoids
+		// touching it at all on each enter.
+		tooltipPrimed = true;
+	}
+	QPushButton::enterEvent(evt);
+}
 
 void SoundButton::setBackgroundImage(const QString &path)
 {

@@ -22,6 +22,7 @@
 #include "../samples.h"
 #include "../SoundInfo.h"
 #include "../config_qt.h"
+#include "../main.h"
 #include "hotkey_block.h"
 #include "theme.h"
 
@@ -213,6 +214,24 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
     });
     QObject::connect(w, &SettingsWindow::logsEnabledChanged, [model](bool v){
         model->setLogsEnabled(v);
+    });
+    QObject::connect(w, &SettingsWindow::showLogViewerRequested, []{
+        sb_openLogViewer();
+    });
+    QObject::connect(w, &SettingsWindow::copySandboxDebugRequested, [page]{
+        QJsonArray arr;
+        for (int i = 0; i < page->channels().size(); ++i) {
+            QJsonObject ch;
+            ch["channelId"] = i;
+            ch["title"]     = page->channels().at(i)->title();
+            ch["sandbox"]   = page->channels().at(i)->sandboxState().toJson();
+            arr.append(ch);
+        }
+        QJsonObject root;
+        root["channels"] = arr;
+        QApplication::clipboard()->setText(
+            QString::fromUtf8(QJsonDocument(root)
+                .toJson(QJsonDocument::Indented)));
     });
     QObject::connect(w, &SettingsWindow::activeProfileChanged, [model, page, sampler](int idx){
         // Flush every channel's sandbox state to persistence BEFORE the
@@ -870,17 +889,34 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             if (slot < 0 || slot >= page->channels().size()) return;
             page->channels().at(slot)->waveform()->setPaused(false);
         }, Qt::QueuedConnection);
-        // Unplayable file -> clear error dialog instead of a silent no-op.
+        // Unplayable file -> in-line red error banner on the channel's
+        // waveform label, NOT a modal popup. Diagnose the precise cause
+        // via QFileInfo so the user sees "File not found" vs "Empty
+        // file" vs "Unsupported format" instead of one generic blob.
+        // The banner clears the next time setFilename / setSound runs
+        // on this channel (i.e. when anything else is played here).
         QObject::connect(sampler, &Sampler::onPlaybackError, page,
-                         [page](int /*slot*/, QString filename){
+                         [page](int slot, QString filename){
+            if (slot < 0 || slot >= page->channels().size()) return;
             QString base = filename;
             int sl = qMax(base.lastIndexOf('/'), base.lastIndexOf('\\'));
             if (sl >= 0) base = base.mid(sl + 1);
             if (base.isEmpty()) base = QObject::tr("(unknown file)");
-            QMessageBox::warning(page, QObject::tr("Playback error"),
-                QObject::tr("Could not play \"%1\".\n\n"
-                            "The file may be missing, in an unsupported "
-                            "format, or damaged.").arg(base));
+
+            QString reason;
+            if (filename.isEmpty()) {
+                reason = QObject::tr("No file assigned");
+            } else {
+                QFileInfo fi(filename);
+                if (!fi.exists())          reason = QObject::tr("File not found");
+                else if (!fi.isReadable()) reason = QObject::tr("Permission denied");
+                else if (fi.size() == 0)   reason = QObject::tr("Empty file");
+                else                       reason = QObject::tr("Unsupported format or corrupt file");
+            }
+
+            const QString msg = QObject::tr("%1 \xE2\x80\x94 %2")
+                                    .arg(reason, base);
+            page->channels().at(slot)->waveform()->setError(msg);
         }, Qt::QueuedConnection);
     }
 
@@ -906,7 +942,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             }
         });
         QObject::connect(ch->fx(), &FxPanel::pitchChanged,
-                         [model, sampler, slot, isPrimary](int v){
+                         [model, sampler, slot, isPrimary, ch](int v){
             if (isPrimary) model->setPitchValue(v);
             if (sampler) {
                 // Match legacy ConfigQt scaling: factor = 3^(v/100).
@@ -914,20 +950,23 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 sampler->setSlotPitchFactor(slot, factor);
                 if (isPrimary) sampler->setPitchFactor(factor);
             }
+            ch->waveform()->setLiveFx(v, ch->fx()->speed(), ch->fx()->reverb());
         });
         QObject::connect(ch->fx(), &FxPanel::speedChanged,
-                         [model, sampler, slot, isPrimary](int v){
+                         [model, sampler, slot, isPrimary, ch](int v){
             if (isPrimary) model->setSpeedValue(v);
             if (sampler) {
                 float factor = static_cast<float>(std::pow(3.0, v / 100.0));
                 sampler->setSlotSpeedFactor(slot, factor);
                 if (isPrimary) sampler->setSpeedFactor(factor);
             }
+            ch->waveform()->setLiveFx(ch->fx()->pitch(), v, ch->fx()->reverb());
         });
         QObject::connect(ch->fx(), &FxPanel::reverbChanged,
-                         [model, sampler, slot, isPrimary](int v){
+                         [model, sampler, slot, isPrimary, ch](int v){
             if (isPrimary) model->setReverbValue(v);
             if (sampler) sampler->setSlotReverbMix(slot, v / 100.0f);
+            ch->waveform()->setLiveFx(ch->fx()->pitch(), ch->fx()->speed(), v);
         });
         QObject::connect(ch->fx(), &FxPanel::syncChanged,
                          [model, isPrimary](bool s){
@@ -956,6 +995,10 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         QObject::connect(ch->waveform(), &WaveformPlayer::loopToggled,
                          [sampler, slot](bool on){
             if (sampler) sampler->setSlotLoop(slot, on);
+        });
+        QObject::connect(ch->waveform(), &WaveformPlayer::reverseToggled,
+                         [sampler, slot](bool on){
+            if (sampler) sampler->setSlotReverse(slot, on);
         });
         QObject::connect(ch, &Channel::stateChanged,
                          [ch](int id){
@@ -1266,6 +1309,13 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         auto *posTimer = new QTimer(page);
         posTimer->setInterval(33);
         QObject::connect(posTimer, &QTimer::timeout, page, [page, sampler, wasActive]{
+            // Skip entire iteration when the GUI is hidden OR nothing
+            // is playing - both are user-visible criteria for "no work
+            // needed". Without the anyPlaying gate the timer kept
+            // iterating channels + calling Sampler::getState on an
+            // idle slot every 33 ms even when no audio was running.
+            if (!page->isVisible()) return;
+            if (!sampler->anyPlaying()) return;
             const int n = page->channels().size();
             if (wasActive->size() < n) wasActive->resize(n);
             for (int i = 0; i < n; ++i) {
@@ -1461,8 +1511,16 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         ch->setExportVisible(model->getAudioExportEnabled());
         ch->waveform()->setAdaptToFx(model->getAdaptWaveformToFx());
         ch->waveform()->setShowCropMarkers(model->getShowCropMarkers());
-        if (model->getAdaptWaveformToFx())
+        if (model->getAdaptWaveformToFx()) {
             ch->waveform()->setSandboxState(ch->sandboxState());
+            // Seed the live FxPanel state too so the waveform reflects
+            // the channel's CURRENT pitch/speed/reverb the moment the
+            // adaptive view is turned on, instead of waiting for the
+            // user to nudge a slider before any visualisation appears.
+            ch->waveform()->setLiveFx(ch->fx()->pitch(),
+                                       ch->fx()->speed(),
+                                       ch->fx()->reverb());
+        }
     };
     for (auto *ch : page->channels()) wireChannelSandbox(ch);
     QObject::connect(page, &MainPage::channelAdded, [page, wireChannelSandbox](int idx){
@@ -1494,8 +1552,25 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     if (sampler) {
         auto *meterTimer = new QTimer(page);
         meterTimer->setInterval(40);
-        QObject::connect(meterTimer, &QTimer::timeout, page, [page, sampler, model](){
+        // drainTicks keeps the loop pumping (0, 0) frames for a short
+        // window AFTER anyPlaying() returns false, so per-channel meter
+        // peak-hold AND the per-band EQ LED bars finish decaying to
+        // zero. Without this the early return on !anyPlaying() froze
+        // every visual at its last-frame value the instant the user
+        // stopped the last sound. 75 ticks @ 40 ms = 3 s, enough for
+        // the slowest decay (EqBandWidget release coefficient 0.10)
+        // to reach ~99 % settled. Counter is reset to 75 every tick
+        // while anyPlaying is true, so any new playback restarts the
+        // window from scratch.
+        QObject::connect(meterTimer, &QTimer::timeout, page, [page, sampler, model, drainTicks = 0]() mutable {
             if (!model->getAudioMeterVisible()) return;
+            if (!page->isVisible()) return;
+            if (sampler->anyPlaying()) {
+                drainTicks = 75;
+            } else {
+                if (drainTicks <= 0) return;
+                --drainTicks;
+            }
             const int n = page->channels().size();
             for (int i = 0; i < n; ++i) {
                 Sampler::state_e st = sampler->getState(i);
@@ -1506,9 +1581,31 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 // keeps decaying multiplicatively until it reaches the
                 // floor, then change-detect kills the paint events.
                 page->channels().at(i)->setMeterPeak(l, r);
+                page->channels().at(i)->pushSandboxLevel(l, r);
+                float bands[16];
+                sampler->getSlotEqBandLevels(i, bands);
+                page->channels().at(i)->pushSandboxEqLevels(bands);
             }
         });
         meterTimer->start();
+
+        // Separate, slow timer pushes the per-channel DSP CPU% into any
+        // sandbox dialog that is currently open. 1 Hz tick - the
+        // measurement is rolling and the user does not need 60 Hz on a
+        // diagnostic readout. Also drained when the page is hidden so
+        // there is no measurement noise + no needless atomic exchanges
+        // while the soundboard isn't on screen.
+        auto *cpuTimer = new QTimer(page);
+        cpuTimer->setInterval(1000);
+        QObject::connect(cpuTimer, &QTimer::timeout, page, [page, sampler](){
+            if (!page->isVisible()) return;
+            if (!sampler->anyPlaying()) return;
+            const int n = page->channels().size();
+            for (int i = 0; i < n; ++i)
+                page->channels().at(i)->pushSandboxCpu(
+                    sampler->getSlotCpuPercent(i));
+        });
+        cpuTimer->start();
     }
 }
 

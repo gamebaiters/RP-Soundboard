@@ -42,6 +42,17 @@ public:
 
     void setAllControlsEnabled(bool on);
 
+    // Polled from the wiring layer at ~1 Hz: display the DSP CPU% the
+    // slot has been spending the last second.
+    void setCpuPercent(double pct);
+    // Polled from the meter timer (~25 Hz). Pushes the channel's
+    // current peak level into the EQ band widgets so they animate.
+    void pushAudioLevel(float peakL, float peakR);
+    // Per-band spectrum levels from the slot's FFT analyser. Each
+    // band's widget gets its own level so the LED column reflects
+    // ONLY that frequency's content.
+    void pushEqBandLevels(const float bands[16]);
+
 signals:
     void stateChanged(const SandboxState &s);
     void resetRequested(int channelId);
@@ -70,6 +81,10 @@ private slots:
     void onPasteEq();
     void onCopySandbox();
     void onPasteSandbox();
+    // Indented plain-JSON dump of the live sandbox state (no marker
+    // prefix, no Base64). Aimed at bug reports - the user can paste
+    // this into a GitHub issue and a human can read every field.
+    void onCopySandboxJsonDebug();
 
 private:
     void buildUi();
@@ -94,6 +109,7 @@ private:
     bool m_loading = false;
 
     QCheckBox     *m_enable      = nullptr;
+    class QLabel  *m_cpuLabel    = nullptr;
     QComboBox     *m_modeBox     = nullptr;
     QPushButton   *m_resetBtn    = nullptr;
     QPushButton   *m_closeBtn    = nullptr;
@@ -150,7 +166,7 @@ private:
 
     // EQ
     QCheckBox        *m_eqEnable = nullptr;
-    QVector<QSlider*> m_eqSliders;
+    QVector<class EqBandWidget*> m_eqSliders;
     QVector<QLabel*>  m_eqLabels;
 
     // Compressor
@@ -226,6 +242,20 @@ private:
 
     // Mono
     QCheckBox *m_monoEnable = nullptr;
+
+    // Random per-fire PITCH jitter (per-channel sandbox feature).
+    // Lives inside the DSP accordion alongside the other modules now,
+    // not as its own full-width section, so it shares the visual
+    // language of the rest of the chain.
+    class QCheckBox *m_randomEnable = nullptr;
+    class QSpinBox  *m_randomPitch  = nullptr;
+
+    // Sidechain ducking: this channel ducks every other slot while it
+    // plays. Also lives inside the DSP accordion as a compact module.
+    class QCheckBox *m_duckEnable     = nullptr;
+    class QSlider   *m_duckAmount     = nullptr;
+    class QLabel    *m_duckAmountLabel = nullptr;
+
 
     // Generation Loss
     QCheckBox   *m_genLossEnable = nullptr;

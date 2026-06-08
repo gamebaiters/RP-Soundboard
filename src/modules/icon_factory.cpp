@@ -46,6 +46,35 @@ QIcon play(const QColor &c)
     return finish(pm);
 }
 
+QIcon reverse(const QColor &c)
+{
+    QPixmap pm = canvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    // Two stacked left-pointing triangles (universal "fast rewind"
+    // glyph) - reads as "go backward / from end to start".
+    const qreal w = (kSize - kInset * 2.0) * 0.5;
+    const qreal h = kSize - kInset * 2.0;
+    qreal x1 = kInset;
+    qreal x2 = kInset + w;
+    auto leftTri = [&](qreal x){
+        QPolygonF tri;
+        tri << QPointF(x,         kSize / 2.0)
+            << QPointF(x + w - 1, kInset)
+            << QPointF(x + w - 1, kSize - kInset);
+        QPainterPath path;
+        path.addPolygon(tri);
+        path.closeSubpath();
+        p.drawPath(path);
+    };
+    leftTri(x1);
+    leftTri(x2);
+    (void)h;
+    return finish(pm);
+}
+
 QIcon pause(const QColor &c)
 {
     QPixmap pm = canvas();

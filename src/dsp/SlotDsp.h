@@ -17,7 +17,10 @@
 #include "Bitcrusher.h"
 #include "GenerationLoss.h"
 
+
 #include <vector>
+#include <atomic>
+#include <cstdint>
 
 // Per-slot DSP block. Lazy-allocated by the Sampler when a channel
 // first turns on its sandbox toggle so slots without sandbox keep zero
@@ -99,6 +102,18 @@ public:
     // and pushed to the per-path Reverb stage.
     void setFxReverbWet(float wet);
 
+    // Rolling DSP CPU percent. Audio thread accumulates per-block
+    // wall-clock time in process()/produceStretchedShort(); GUI thread
+    // reads the rolling value via these getters. cpuPercent() returns
+    // % of real-time spent in the chain over the last ~500 ms window;
+    // it self-resets after read so the next poll covers the next
+    // window. Cheap to maintain (one steady_clock per block).
+    double cpuPercent();
+
+    // Read the playback path's EQ band levels (0..1) into out[16].
+    // Lock-free; the audio thread updates atomics from runFftAnalysis.
+    void getEqBandLevels(float out[16]) const;
+
 private:
     // Per-path DSP state. Capture path (server-bound) and playback
     // path (local-bound) keep INDEPENDENT EQ + Positional + Reverb
@@ -138,6 +153,14 @@ private:
 
     PathState m_play;
     PathState m_cap;
+
+    // Rolling CPU measurement. m_cpuNs accumulates wall-clock ns spent
+    // in process/produceStretchedShort. m_cpuFrames counts the frames
+    // those calls processed. cpuPercent() converts to percent of real
+    // time and resets both atomics. Atomic load + clear so the GUI
+    // poll is lock-free against the audio thread.
+    std::atomic<int64_t> m_cpuNs    {0};
+    std::atomic<int64_t> m_cpuFrames{0};
 
     // Per-slot streaming paulstretch state. We keep TWO independent
     // instances - one fed by the playback path (local listener), one

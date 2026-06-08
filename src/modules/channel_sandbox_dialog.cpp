@@ -6,6 +6,7 @@
 #include "icon_factory.h"
 #include "../ExpandableSection.h"
 #include "../dsp/EqRack.h"
+#include "eq_band_widget.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -17,6 +18,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QCheckBox>
+#include <QSpinBox>
 #include <QScrollArea>
 #include <QStyle>
 #include <QApplication>
@@ -80,6 +82,20 @@ QString genLossDesc(int v) {
     return QString::number(v) + " (destroyed)";
 }
 
+// Built-in EQ preset shapes shared by the preset dropdown lambda
+// captures. Kept at namespace scope so lambdas don't have to capture
+// the array.
+struct EqPresetEntry { const char *name; float v[16]; };
+static const EqPresetEntry kEqBuiltIn[] = {
+    {"Flat",     {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},
+    {"Low cut",  {-12,-12,-10,-7,-4,-1,0,0,0,0,0,0,0,0,0,0}},
+    {"High cut", {0,0,0,0,0,0,0,0,0,0,0,-2,-5,-8,-10,-12}},
+    {"Smile",    {4,5,5,4,2,0,-2,-3,-3,-2,0,2,4,5,5,4}},
+    {"Voice",    {-4,-3,-2,-1,0,1,2,3,4,5,5,4,2,0,-2,-4}},
+};
+static constexpr int kEqBuiltInCount =
+    (int)(sizeof(kEqBuiltIn) / sizeof(kEqBuiltIn[0]));
+
 // Map dropdown index <-> SandboxState::SpatialMode. The dropdown order
 // is the natural reading order; the enum values are stable so saved
 // INI files keep loading correctly.
@@ -108,8 +124,8 @@ ChannelSandboxDialog::ChannelSandboxDialog(int channelId, QWidget *parent)
         QSize avail(1280, 800);
         if (QScreen *scr = QGuiApplication::primaryScreen())
             avail = scr->availableGeometry().size();
-        resize(qMin(1240, avail.width()  - 80),
-               qMin(940,  avail.height() - 48));
+        resize(qMin(1360, avail.width()  - 60),
+               qMin(1000, avail.height() - 40));
     }
     setMinimumSize(640, 460);
     buildUi();
@@ -194,6 +210,12 @@ void ChannelSandboxDialog::buildUi()
         "consumes zero CPU. Every parameter below is preserved on disk\n"
         "so you can re-enable later and pick up exactly where you left."), this));
     topRow->addStretch(1);
+    m_cpuLabel = new QLabel(tr("CPU --"), this);
+    m_cpuLabel->setStyleSheet("color: #8aa6c0; font-size: 10px;");
+    m_cpuLabel->setToolTip(tr(
+        "DSP CPU used by this channel over the last second.\n"
+        "High values mean a heavy effect is engaged."));
+    topRow->addWidget(m_cpuLabel);
     root->addLayout(topRow);
 
     // ===== Spatial mode selector =====
@@ -390,6 +412,14 @@ void ChannelSandboxDialog::buildUi()
             m_leiaRoomType->addItem(tr("Tiles"));
             m_leiaRoomType->addItem(tr("Concrete"));
             m_leiaRoomType->addItem(tr("Glass (most reflective)"));
+            m_leiaRoomType->addItem(tr("Living room"));
+            m_leiaRoomType->addItem(tr("Wood cabin"));
+            m_leiaRoomType->addItem(tr("Hall"));
+            m_leiaRoomType->addItem(tr("Cathedral"));
+            m_leiaRoomType->addItem(tr("Bathroom"));
+            m_leiaRoomType->addItem(tr("Car"));
+            m_leiaRoomType->addItem(tr("Outdoor (anechoic)"));
+            m_leiaRoomType->addItem(tr("Underwater"));
             m_leiaRoomType->setSizeAdjustPolicy(
                 QComboBox::AdjustToMinimumContentsLengthWithIcon);
             m_leiaRoomType->setMinimumContentsLength(6);
@@ -438,27 +468,148 @@ void ChannelSandboxDialog::buildUi()
     eqHeader->addWidget(pasteEqBtn);
     connect(copyEqBtn, &QPushButton::clicked, this, &ChannelSandboxDialog::onCopyEq);
     connect(pasteEqBtn, &QPushButton::clicked, this, &ChannelSandboxDialog::onPasteEq);
+    // EQ preset picker - small dropdown matching the sandbox preset
+    // strip below. Built-in presets are listed first (locked, no
+    // delete) followed by the user's own saved curves. Save dumps the
+    // current 16 bands into a named preset; Delete only fires on user
+    // presets.
+    auto applyShape = [this](const float *shape){
+        m_loading = true;
+        for (int b = 0; b < 16 && b < m_eqSliders.size(); ++b) {
+            int v = (int)std::round(shape[b]);
+            if (v < -12) v = -12;
+            if (v >  12) v =  12;
+            m_state.eqBandDb[b] = (float)v;
+            if (m_eqSliders[b]) m_eqSliders[b]->setValue(v);
+        }
+        m_loading = false;
+        pushChange();
+    };
+    eqHeader->addSpacing(6);
+    m_eqPresetBox = new QComboBox(eqBox);
+    m_eqPresetBox->setMinimumContentsLength(10);
+    auto *eqPresetSaveBtn   = new QPushButton(tr("Save..."), eqBox);
+    auto *eqPresetDeleteBtn = new QPushButton(tr("Delete"),  eqBox);
+    eqPresetSaveBtn->setMaximumWidth(64);
+    eqPresetDeleteBtn->setMaximumWidth(64);
+    eqHeader->addWidget(m_eqPresetBox);
+    eqHeader->addWidget(eqPresetSaveBtn);
+    eqHeader->addWidget(eqPresetDeleteBtn);
+
+    auto refreshEqCombo = [this]{
+        QSignalBlocker bl(m_eqPresetBox);
+        m_eqPresetBox->clear();
+        m_eqPresetBox->addItem(tr("(select preset)"), -1);
+        for (int i = 0; i < kEqBuiltInCount; ++i)
+            m_eqPresetBox->addItem(QString::fromLatin1(kEqBuiltIn[i].name), i);
+        const auto userPresets = PresetManager::loadEqPresets();
+        if (!userPresets.isEmpty())
+            m_eqPresetBox->insertSeparator(m_eqPresetBox->count());
+        for (const auto &p : userPresets)
+            m_eqPresetBox->addItem(p.name, 1000 + m_eqPresetBox->count());
+    };
+    refreshEqCombo();
+
+    auto updateDeleteEnabled = [this, eqPresetDeleteBtn]{
+        int idx = m_eqPresetBox->currentIndex();
+        QVariant tag = m_eqPresetBox->itemData(idx);
+        bool isUser = idx >= 0 && tag.isValid() && tag.toInt() >= 1000;
+        eqPresetDeleteBtn->setEnabled(isUser);
+    };
+    updateDeleteEnabled();
+
+    connect(m_eqPresetBox, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, [this, applyShape, updateDeleteEnabled](int idx){
+        QVariant tag = m_eqPresetBox->itemData(idx);
+        if (tag.isValid()) {
+            int t = tag.toInt();
+            if (t >= 0 && t < kEqBuiltInCount) {
+                applyShape(kEqBuiltIn[t].v);
+            } else if (t >= 1000) {
+                QString name = m_eqPresetBox->itemText(idx);
+                const auto presets = PresetManager::loadEqPresets();
+                for (const auto &p : presets) {
+                    if (p.name == name) {
+                        QStringList parts = p.data.split('#', Qt::SkipEmptyParts);
+                        float buf[16] = {0};
+                        for (int i = 0; i < 16 && i < parts.size(); ++i)
+                            buf[i] = parts[i].toFloat();
+                        applyShape(buf);
+                        break;
+                    }
+                }
+            }
+        }
+        updateDeleteEnabled();
+    });
+
+    connect(eqPresetSaveBtn, &QPushButton::clicked, this,
+            [this, refreshEqCombo]{
+        bool ok = false;
+        QString name = QInputDialog::getText(this, tr("Save EQ preset"),
+            tr("Preset name:"), QLineEdit::Normal, QString(), &ok);
+        if (!ok || name.trimmed().isEmpty()) return;
+        name = name.trimmed();
+        // Refuse a name that collides with a built-in - those are
+        // immutable. The user can always pick a different name.
+        for (int i = 0; i < kEqBuiltInCount; ++i) {
+            if (name.compare(QString::fromLatin1(kEqBuiltIn[i].name),
+                              Qt::CaseInsensitive) == 0) {
+                QMessageBox::warning(this, tr("Save EQ preset"),
+                    tr("\"%1\" is a built-in preset; pick another name.").arg(name));
+                return;
+            }
+        }
+        QString data;
+        for (int i = 0; i < 16; ++i)
+            data += "#" + QString::number(m_state.eqBandDb[i]);
+        PresetManager::saveEqPreset(name, data);
+        refreshEqCombo();
+        for (int i = 0; i < m_eqPresetBox->count(); ++i) {
+            if (m_eqPresetBox->itemText(i) == name) {
+                QSignalBlocker bl(m_eqPresetBox);
+                m_eqPresetBox->setCurrentIndex(i);
+                break;
+            }
+        }
+    });
+
+    connect(eqPresetDeleteBtn, &QPushButton::clicked, this,
+            [this, refreshEqCombo]{
+        int idx = m_eqPresetBox->currentIndex();
+        QVariant tag = m_eqPresetBox->itemData(idx);
+        if (!tag.isValid() || tag.toInt() < 1000) return;
+        QString name = m_eqPresetBox->itemText(idx);
+        auto choice = QMessageBox::question(this, tr("Delete EQ preset"),
+            tr("Delete preset \"%1\"?").arg(name),
+            QMessageBox::Yes | QMessageBox::No);
+        if (choice != QMessageBox::Yes) return;
+        PresetManager::deleteEqPreset(name);
+        refreshEqCombo();
+    });
     eqHeader->addStretch(1);
     eqOuter->addLayout(eqHeader);
 
     auto *eqGrid = new QWidget(eqBox);
     auto *eqLay = new QGridLayout(eqGrid);
-    eqLay->setHorizontalSpacing(2);
-    eqLay->setVerticalSpacing(3);
+    eqLay->setHorizontalSpacing(0);
+    eqLay->setVerticalSpacing(2);
+    eqLay->setContentsMargins(0, 0, 0, 0);
     eqOuter->addWidget(eqGrid, 1);
     for (int i = 0; i < EqRack::kNumBands; ++i) {
-        auto *s = new QSlider(Qt::Vertical, eqGrid);
-        s->setRange(-12, 12);
-        s->setValue(0);
-        s->setMinimumHeight(80);
-        s->setMaximumWidth(20);
+        auto *s = new EqBandWidget(eqGrid);
+        s->setMinimumHeight(110);
+        s->setMaximumWidth(14);
+        s->setMinimumWidth(14);
         m_eqSliders.append(s);
         auto *freq = new QLabel(fmtFreq(EqRack::bandFrequency(i)), eqGrid);
         freq->setAlignment(Qt::AlignHCenter);
-        freq->setStyleSheet("font-size: 10px;");
+        freq->setStyleSheet("font-size: 9px;");
+        freq->setMaximumWidth(30);
         auto *val = new QLabel("0", eqGrid);
         val->setAlignment(Qt::AlignHCenter);
-        val->setStyleSheet("font-size: 10px;");
+        val->setStyleSheet("font-size: 9px;");
+        val->setMaximumWidth(30);
         m_eqLabels.append(val);
         eqLay->addWidget(s,    0, i, Qt::AlignHCenter);
         eqLay->addWidget(freq, 1, i, Qt::AlignHCenter);
@@ -915,6 +1066,67 @@ void ChannelSandboxDialog::buildUi()
     }
     dspScrollLay->addWidget(genLossSection);
 
+    // ---- Random per-fire pitch jitter ----
+    auto *randomSection = new ExpandableSection(
+        tr("Random pitch per fire"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *hdr = new QHBoxLayout;
+        m_randomEnable = new QCheckBox(tr("Enable random pitch jitter"));
+        m_randomEnable->setToolTip(tr(
+            "Roll a fresh random pitch offset every fire and on every\n"
+            "loop. Keeps repeated triggers from sounding mechanical."));
+        hdr->addWidget(m_randomEnable);
+        hdr->addStretch(1);
+        lay->addLayout(hdr);
+        QSlider *rs = nullptr; QLabel *rlbl = nullptr;
+        auto *r1 = buildSliderRow(nullptr, tr("Pitch range +/-"),
+                                  0, 200, 0, tr(" cents"), rs, rlbl);
+        m_randomPitch = nullptr; // we keep QSpinBox below, slider unused
+        // Replace with QSpinBox for explicit numeric entry (cents are
+        // small enough that the slider precision was awkward).
+        delete r1;
+        m_randomPitch = new QSpinBox(nullptr);
+        m_randomPitch->setRange(0, 200);
+        m_randomPitch->setSuffix(tr(" cents"));
+        auto *rrow = new QHBoxLayout;
+        rrow->addWidget(new QLabel(tr("Pitch range +/-")));
+        rrow->addWidget(m_randomPitch, 1);
+        lay->addLayout(rrow);
+        randomSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(randomSection);
+
+    // ---- Sidechain ducking ----
+    auto *duckSection = new ExpandableSection(
+        tr("Sidechain ducking"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *hdr = new QHBoxLayout;
+        m_duckEnable = new QCheckBox(tr("Duck other channels while I play"));
+        m_duckEnable->setToolTip(tr(
+            "While this channel produces audio every other slot's\n"
+            "output is attenuated by the amount below. Smooth attack /\n"
+            "release. Music channel + SFX channel pair: music dips\n"
+            "under the SFX and returns when it ends."));
+        hdr->addWidget(m_duckEnable);
+        hdr->addStretch(1);
+        lay->addLayout(hdr);
+        m_duckAmount = new QSlider(Qt::Horizontal);
+        m_duckAmount->setRange(-30, 0);
+        m_duckAmount->setValue(-12);
+        m_duckAmountLabel = new QLabel("-12 dB");
+        m_duckAmountLabel->setMinimumWidth(56);
+        m_duckAmountLabel->setAlignment(Qt::AlignRight);
+        auto *drow = new QHBoxLayout;
+        drow->addWidget(new QLabel(tr("Amount:")));
+        drow->addWidget(m_duckAmount, 1);
+        drow->addWidget(m_duckAmountLabel);
+        lay->addLayout(drow);
+        duckSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(duckSection);
+
     // Map each DspStage to its accordion panel. EQ, Spatial and Reverb
     // stay nullptr - their controls live in the left column.
     m_stageSection[SandboxState::Stage_Paulstretch] = stretchSection;
@@ -1025,6 +1237,11 @@ void ChannelSandboxDialog::buildUi()
         refreshPresetCombo();
     });
 
+    // Random per-fire pitch jitter + Sidechain ducking live inside the
+    // DSP accordion above (alongside Compressor, Saturator, etc.) so
+    // they share the visual language of the rest of the chain instead
+    // of stealing a whole row of the dialog.
+
     // ===== Bottom: reset + copy/paste sandbox + close =====
     auto *btnRow = new QHBoxLayout;
     m_resetBtn = new QPushButton(tr("Reset audio sandbox for this channel"), this);
@@ -1081,7 +1298,90 @@ void ChannelSandboxDialog::buildUi()
     });
     connect(m_leiaRoomType, qOverload<int>(&QComboBox::currentIndexChanged),
             this, [this](int idx){
-        m_state.leiaRoomType = idx; pushChange();
+        // Each preset is a BUNDLE: absorption (handled by the engine
+        // from leiaRoomType) + a recommended room size + reflection
+        // level + width slider. Without bundling, picking "Cathedral"
+        // on a 10 m room at -25 dB reflLevel sounded identical to
+        // "Drapes" - because the reflection signal was already drowned
+        // by absorption-independent gating. The bundle below
+        // guarantees an audible difference on every preset.
+        //
+        // size in metres / reflLvl in dB / width % / enableRefl
+        struct PresetBundle { float size; int reflDb; int width; bool enable; };
+        static const PresetBundle kBundle[] = {
+            { 10.0f,  -12,  70, true  }, // 0  Drapes
+            { 10.0f,   -9,  60, true  }, // 1  Studio
+            { 10.0f,   -3,  80, true  }, // 2  Tiles
+            { 15.0f,   -3,  85, true  }, // 3  Concrete
+            { 15.0f,   -3,  90, true  }, // 4  Glass
+            { 12.0f,   -6,  70, true  }, // 5  Living room
+            { 10.0f,   -6,  65, true  }, // 6  Wood cabin
+            { 35.0f,   -3,  90, true  }, // 7  Hall
+            { 50.0f,   -1,  95, true  }, // 8  Cathedral
+            {  7.0f,    0,  85, true  }, // 9  Bathroom
+            {  7.0f,   -9,  60, true  }, // 10 Car
+            { 50.0f,  -25,  10, false }, // 11 Outdoor (no reflections)
+            { 18.0f,   -6,  60, true  }, // 12 Underwater
+        };
+        const int n = static_cast<int>(sizeof(kBundle) / sizeof(kBundle[0]));
+        if (idx < 0 || idx >= n) {
+            m_state.leiaRoomType = idx;
+            pushChange();
+            return;
+        }
+        const PresetBundle &b = kBundle[idx];
+        m_state.leiaRoomType   = idx;
+        m_state.leiaRoomSize   = b.size;
+        m_state.leiaReflLevel  = static_cast<float>(b.reflDb);
+        m_state.leiaWidth      = static_cast<float>(b.width);
+        m_state.leiaReflEnable = b.enable;
+        // Guarantee audibility: the room type ONLY produces sound when
+        // the Leia engine is rendering a 3D mode. Picking a preset
+        // while the channel sits on Classic / Off / LR Pan would do
+        // absolutely nothing audible - "I picked Cathedral and heard
+        // no change" was exactly that. Force the engine to Leia and
+        // bump the spatial mode to 3D Manual when needed, plus
+        // re-enable the master sandbox if the user had it off.
+        bool needsModeBump = (m_state.spatialMode != SandboxState::Spatial_3DManual
+                          &&  m_state.spatialMode != SandboxState::Spatial_3DRotate
+                          &&  m_state.spatialMode != SandboxState::Spatial_8DPreset);
+        if (!m_state.enabled)        m_state.enabled        = true;
+        if (m_state.spatialEngine != SandboxState::Engine_Leia)
+            m_state.spatialEngine = SandboxState::Engine_Leia;
+        if (needsModeBump)
+            m_state.spatialMode = SandboxState::Spatial_3DManual;
+        // Make sure the spatial wet/dry isn't zero either - a user with
+        // the slider at 0 would still hear nothing. Nudge to at least
+        // 60% but never lower the user's setting.
+        if (m_state.spatialMix < 0.6f) m_state.spatialMix = 0.6f;
+        // Push the new bundle values into the widgets too so the user
+        // sees what just happened. m_loading-style blocker not needed
+        // here - the per-widget connect lambdas all early-return on
+        // m_loading, and we set it before / after the setters.
+        m_loading = true;
+        if (m_leiaRoomSize) {
+            m_leiaRoomSize->setValue(static_cast<int>(b.size));
+            m_leiaRoomSizeLabel->setText(QString::number(static_cast<int>(b.size)) + " m");
+        }
+        if (m_leiaReflLevel) {
+            m_leiaReflLevel->setValue(b.reflDb);
+            m_leiaReflLevelLabel->setText(QString::number(b.reflDb) + " dB");
+        }
+        if (m_leiaWidth) {
+            m_leiaWidth->setValue(b.width);
+            m_leiaWidthLabel->setText(QString::number(b.width) + "%");
+        }
+        if (m_leiaRefl) m_leiaRefl->setChecked(b.enable);
+        if (m_engineBox && m_engineBox->currentIndex() != 1)
+            m_engineBox->setCurrentIndex(1); // Leia
+        if (needsModeBump && m_modeBox)
+            m_modeBox->setCurrentIndex(dropdownForMode(SandboxState::Spatial_3DManual));
+        if (m_enable && !m_enable->isChecked()) m_enable->setChecked(true);
+        if (m_spatialMix) m_spatialMix->setValue(
+            std::max(m_spatialMix->value(), 60));
+        m_loading = false;
+        applyModeVisibility();
+        pushChange();
     });
     connect(m_leiaClarity, &QSlider::valueChanged, this, [this](int v){
         m_state.leiaClarity = static_cast<float>(v);
@@ -1413,6 +1713,25 @@ void ChannelSandboxDialog::buildUi()
     });
 
     // Generation Loss
+    if (m_randomEnable)
+        connect(m_randomEnable, &QCheckBox::toggled, this, [this](bool on){
+            m_state.randomEnabled = on; pushChange();
+        });
+    if (m_randomPitch)
+        connect(m_randomPitch, qOverload<int>(&QSpinBox::valueChanged),
+                this, [this](int v){ m_state.randomPitchCents = v; pushChange(); });
+    if (m_duckEnable)
+        connect(m_duckEnable, &QCheckBox::toggled, this, [this](bool on){
+            m_state.duckSource = on; pushChange();
+        });
+    if (m_duckAmount)
+        connect(m_duckAmount, &QSlider::valueChanged, this, [this](int v){
+            m_state.duckOthersDb = static_cast<float>(v);
+            if (m_duckAmountLabel)
+                m_duckAmountLabel->setText(QString::number(v) + " dB");
+            pushChange();
+        });
+
     connect(m_genLossEnable, &QCheckBox::toggled, this, [this](bool on){
         m_state.genLossEnabled = on; pushChange();
     });
@@ -1653,6 +1972,12 @@ void ChannelSandboxDialog::pushStateToWidgets()
     if (m_monoEnable) m_monoEnable->setChecked(m_state.monoEnabled);
 
     if (m_genLossEnable) m_genLossEnable->setChecked(m_state.genLossEnabled);
+    if (m_randomEnable) m_randomEnable->setChecked(m_state.randomEnabled);
+    if (m_randomPitch)  m_randomPitch->setValue(m_state.randomPitchCents);
+    if (m_duckEnable)   m_duckEnable->setChecked(m_state.duckSource);
+    if (m_duckAmount)   m_duckAmount->setValue(static_cast<int>(m_state.duckOthersDb));
+    if (m_duckAmountLabel)
+        m_duckAmountLabel->setText(QString::number(static_cast<int>(m_state.duckOthersDb)) + " dB");
     if (m_genLossGens) {
         m_genLossGens->setValue(m_state.genLossGenerations);
         m_genLossGensLabel->setText(genLossDesc(m_state.genLossGenerations));
@@ -1722,6 +2047,38 @@ void ChannelSandboxDialog::onEngineChanged(int idx)
     SandboxEnginePref::save(engine);
     applyModeVisibility();
     pushChange();
+}
+
+void ChannelSandboxDialog::setCpuPercent(double pct)
+{
+    if (!m_cpuLabel) return;
+    if (pct < 0.05) {
+        m_cpuLabel->setText(tr("CPU <0.1%"));
+    } else {
+        m_cpuLabel->setText(tr("CPU %1%").arg(pct, 0, 'f', 1));
+    }
+}
+
+void ChannelSandboxDialog::pushAudioLevel(float peakL, float peakR)
+{
+    // Broadband fallback. The proper per-band animation now comes from
+    // pushEqBandLevels (FFT-driven); this stays as a safety net for
+    // slots whose DSP block has not been built yet.
+    (void)peakL; (void)peakR;
+}
+
+void ChannelSandboxDialog::pushEqBandLevels(const float bands[16])
+{
+    if (!isVisible()) return;
+    for (int i = 0; i < 16 && i < m_eqSliders.size(); ++i)
+        if (m_eqSliders[i]) m_eqSliders[i]->setLevel(bands[i]);
+}
+
+void ChannelSandboxDialog::onCopySandboxJsonDebug()
+{
+    QJsonDocument doc(m_state.toJson());
+    QApplication::clipboard()->setText(
+        QString::fromUtf8(doc.toJson(QJsonDocument::Indented)));
 }
 
 void ChannelSandboxDialog::onEnableToggled(bool on)

@@ -30,4 +30,11 @@ void         saveName(int channelId, const QString &name);
 int          loadChannelCount();
 void         saveChannelCount(int count);
 
+// Cascade-shift persisted state + name from positional index `from+1`
+// down to `from`. Called after MainPage::removeChannel(idx) so the
+// persisted (positional) record stays aligned with the renumbered
+// channel ids. `totalRemaining` is the post-remove channel count.
+// Safe no-op when nothing is saved past `from`.
+void         shiftDownFrom(int from, int totalRemaining);
+
 }

@@ -138,6 +138,9 @@ void ButtonGrid::applyButtonAppearance(int idx) {
     else
         b->setBackgroundColor(QColor());
     b->setBackgroundImage(s.imagePath);
+    // Lazy hover tooltip: FileMetadata only probes on the first hover
+    // after this path is set, so applying a whole grid stays cheap.
+    b->setSoundFilePath(s.filename);
 }
 
 void ButtonGrid::applyFilter() {

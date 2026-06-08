@@ -42,6 +42,7 @@
 #include <ctime>
 static FILE *g_dbgSamples = nullptr;
 #include "plugin.h"
+#include "ts3log.h"
 static void sdbgOpen()
 {
 	if (!g_rpsbLogsEnabled) return;
@@ -58,16 +59,27 @@ static void sdbgOpen()
 }
 static void sdbgLog(const char *fmt, ...)
 {
+	// Format into a stack buffer once, then send the same line to
+	// both the file and the in-memory ring used by the in-app log
+	// viewer. Mirrors the policy in inputfileffmpeg.cpp's dbgLog.
 	if (!g_rpsbLogsEnabled) return;
-	sdbgOpen();
-	if (!g_dbgSamples) return;
+	char buf[1024];
+	int written = 0;
+	written = snprintf(buf, sizeof(buf), "[samples] ");
+	if (written < 0) written = 0;
+	if (written > static_cast<int>(sizeof(buf)) - 1)
+		written = static_cast<int>(sizeof(buf)) - 1;
 	va_list ap;
 	va_start(ap, fmt);
-	fprintf(g_dbgSamples, "[samples] ");
-	vfprintf(g_dbgSamples, fmt, ap);
+	vsnprintf(buf + written, sizeof(buf) - written, fmt, ap);
 	va_end(ap);
-	fprintf(g_dbgSamples, "\n");
-	fflush(g_dbgSamples);
+	sdbgOpen();
+	if (g_dbgSamples) {
+		fputs(buf, g_dbgSamples);
+		fputc('\n', g_dbgSamples);
+		fflush(g_dbgSamples);
+	}
+	rpsbDebugRingPush(buf);
 }
 
 extern "C" void rpsb_close_debug_log()
@@ -128,6 +140,74 @@ void Sampler::setSlotLoop(int slot, bool on)
 	m_slots[slot].loop = on;
 }
 
+void Sampler::setSlotReverse(int slot, bool on)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	PlaybackSlot &s = m_slots[slot];
+	if (s.channelReverse == on) return;
+	s.channelReverse = on;
+	state_e st = s.state.load();
+	if (!((st == ePLAYING || st == ePAUSED) && s.lastSoundValid))
+		return;
+
+	// In-place direction swap. The waveform widget never sees an
+	// onStop / onStart pair so the analysed bins, the loaded filename
+	// and the channel state stay intact - no flicker, no re-analysis.
+	double resumeSec = s.cachedPositionSec.load(std::memory_order_relaxed);
+	const SoundInfo lastSound = s.lastSound;
+
+	s.producerThread.setSource(NULL);
+	if (s.inputFile) {
+		s.inputFile->close();
+		delete s.inputFile;
+		s.inputFile = NULL;
+	}
+	{
+		SampleBuffer::Lock sblc(s.sbCapture.getMutex());
+		SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
+		s.sbCapture.consume(NULL, s.sbCapture.avail());
+		s.sbPlayback.consume(NULL, s.sbPlayback.avail());
+	}
+	if (s.dsp) s.dsp->reset();
+
+	s.inputFile = CreateInputFileFFmpeg();
+	if (lastSound.reverse || on)   s.inputFile->setReverse(true);
+	if (lastSound.autoNormalize)   s.inputFile->setAutoNormalize(true);
+	// Apply pitch / speed / reverb BEFORE open() so the filter graph
+	// (and the reverse pre-decode pass) builds with them baked in.
+	// Without this the buffer was decoded at identity and the user
+	// briefly heard the file without their FX before the deferred
+	// rebuild fired.
+	float pitchBase = (s.lastSlotPitchFactor > 0.01f)
+		? s.lastSlotPitchFactor : m_pitchFactor;
+	if (pitchBase != 1.0f) s.inputFile->setPitchFactor(pitchBase);
+	if (m_speedFactor != 1.0f) s.inputFile->setSpeedFactor(m_speedFactor);
+	if (m_reverbMix > 0.0f)    s.inputFile->setReverbMix(m_reverbMix);
+	int rc = -1;
+	try {
+		rc = s.inputFile->open(lastSound.filename.toUtf8(),
+		                       lastSound.getStartTime(),
+		                       lastSound.getPlayTime());
+	} catch (...) {
+		rc = -1;
+	}
+	if (rc != 0) {
+		delete s.inputFile;
+		s.inputFile = NULL;
+		s.state = eSILENT;
+		emit onStopPlaying(slot);
+		return;
+	}
+	// Precision seek: cached position is what the user sees, not the
+	// decoder's raw cursor which leads by ~bufferedSec. Resume there
+	// so the cursor does not visibly jump.
+	s.inputFile->seek(resumeSec);
+	s.cachedPositionSec.store(resumeSec, std::memory_order_relaxed);
+	s.posCacheValid = false;
+	s.producerThread.setSource(s.inputFile);
+}
+
 void Sampler::setSlotSandboxState(int slot, const SandboxState &s)
 {
 	if (slot < 0 || slot >= MAX_SLOTS) return;
@@ -168,6 +248,11 @@ void Sampler::setSlotSandboxState(int slot, const SandboxState &s)
 	bool wasStretchOn = sl.dsp ? sl.dsp->state().stretchEnabled : false;
 	bool wasDspMissing = false;  // dsp was ensured under Phase 1's lock
 	sl.dsp->applyState(s);
+	// Mirror the ducking flags onto the slot so the audio thread can
+	// read them lock-free in fetchInputSamples. Master sandbox switch
+	// off => duck is OFF too, regardless of the per-feature checkbox.
+	sl.duckSource   = s.enabled && s.duckSource;
+	sl.duckOthersDb = s.duckOthersDb;
 	// Re-route any prior FxPanel reverb into the dsp's end-stage and
 	// disable the libavfilter pre-reverb. Without this, enabling the
 	// sandbox after a reverb was already set would leave the legacy
@@ -235,6 +320,36 @@ void Sampler::getSlotPeak(int slot, float &peakL, float &peakR) const
 	}
 	peakL = m_slots[slot].peakL.load();
 	peakR = m_slots[slot].peakR.load();
+}
+
+double Sampler::getSlotCpuPercent(int slot)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return 0.0;
+	SlotDsp *d = m_slots[slot].dsp.get();
+	return d ? d->cpuPercent() : 0.0;
+}
+
+void Sampler::getSlotEqBandLevels(int slot, float out[16]) const
+{
+	for (int i = 0; i < 16; ++i) out[i] = 0.0f;
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	// Levels only meaningful while audio is actively being rendered.
+	// Pause / stop -> push zeros so the widgets smoothly decay to off
+	// instead of freezing at the last frame.
+	state_e st = m_slots[slot].state.load(std::memory_order_relaxed);
+	if (st != ePLAYING && st != ePLAYING_PREVIEW) return;
+	SlotDsp *d = m_slots[slot].dsp.get();
+	if (d) d->getEqBandLevels(out);
+}
+
+bool Sampler::anyPlaying() const
+{
+	for (int s = 0; s < MAX_SLOTS; ++s) {
+		state_e st = m_slots[s].state.load(std::memory_order_relaxed);
+		if (st == ePLAYING || st == ePAUSED || st == ePLAYING_PREVIEW)
+			return true;
+	}
+	return false;
 }
 
 //---------------------------------------------------------------
@@ -478,6 +593,27 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 
 	int totalWritten = 0;
 
+	// Sidechain ducking: find the deepest (most negative dB) active
+	// duck source. Every non-source playing slot will smoothly attack
+	// toward that attenuation; everyone else releases back to unity.
+	// Source slots themselves never duck their own output (otherwise
+	// the duck depth depends on whether a single channel is its own
+	// source).
+	double duckTargetDb       = 0.0;
+	int    duckSourceSlotIdx  = -1;
+	for (int s = 0; s < MAX_SLOTS; s++) {
+		const PlaybackSlot &slot = m_slots[s];
+		state_e st2 = slot.state.load();
+		if (st2 != ePLAYING) continue;
+		if (!slot.duckSource) continue;
+		if (slot.duckOthersDb < duckTargetDb) {
+			duckTargetDb      = slot.duckOthersDb;
+			duckSourceSlotIdx = s;
+		} else if (duckSourceSlotIdx < 0) {
+			duckSourceSlotIdx = s;
+		}
+	}
+
 	for (int s = 0; s < MAX_SLOTS; s++)
 	{
 		PlaybackSlot &slot = m_slots[s];
@@ -488,9 +624,30 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 		if (st == ePAUSED)
 			continue;
 
+		// Smoothly attack / release the ducking gain. duckGain is the
+		// LINEAR multiplier currently applied; convert to dB and add
+		// to setVolumeDb for this block. Source slots and lone-channel
+		// playback see target = 1.0 (no attenuation).
+		bool isDuckee = (duckSourceSlotIdx >= 0) && (s != duckSourceSlotIdx)
+		             && !slot.duckSource;
+		float targetGain = isDuckee
+			? static_cast<float>(std::pow(10.0, duckTargetDb / 20.0))
+			: 1.0f;
+		float curGain = slot.duckGain.load(std::memory_order_relaxed);
+		// Attack faster than release so a SFX riding music gets the
+		// duck instantly but the music returns gracefully when the
+		// SFX ends. Per-block coefficients (~20ms blocks).
+		float alpha = (targetGain < curGain) ? 0.55f : 0.10f;
+		curGain += alpha * (targetGain - curGain);
+		if (curGain < 0.0001f) curGain = 0.0001f;
+		if (curGain > 1.0f)    curGain = 1.0f;
+		slot.duckGain.store(curGain, std::memory_order_relaxed);
+		double duckActiveDb = (curGain >= 0.9999f) ? 0.0
+		                    : 20.0 * std::log10(curGain);
+
 		// Set volume for this slot: per-slot in multi-mode, global otherwise
 		double remoteDb = m_multiMode ? slot.slotDbRemote : m_globalDbSettingRemote;
-		setVolumeDb(remoteDb + slot.soundDbSetting);
+		setVolumeDb(remoteDb + slot.soundDbSetting + duckActiveDb);
 
 		bool muteCapture = m_muteMyself.load(std::memory_order_relaxed);
 		bool isFirstSlot = (totalWritten == 0);
@@ -517,35 +674,38 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 				if (sf <= 0.0) sf = 1.0;
 				int availSamples = 0;
 				{
-					// SampleBuffer::avail() asserts the buffer mutex is
-					// held; the position computation is best-effort anyway,
-					// so a brief lock here keeps the assert + RaceBuilder
-					// clean without measurably extending the audio block.
 					SampleBuffer::Lock sblp(slot.sbPlayback.getMutex());
 					availSamples = slot.sbPlayback.avail();
 				}
 				double bufferedSec = availSamples / 48000.0 * sf;
-				posSec = decoderPos - bufferedSec;
-				if (posSec < 0.0) posSec = 0.0;
+				// Reverse: decoder runs file backward, so samples still
+				// in the playback buffer correspond to forward times
+				// HIGHER than decoderPos. Add instead of subtract.
+				if (slot.channelReverse) {
+					posSec = decoderPos + bufferedSec;
+					if (posSec > lenSec) posSec = lenSec;
+				} else {
+					posSec = decoderPos - bufferedSec;
+					if (posSec < 0.0) posSec = 0.0;
+				}
 			}
-			// Rate-limit + monotonic guard. Live speed / pitch changes
-			// recompute bufferedSec with the new sf against the buffer
-			// content produced at the OLD sf, so the raw position can
-			// jump backward (cursor "bounce") or jump forward by several
-			// seconds when the user drags a slider. We keep the cursor
-			// monotonic and cap the per-cycle forward advance at a
-			// value comfortably above real playback rate at the highest
-			// supported speed (3x) so normal play is never throttled.
+			// Rate-limit + monotonic guard. Direction depends on the
+			// slot's reverse flag - forward play is monotonic up,
+			// reverse play is monotonic down. The per-cycle advance is
+			// clamped so a slider seek can never jump several seconds.
 			{
 				double prev = slot.cachedPositionSec.load(std::memory_order_relaxed);
 				double accepted = posSec;
 				if (slot.posCacheValid) {
-					if (accepted < prev) {
-						accepted = prev;
+					constexpr double kMaxPerCycle = 0.20;
+					if (!slot.channelReverse) {
+						if (accepted < prev) accepted = prev;
+						else if (accepted > prev + kMaxPerCycle)
+							accepted = prev + kMaxPerCycle;
 					} else {
-						constexpr double kMaxFwdPerCycle = 0.20;
-						if (accepted > prev + kMaxFwdPerCycle)
-							accepted = prev + kMaxFwdPerCycle;
+						if (accepted > prev) accepted = prev;
+						else if (accepted < prev - kMaxPerCycle)
+							accepted = prev - kMaxPerCycle;
 					}
 				} else {
 					slot.posCacheValid = true;
@@ -570,7 +730,48 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 			if (canEnd)
 			{
 				if (slot.loop) {
-					slot.inputFile->seek(slot.cropStart);
+					// Per-playback random pitch jitter. Reads the LIVE
+					// SandboxState + gates on the sandbox master switch
+					// so toggling master off stops the jitter on the
+					// next loop boundary. Applies the jitter multiplier
+					// ON TOP of the slot's intended pitch (last value
+					// pushed via setSlotPitchFactor by the FxPanel
+					// wiring), so the channel's pitch slider is never
+					// clobbered by global pitch on loop restart.
+					//
+					// Reverse mode: loop restart point is the FORWARD
+					// file end (cropEnd if set, otherwise full file
+					// length). seek(end) drops the reverse buffer back
+					// to its index-0 position so playback restarts at
+					// the right edge of the waveform and walks left.
+					double loopStartSec = slot.cropStart;
+					if (slot.channelReverse) {
+						loopStartSec = (slot.cropEnd > 0.0)
+							? slot.cropEnd
+							: slot.inputFile->getLength();
+					}
+					float  slotBasePitch = slot.lastSlotPitchFactor;
+					if (slotBasePitch < 0.01f) slotBasePitch = m_pitchFactor;
+					if (slot.dsp && slot.inputFile) {
+						const SandboxState &st = slot.dsp->state();
+						if (st.enabled
+						 && st.randomEnabled
+						 && st.randomPitchCents > 0)
+						{
+							auto urand = []{ return (double)rand()
+							                       / (double)RAND_MAX; };
+							double jc = (urand() * 2.0 - 1.0) * st.randomPitchCents;
+							double mul = std::pow(2.0, jc / 1200.0);
+							slot.inputFile->setPitchFactor(
+								slotBasePitch * static_cast<float>(mul));
+						} else if (slot.randomActive) {
+							// Random was active at fire but is now off -
+							// restore the slot's intended pitch (FxPanel
+							// channel slider value).
+							slot.inputFile->setPitchFactor(slotBasePitch);
+						}
+					}
+					slot.inputFile->seek(loopStartSec);
 					{
 						SampleBuffer::Lock sblp(slot.sbPlayback.getMutex());
 						slot.sbPlayback.clear();
@@ -585,7 +786,7 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 					// the cache to cropStart so the cursor jumps back to
 					// the loop point instead of being held forward by
 					// the monotonic guard.
-					slot.cachedPositionSec.store(slot.cropStart, std::memory_order_relaxed);
+					slot.cachedPositionSec.store(loopStartSec, std::memory_order_relaxed);
 					slot.posCacheValid = false;
 				} else {
 					slot.state = eSILENT;
@@ -657,9 +858,15 @@ int Sampler::fetchOutputSamples(short *samples, int count, int channels, const u
 		if (st == ePAUSED)
 			continue;
 
-		// Set volume for this slot: per-slot in multi-mode, global otherwise
+		// Set volume for this slot: per-slot in multi-mode, global otherwise.
+		// Local playback honours the same duck gain the capture path
+		// applied this block - reading the already-updated value keeps
+		// the two paths phase-locked.
+		float curDuck = slot.duckGain.load(std::memory_order_relaxed);
+		double duckActiveDb = (curDuck >= 0.9999f) ? 0.0
+		                    : 20.0 * std::log10(std::max(curDuck, 1e-4f));
 		double localDb = m_multiMode ? slot.slotDbLocal : m_globalDbSettingLocal;
-		setVolumeDb(localDb + slot.soundDbSetting);
+		setVolumeDb(localDb + slot.soundDbSetting + duckActiveDb);
 
 		bool isFirstSlot = (totalWritten == 0);
 		int written = fetchSamples(slot.sbPlayback, m_peakMeterPlayback, samples, count, channels, true,
@@ -786,7 +993,9 @@ void Sampler::setSlotVolumeRemote(int slot, int vol)
 void Sampler::setSlotPitchFactor(int slot, float factor)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
-	if (slot >= 0 && slot < MAX_SLOTS && m_slots[slot].inputFile)
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	m_slots[slot].lastSlotPitchFactor = factor;
+	if (m_slots[slot].inputFile)
 		m_slots[slot].inputFile->setPitchFactor(factor);
 }
 
@@ -967,6 +1176,17 @@ void Sampler::stopSlotInternal(int slot)
 		s.cachedLengthSec.store(0.0, std::memory_order_relaxed);
 		s.posCacheValid = false;
 
+		// Drop the per-playback random-variation footprint so the next
+		// play starts with a fresh roll (the audio thread reads these
+		// at loop boundaries; stale values from a previous file would
+		// otherwise still drive a brand-new playback for one block).
+		s.randomActive = false;
+		// Release the sidechain duck gain so a slot that was being
+		// ducked snaps back to unity on its next play. Otherwise a
+		// stale 0.x value would attenuate the next sound until the
+		// smoother walked back to 1.
+		s.duckGain.store(1.0f, std::memory_order_relaxed);
+
 		emit onStopPlaying(slot);
 	}
 }
@@ -990,7 +1210,7 @@ int Sampler::findFreeSlot() const
 //---------------------------------------------------------------
 // Purpose: Play a sound in a specific slot (or find one if slot=-1)
 //---------------------------------------------------------------
-bool Sampler::playSoundInSlot(int slot, const SoundInfo &sound, bool preview)
+bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
 	// Reset per-slot DSP state on new playback so EQ biquads + HRTF
@@ -999,6 +1219,8 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &sound, bool preview)
 	// on start when the sandbox was already enabled).
 	if (slot >= 0 && slot < MAX_SLOTS && m_slots[slot].dsp)
 		m_slots[slot].dsp->reset();
+
+	SoundInfo sound = soundOrig;
 
 	sdbgLog("playSoundInSlot: slot=%d file='%s' preview=%d startTime=%.2f playTime=%.2f vol=%.1f",
 		slot, sound.filename.toUtf8().constData(), preview, sound.getStartTime(), sound.getPlayTime(), (double)sound.volume);
@@ -1030,8 +1252,47 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &sound, bool preview)
 
 	PlaybackSlot &s = m_slots[slot];
 
+	// Per-playback random PITCH-only jitter. Volume + start-offset
+	// axes were dropped because they produced glitchy playback
+	// (mid-loop volume jumps + cropStart re-seek artefacts). Pitch
+	// jitter is applied here for the first fire; loop restarts in
+	// fetchInputSamples re-read the LIVE SandboxState so disabling
+	// random mid-playback stops the jitter immediately.
+	double randPitchMul = 1.0;
+	bool   jitterActive = false;
+	if (s.dsp) {
+		const SandboxState &st = s.dsp->state();
+		if (st.enabled && st.randomEnabled && st.randomPitchCents > 0) {
+			jitterActive = true;
+			auto urand = []{ return (double)rand() / (double)RAND_MAX; };
+			double j = (urand() * 2.0 - 1.0) * st.randomPitchCents;
+			randPitchMul = std::pow(2.0, j / 1200.0);
+		}
+	}
+
 	s.inputFile = CreateInputFileFFmpeg();
 	sdbgLog("  CreateInputFileFFmpeg returned %p for slot %d", s.inputFile, slot);
+
+	// Reverse playback + loudness normalisation flags MUST be set
+	// before open() so the filter graph picks them up on construction.
+	// Per-channel reverse override (WaveformPlayer reverse button)
+	// wins over the per-cell flag when ON.
+	if (sound.reverse || s.channelReverse) s.inputFile->setReverse(true);
+	if (sound.autoNormalize)               s.inputFile->setAutoNormalize(true);
+	// Pre-set pitch / speed / reverb factors BEFORE open() so the
+	// initial filter-graph build (and, in reverse mode, the
+	// pre-decode pass) already applies them. Without this the reverse
+	// buffer was built at identity and the first ~250 ms of playback
+	// rendered without atempo/asetrate.
+	{
+		float prePitch = (s.lastSlotPitchFactor > 0.01f
+		                && std::fabs(s.lastSlotPitchFactor - 1.0f) > 1e-4f)
+		                ? s.lastSlotPitchFactor : m_pitchFactor;
+		float preFactor = prePitch * static_cast<float>(randPitchMul);
+		if (preFactor != 1.0f) s.inputFile->setPitchFactor(preFactor);
+		if (m_speedFactor != 1.0f) s.inputFile->setSpeedFactor(m_speedFactor);
+		if (m_reverbMix > 0.0f) s.inputFile->setReverbMix(m_reverbMix);
+	}
 
 	int openRet = -1;
 	try {
@@ -1080,14 +1341,25 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &sound, bool preview)
 	setVolumeDb(localDb + s.soundDbSetting);
 	sdbgLog("  volume set: soundDb=%.1f globalLocal=%.1f globalRemote=%.1f", s.soundDbSetting, m_globalDbSettingLocal, m_globalDbSettingRemote);
 
-	// Apply current pitch/speed factors to the new input file
-	if (m_pitchFactor != 1.0f)
-		s.inputFile->setPitchFactor(m_pitchFactor);
-	if (m_speedFactor != 1.0f)
-		s.inputFile->setSpeedFactor(m_speedFactor);
-	if (m_reverbMix > 0.0f)
+	// Pitch / speed / reverb were already applied above (BEFORE open
+	// so the filter graph / reverse buffer build with them baked in).
+	// Reverb mix only needs a refresh because the per-sample freeverb
+	// reads the live m_reverbMix every block.
+	if (m_reverbMix > 0.0f && std::fabs(m_reverbMix - 0.0f) > 1e-4f)
 		s.inputFile->setReverbMix(m_reverbMix);
-	sdbgLog("  pitch=%.2f speed=%.2f reverb=%.2f applied to slot %d inputFile", m_pitchFactor, m_speedFactor, m_reverbMix, slot);
+	sdbgLog("  pitch=%.2f (jitter %.3f) speed=%.2f reverb=%.2f applied to slot %d inputFile",
+		m_pitchFactor, randPitchMul, m_speedFactor, m_reverbMix, slot);
+
+	// Fast-path flag so the loop-restart hot loop can skip the
+	// SandboxState re-read when random has never been enabled on this
+	// slot. The live state is still checked at every loop boundary
+	// (see fetchInputSamples) so a user enabling random mid-playback
+	// still gets jitter on the next loop iteration.
+	s.randomActive = jitterActive;
+	// Remember the SoundInfo so setSlotReverse can re-trigger this
+	// playback when the channel's reverse button is toggled mid-play.
+	s.lastSound       = sound;
+	s.lastSoundValid  = true;
 
 	SampleBuffer::Lock sblc(s.sbCapture.getMutex());
 	SampleBuffer::Lock sblp(s.sbPlayback.getMutex());

@@ -5,6 +5,7 @@
 #include "search_bar.h"
 #include "button_grid.h"
 #include "channel.h"
+#include "channel_state_persistence.h"
 #include "reset_channels_btn.h"
 #include "settings_window.h"
 #include "onboarding_overlay.h"
@@ -282,6 +283,15 @@ void MainPage::removeChannel(int idx) {
     auto *ch = m_channels.takeAt(idx);
     m_channelsLayout->removeWidget(ch);
     ch->deleteLater();
+    // Renumber channels [idx .. end-1] so m_id matches positional index
+    // again - without this, the per-channel sandbox dialog title, signal
+    // emissions (sandboxStateChanged(id,...) etc.) and any external
+    // persistence keyed by channelId all drift after a middle-channel
+    // removal. Persistence shift below keeps the saved INI aligned with
+    // the new positions.
+    ChannelStatePersistence::shiftDownFrom(idx, m_channels.size());
+    for (int i = idx; i < m_channels.size(); ++i)
+        m_channels.at(i)->setChannelId(i);
     emit channelRemoved(idx);
 }
 

@@ -7,6 +7,7 @@
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
+#include <QSettings>
 #include <QFileInfo>
 #include <QMutex>
 #include <QMutexLocker>
@@ -25,6 +26,25 @@ QString resolveSofaPath()
     static QMutex mutex;
     static QString cached;
     QMutexLocker lock(&mutex);
+
+    // Custom-SOFA override: user can point the Leia engine at any
+    // personalised HRTF dataset via QSettings("GameBaiters","Soundboard")
+    // key "leia/custom_sofa_path". When set and the file exists, it
+    // wins over the bundled default. The lookup is cached the FIRST
+    // time we resolve so the audio-thread path through ensureInit
+    // (which can fire on a slot's first Leia block as a fallback)
+    // never hits QSettings disk I/O.
+    static bool customChecked = false;
+    static QString customCached;
+    if (!customChecked) {
+        QSettings sset(QStringLiteral("GameBaiters"),
+                       QStringLiteral("Soundboard"));
+        customCached = sset.value(QStringLiteral("leia/custom_sofa_path"))
+                          .toString();
+        customChecked = true;
+    }
+    if (!customCached.isEmpty() && QFile::exists(customCached))
+        return customCached;
 
     if (!cached.isEmpty())
         return cached;

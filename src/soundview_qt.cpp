@@ -376,47 +376,9 @@ void SoundView::setAdaptToFx(bool on)
 void SoundView::setSandboxState(const SandboxState &s)
 {
 	bool stretchParamChanged = s.enabled && s.stretchEnabled && (
-		s.stretchFactor != m_sandbox.stretchFactor ||
+		s.stretchFactor   != m_sandbox.stretchFactor ||
 		s.stretchWindowMs != m_sandbox.stretchWindowMs ||
 		(s.stretchEnabled && !m_sandbox.stretchEnabled));
-
-	bool needRedraw = m_adaptToFx && (
-		s.enabled != m_sandbox.enabled ||
-		s.stretchEnabled != m_sandbox.stretchEnabled ||
-		s.stretchFactor != m_sandbox.stretchFactor ||
-		s.stretchWindowMs != m_sandbox.stretchWindowMs ||
-		s.eqEnabled != m_sandbox.eqEnabled ||
-		s.compEnabled != m_sandbox.compEnabled ||
-		s.compThresholdDb != m_sandbox.compThresholdDb ||
-		s.compRatio != m_sandbox.compRatio ||
-		s.saturatorEnabled != m_sandbox.saturatorEnabled ||
-		s.saturatorDrive != m_sandbox.saturatorDrive ||
-		s.saturatorMix != m_sandbox.saturatorMix ||
-		s.bitcrusherEnabled != m_sandbox.bitcrusherEnabled ||
-		s.bitcrusherBitDepth != m_sandbox.bitcrusherBitDepth ||
-		s.bitcrusherRate != m_sandbox.bitcrusherRate ||
-		s.monoEnabled != m_sandbox.monoEnabled ||
-		s.genLossEnabled != m_sandbox.genLossEnabled ||
-		s.genLossGenerations != m_sandbox.genLossGenerations ||
-		s.chorusEnabled != m_sandbox.chorusEnabled ||
-		s.chorusMix != m_sandbox.chorusMix ||
-		s.flangerEnabled != m_sandbox.flangerEnabled ||
-		s.flangerMix != m_sandbox.flangerMix ||
-		s.flangusEnabled != m_sandbox.flangusEnabled ||
-		s.flangusMix != m_sandbox.flangusMix ||
-		s.phaserEnabled != m_sandbox.phaserEnabled ||
-		s.phaserMix != m_sandbox.phaserMix ||
-		s.delayEnabled != m_sandbox.delayEnabled ||
-		s.delayMix != m_sandbox.delayMix ||
-		s.limiterEnabled != m_sandbox.limiterEnabled ||
-		s.reverbWet != m_sandbox.reverbWet);
-
-	bool eqChanged = m_adaptToFx && s.eqEnabled;
-	if (!needRedraw && eqChanged) {
-		for (int i = 0; i < 16; ++i) {
-			if (s.eqBandDb[i] != m_sandbox.eqBandDb[i]) { needRedraw = true; break; }
-		}
-	}
 
 	m_sandbox = s;
 
@@ -432,7 +394,28 @@ void SoundView::setSandboxState(const SandboxState &s)
 		m_loadTimer->stop();
 	}
 
-	if (needRedraw) {
+	// Earlier this method had a long list of per-field diffs that
+	// gated needRedraw. The list missed every continuous slider that
+	// did not also flip a bool (e.g. compThresholdDb without
+	// compEnabled toggling), so dragging compressor ratio left the
+	// waveform stale. Cheaper and more correct: when the adaptive
+	// view is on, redraw whenever ANY sandbox state lands. The bin
+	// FX pass is cheap (1024 bins) and only happens after a state
+	// arrives, so this does not spin the GUI.
+	if (m_adaptToFx) {
+		m_drawnBins = 0;
+		update();
+	}
+}
+
+void SoundView::setLiveFx(int pitch, int speed, int reverb)
+{
+	if (pitch == m_fxPitch && speed == m_fxSpeed && reverb == m_fxReverb)
+		return;
+	m_fxPitch  = pitch;
+	m_fxSpeed  = speed;
+	m_fxReverb = reverb;
+	if (m_adaptToFx) {
 		m_drawnBins = 0;
 		update();
 	}
@@ -652,6 +635,34 @@ void SoundView::applyFxToBins(std::vector<float> &binsL, std::vector<float> &bin
 			if (binsL[i] < -ceil) binsL[i] = -ceil;
 			if (binsR[i] >  ceil) binsR[i] =  ceil;
 			if (binsR[i] < -ceil) binsR[i] = -ceil;
+		}
+	}
+
+	// FxPanel pitch / speed do not actually transform the waveform
+	// (the file content does not change - only playback rate). Earlier
+	// builds resampled the bins on the x-axis to "visualise" speed,
+	// but that squashed the wave toward x=0 and left the cursor
+	// floating over empty pixels in the right half. Pitch gain biasing
+	// was also misleading because the file amplitude does not depend
+	// on pitch slider. Both are removed. Only reverb is hinted at via
+	// a tail since reverb truly adds extra wet on top of the dry.
+	if (m_fxReverb > 0) {
+		float wet = m_fxReverb / 100.0f;
+		int tailLen = 64;
+		std::vector<float> tailL(count, 0.0f), tailR(count, 0.0f);
+		float decay = 0.93f;
+		for (size_t i = 0; i < count; ++i) {
+			float al = binsL[i], ar = binsR[i];
+			float g = wet * 0.5f;
+			for (int k = 1; k < tailLen && i + k < count; ++k) {
+				tailL[i + k] += al * g;
+				tailR[i + k] += ar * g;
+				g *= decay;
+			}
+		}
+		for (size_t i = 0; i < count; ++i) {
+			binsL[i] += tailL[i];
+			binsR[i] += tailR[i];
 		}
 	}
 }

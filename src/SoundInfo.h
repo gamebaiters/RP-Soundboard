@@ -58,6 +58,19 @@ public:
 	// the whole button face; the label gets a translucent black backdrop
 	// in the center so it stays readable on top of any image.
 	QString imagePath;
+
+	// Play the sample back-to-front when ON. Filter chain adds the
+	// FFmpeg `areverse` filter, which buffers the whole stream then
+	// outputs reversed. Intended for short SFX cells - long files
+	// will allocate memory proportional to length.
+	bool reverse;
+
+	// EBU R128 loudness normalisation per-cell. When ON the FFmpeg
+	// `loudnorm` filter runs in single-pass mode and brings the cell
+	// to -16 LUFS integrated with a -1 dBTP peak ceiling. Stops loud
+	// memes from drowning out quiet stings without per-cell volume
+	// tweaking.
+	bool autoNormalize;
 };
 
 #endif // rpsbsrc__SoundInfo_H__

@@ -99,6 +99,14 @@ private:
                                      // are ignored at playback / preview
     FxPanel     *m_fx;
 
+    // Per-cell reverse playback toggle. Inserts an `areverse` filter
+    // into the decoder graph so the sound plays back-to-front. Cost is
+    // proportional to file length (whole stream is buffered).
+    QCheckBox   *m_reverseChk = nullptr;
+    // Per-cell LUFS auto-normalisation. Inserts `loudnorm` filter so
+    // the cell hits -16 LUFS integrated regardless of source level.
+    QCheckBox   *m_normalizeChk = nullptr;
+
     QPushButton *m_hotkeyBtn;
     QPushButton *m_hotkeyReset;
 

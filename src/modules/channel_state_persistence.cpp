@@ -84,4 +84,32 @@ void saveChannelCount(int count) {
     s.setValue("meta/channel_count", count);
 }
 
+void shiftDownFrom(int from, int totalRemaining) {
+    QString path = filePath();
+    if (path.isEmpty()) return;
+    QSettings s(path, QSettings::IniFormat);
+    // Move keys: channel_{from+1} -> channel_{from}, ...,
+    // channel_{totalRemaining} -> channel_{totalRemaining-1}, then drop
+    // the now-orphaned tail section.
+    for (int p = from; p < totalRemaining; ++p) {
+        QString src = QString("channel_%1").arg(p + 1);
+        QString dst = QString("channel_%1").arg(p);
+        QString stateKeySrc = src + "/state";
+        QString stateKeyDst = dst + "/state";
+        QString nameKeySrc  = src + "/name";
+        QString nameKeyDst  = dst + "/name";
+        QVariant st = s.value(stateKeySrc);
+        QVariant nm = s.value(nameKeySrc);
+        if (st.isValid()) s.setValue(stateKeyDst, st); else s.remove(stateKeyDst);
+        if (nm.isValid()) s.setValue(nameKeyDst,  nm); else s.remove(nameKeyDst);
+    }
+    // Drop the trailing section that nothing now references. Without
+    // this it would re-appear as a phantom channel on the next session
+    // restore.
+    QString tail = QString("channel_%1").arg(totalRemaining);
+    s.beginGroup(tail);
+    s.remove("");
+    s.endGroup();
+}
+
 }

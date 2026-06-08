@@ -1,6 +1,47 @@
 #include "SlotDsp.h"
 #include <cmath>
 #include <algorithm>
+#include <chrono>
+
+namespace {
+// Tiny RAII timer that adds elapsed ns to a pair of atomic counters at
+// destruction. Used to wrap SlotDsp::process and produceStretchedShort
+// without sprinkling timer logic through both functions.
+struct ScopedCpuTimer {
+    std::atomic<int64_t> &ns;
+    std::atomic<int64_t> &frames;
+    int  framesProcessed;
+    std::chrono::steady_clock::time_point start;
+    ScopedCpuTimer(std::atomic<int64_t> &nsOut,
+                   std::atomic<int64_t> &framesOut,
+                   int framesIn)
+        : ns(nsOut), frames(framesOut), framesProcessed(framesIn),
+          start(std::chrono::steady_clock::now()) {}
+    ~ScopedCpuTimer() {
+        auto end = std::chrono::steady_clock::now();
+        int64_t took = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           end - start).count();
+        ns.fetch_add(took, std::memory_order_relaxed);
+        frames.fetch_add(framesProcessed, std::memory_order_relaxed);
+    }
+};
+} // namespace
+
+void SlotDsp::getEqBandLevels(float out[16]) const
+{
+    for (int i = 0; i < 16; ++i)
+        out[i] = m_play.eq.bandLevel(i);
+}
+
+double SlotDsp::cpuPercent()
+{
+    int64_t ns     = m_cpuNs    .exchange(0, std::memory_order_relaxed);
+    int64_t frames = m_cpuFrames.exchange(0, std::memory_order_relaxed);
+    if (frames <= 0 || m_fs <= 0.0) return 0.0;
+    double realTimeNs = (double)frames / m_fs * 1e9;
+    if (realTimeNs <= 0.0) return 0.0;
+    return 100.0 * (double)ns / realTimeNs;
+}
 
 namespace {
 inline short clampToShort(float x) {
@@ -507,6 +548,7 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
 
 void SlotDsp::process(short *interleaved, int frames, int channels,
                       float &peakL, float &peakR, bool isCapture) {
+    ScopedCpuTimer t(m_cpuNs, m_cpuFrames, frames);
     PathState &p = isCapture ? m_cap : m_play;
     constexpr float kInv = 1.0f / 32768.0f;
 
@@ -539,6 +581,11 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
         // Inject anti-denormal bias before any stateful filter.
         float dither = antiDenormDither(i);
         l += dither; r -= dither;
+
+        // Always feed the EQ analyser regardless of the eqEnabled
+        // gate so the per-band LED widgets keep reflecting the input
+        // spectrum even when the EQ stage is bypassed.
+        p.eq.feedAnalysis(l, r);
 
         for (int si = 0; si < SandboxState::Stage_COUNT; ++si) {
             int stage = m_state.pipelineOrder[si];
@@ -574,6 +621,7 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
 
 void SlotDsp::produceStretchedShort(short *out, int frames, int channels,
                                      float &peakL, float &peakR, bool isCapture) {
+    ScopedCpuTimer t(m_cpuNs, m_cpuFrames, frames);
     StretchState &s = isCapture ? m_stretchCap : m_stretchPlay;
     PathState &p = isCapture ? m_cap : m_play;
     static thread_local std::vector<float> tmpL, tmpR;

@@ -98,6 +98,14 @@ signals:
     void globalFxEnabledChanged(bool);
     void hideWaveformChanged(bool);
     void logsEnabledChanged(bool);
+    // User clicked the hidden "Show real-time log" button in the
+    // Logging section. Forwarded by the wiring layer to sb_openLogViewer.
+    void showLogViewerRequested();
+    // User clicked the hidden "Copy sandbox debug snapshot" link in
+    // the Logging section. The wiring layer iterates every channel's
+    // sandbox state and writes a single indented JSON document to
+    // the clipboard so the user can paste it into a bug report.
+    void copySandboxDebugRequested();
     void audioSandboxEnabledChanged(bool);
     void audioMeterVisibleChanged(bool);
     void audioExportEnabledChanged(bool);
@@ -140,6 +148,10 @@ private:
     QCheckBox   *m_globalFx;
     QCheckBox   *m_hideWaveform;
     QCheckBox   *m_logsEnabled;
+    // Discrete button next to the debug-log checkbox that opens the
+    // in-app real-time log viewer. Intentionally low-key (small, plain
+    // text label) - it's an advanced diagnostic, not a primary control.
+    QPushButton *m_logViewerBtn = nullptr;
     QCheckBox   *m_sandboxEnabled = nullptr;
     QCheckBox   *m_meterVisible   = nullptr;
     QCheckBox   *m_exportEnabled  = nullptr;

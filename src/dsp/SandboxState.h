@@ -193,6 +193,27 @@ struct SandboxState
     bool  genLossEnabled     = false;
     int   genLossGenerations = 1;          // 1..1000
 
+    // ---- Random per-fire variation (per channel) ----
+    // Opt-in pitch jitter applied to every sound that fires through
+    // this channel's slot AND to every loop restart (audio thread
+    // re-reads from the live SandboxState every loop, so disabling
+    // the feature mid-playback stops the jitter immediately).
+    // Volume + start-offset axes were removed - they produced glitchy
+    // playback (volume jumps mid-loop, start-offset re-seeks mid-buffer)
+    // and the only one the user actually wanted is pitch.
+    bool  randomEnabled      = false;
+    int   randomPitchCents   = 0;     // 0..200
+
+    // ---- Sidechain ducking (per channel) ----
+    // Mark a channel as a DUCK SOURCE - while it is playing, every
+    // other slot's output volume drops by duckOthersDb (clamped -30..0).
+    // Smoothly attacks / releases so the duck does not click. The
+    // typical use is: music on channel 0, mic-style SFX on channel 1
+    // with duckSource=true. The SFX plays, music ducks under it,
+    // music returns when the SFX ends.
+    bool  duckSource         = false;
+    float duckOthersDb       = -12.0f; // -30..0; less = deeper duck
+
     // DSP pipeline order (user-draggable). Default = canonical enum
     // order, so it matches defaultPipelineOrder() (out[i] = i).
     int pipelineOrder[Stage_COUNT] = {

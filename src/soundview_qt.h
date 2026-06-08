@@ -32,6 +32,12 @@ public:
 	void clearPlayback();
 	void setAdaptToFx(bool on);
 	void setSandboxState(const SandboxState &s);
+	// Live FxPanel state (per-channel simple FX outside the sandbox).
+	// pitch/speed in slider units (-100..100, pow(3.0, v/100) factor),
+	// reverb 0..100. Fed by the wiring layer when the channel's
+	// FxPanel changes so the waveform mirrors what the user just
+	// applied without waiting for a fresh sandbox state.
+	void setLiveFx(int pitch, int speed, int reverb);
 	void notifySeek();
 
 	// Crop markers. The wiring feeds the ACTUAL crop applied to the
@@ -81,6 +87,14 @@ private:
 	bool m_active;
 	bool m_adaptToFx = false;
 	SandboxState m_sandbox;
+	// Live FxPanel state. Defaults = neutral (pitch=0, speed=0,
+	// reverb=0). When m_adaptToFx is on these get layered on top of
+	// the sandbox visualisation: pitch shifts bin colour cast, speed
+	// compresses the rendered x-axis, reverb stretches a fading tail
+	// past the end of the played portion.
+	int  m_fxPitch  = 0;
+	int  m_fxSpeed  = 0;
+	int  m_fxReverb = 0;
 
 	QTimer        *m_loadTimer = nullptr;
 	QElapsedTimer  m_loadElapsed;

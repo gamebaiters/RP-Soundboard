@@ -50,9 +50,17 @@
 #include "modules/theme.h"
 #include "modules/button_grid.h"
 #include "modules/hotkey_block.h"
+#include "modules/whats_new_dialog.h"
+#include "modules/log_viewer_dialog.h"
 #include <QApplication>
 
 extern "C" void rpsb_close_debug_log();
+
+// File-scope storage for the lazily-created log viewer instance.
+// sb_kill (further up the TU) references it to delete the top-level
+// QWidget before TS3 unloads the plugin DLL; without that step the
+// freed-DLL vtable pattern crashes the client on close.
+LogViewerDialog *logViewerDialog = nullptr;
 
 class ModelObserver_Prog : public ConfigModel::Observer
 {
@@ -423,6 +431,18 @@ CAPI void sb_kill()
 		howToDialog = NULL;
 	}
 
+	// Same rule for the in-app log viewer. Without this, opening the
+	// viewer once then quitting TS3 left a top-level QWidget pointing
+	// into freed plugin DLL code, causing the intermittent client
+	// crash on close the user reported.
+	if (logViewerDialog)
+	{
+		logViewerDialog->hide();
+		logViewerDialog->setParent(nullptr);
+		delete logViewerDialog;
+		logViewerDialog = nullptr;
+	}
+
 	if (updateChecker)
 	{
 		delete updateChecker;
@@ -485,6 +505,14 @@ CAPI void sb_openDialog()
 	}
 
 	sb_enableInterface(connectionStatusMap[activeServerId]);
+
+	// One-shot upgrade notice. Deferred to dialog-open (instead of
+	// sb_init) so the user actually has a parent window to anchor the
+	// modal to, and we never pop release-notes over the TS3 main window
+	// while the soundboard is still hidden. The static guard inside the
+	// helper makes it self-debouncing if openDialog is called repeatedly.
+	WhatsNewDialog::showIfUpdated(mainPage ? static_cast<QWidget*>(mainPage)
+	                                       : static_cast<QWidget*>(configDialog));
 }
 
 
@@ -596,6 +624,19 @@ CAPI void sb_openHowTo()
 	howToDialog->show();
 	howToDialog->raise();
 	howToDialog->activateWindow();
+}
+
+// `logViewerDialog` is declared at file-scope at the top of the TU so
+// sb_kill (which lives further up) can null-check + delete it without
+// hitting LNK2019. The forward decl provides the storage; this comment
+// just marks where the symbol's lifetime actually starts in code.
+CAPI void sb_openLogViewer()
+{
+	if (!logViewerDialog)
+		logViewerDialog = new LogViewerDialog();
+	logViewerDialog->show();
+	logViewerDialog->raise();
+	logViewerDialog->activateWindow();
 }
 
 

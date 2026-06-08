@@ -7,12 +7,25 @@
 #include <algorithm>
 #include <cstring>
 
+// Stable index ordering - new entries always appended so saved INIs
+// keep loading correctly. Each preset carries: absorption[6] +
+// lateFeedback + lateDamp + lateMix + tapLpHz + erDelayScale, so a
+// preset can be characterised by far more than its absorption alone.
 const ShoeboxRoom::RoomPreset ShoeboxRoom::kPresets[] = {
-    { "Drapes",   { 0.80f, 0.80f, 0.80f, 0.80f, 0.70f, 0.60f } },
-    { "Studio",   { 0.50f, 0.50f, 0.50f, 0.50f, 0.45f, 0.40f } },
-    { "Tiles",    { 0.20f, 0.20f, 0.20f, 0.20f, 0.25f, 0.15f } },
-    { "Concrete", { 0.08f, 0.08f, 0.08f, 0.08f, 0.10f, 0.05f } },
-    { "Glass",    { 0.05f, 0.05f, 0.05f, 0.05f, 0.10f, 0.05f } },
+    // name           absorption[6]                                                fb     damp    mix    lpHz       erScale
+    { "Drapes",       { 0.80f, 0.80f, 0.80f, 0.80f, 0.70f, 0.60f },              0.40f, 0.70f,  0.18f, 2400.0f,   1.0f },
+    { "Studio",       { 0.50f, 0.50f, 0.50f, 0.50f, 0.45f, 0.40f },              0.55f, 0.45f,  0.28f, 7000.0f,   1.0f },
+    { "Tiles",        { 0.20f, 0.20f, 0.20f, 0.20f, 0.25f, 0.15f },              0.78f, 0.18f,  0.45f, 12000.0f,  1.0f },
+    { "Concrete",     { 0.08f, 0.08f, 0.08f, 0.08f, 0.10f, 0.05f },              0.86f, 0.12f,  0.55f, 14000.0f,  1.0f },
+    { "Glass",        { 0.05f, 0.05f, 0.05f, 0.05f, 0.10f, 0.05f },              0.88f, 0.08f,  0.60f, 16000.0f,  1.0f },
+    { "Living room",  { 0.55f, 0.55f, 0.60f, 0.60f, 0.75f, 0.45f },              0.50f, 0.55f,  0.22f, 5500.0f,   1.0f },
+    { "Wood cabin",   { 0.40f, 0.40f, 0.40f, 0.40f, 0.50f, 0.45f },              0.58f, 0.42f,  0.30f, 6500.0f,   1.0f },
+    { "Hall",         { 0.18f, 0.18f, 0.18f, 0.18f, 0.55f, 0.35f },              0.86f, 0.22f,  0.62f, 11000.0f,  1.3f },
+    { "Cathedral",    { 0.06f, 0.06f, 0.06f, 0.06f, 0.10f, 0.08f },              0.92f, 0.18f,  0.85f, 9000.0f,   1.6f },
+    { "Bathroom",     { 0.08f, 0.08f, 0.08f, 0.08f, 0.08f, 0.10f },              0.82f, 0.05f,  0.55f, 18000.0f,  0.7f },
+    { "Car",          { 0.70f, 0.70f, 0.75f, 0.75f, 0.65f, 0.70f },              0.30f, 0.65f,  0.15f, 3500.0f,   0.6f },
+    { "Outdoor",      { 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f },              0.00f, 0.85f,  0.00f, 18000.0f,  1.0f },
+    { "Underwater",   { 0.45f, 0.45f, 0.45f, 0.45f, 0.30f, 0.40f },              0.65f, 0.80f,  0.55f, 600.0f,    0.9f },
 };
 
 const int ShoeboxRoom::kNumPresets =
@@ -41,6 +54,40 @@ void ShoeboxRoom::init(float sampleRate, int blockSize,
     m_leftScratch .assign(static_cast<size_t>(blockSize), 0.0f);
     m_rightScratch.assign(static_cast<size_t>(blockSize), 0.0f);
     m_delayRamp   .assign(static_cast<size_t>(blockSize), 0.0f);
+
+    // Schroeder diffuse tail initialisation. Comb delays + allpass
+    // delays from Freeverb (Jezar) scaled to the active sample rate.
+    // Delays are coprime-ish to break the periodicity of the feedback
+    // loops, which is what gives a smooth "wash" instead of a metallic
+    // ring. Right channel uses a small offset so the stereo image is
+    // mildly decorrelated.
+    const float scale = sampleRate / 44100.0f;
+    const int combDelays[kNumCombs] = {
+        int(1116 * scale), int(1188 * scale),
+        int(1277 * scale), int(1356 * scale)
+    };
+    const int combStereoSpread = int(23 * scale);
+    for (int c = 0; c < kNumCombs; ++c) {
+        int dL = combDelays[c];
+        int dR = combDelays[c] + combStereoSpread;
+        m_combs[c].bufL.assign(static_cast<size_t>(dL), 0.0f);
+        m_combs[c].bufR.assign(static_cast<size_t>(dR), 0.0f);
+        m_combs[c].idx = 0;
+        m_combs[c].dampL = 0.0f;
+        m_combs[c].dampR = 0.0f;
+        m_combs[c].feedback = 0.84f;
+        m_combs[c].damp     = 0.20f;
+    }
+    const int allpassDelays[kNumAllpass] = {
+        int(556 * scale), int(441 * scale)
+    };
+    for (int a = 0; a < kNumAllpass; ++a) {
+        int d = allpassDelays[a];
+        m_allpass[a].bufL.assign(static_cast<size_t>(d), 0.0f);
+        m_allpass[a].bufR.assign(static_cast<size_t>(d + combStereoSpread), 0.0f);
+        m_allpass[a].idx = 0;
+        m_allpass[a].feedback = 0.5f;
+    }
 }
 
 void ShoeboxRoom::setRoomSize(float meters)
@@ -64,7 +111,13 @@ void ShoeboxRoom::setReflectionLevel(float dB)
 void ShoeboxRoom::setRoomType(int type)
 {
     if (type < 0 || type >= kNumPresets) return;
-    std::memcpy(m_absorption, kPresets[type].absorption, sizeof(m_absorption));
+    const RoomPreset &p = kPresets[type];
+    std::memcpy(m_absorption, p.absorption, sizeof(m_absorption));
+    m_presetLateFeedback = p.lateFeedback;
+    m_presetLateDamp     = p.lateDamp;
+    m_presetLateMix      = p.lateMix;
+    m_presetTapLpHz      = p.tapLpHz;
+    m_presetErDelayScale = p.erDelayScale;
 }
 
 void ShoeboxRoom::setEnabled(bool on) { m_enabled = on; }
@@ -96,38 +149,35 @@ void ShoeboxRoom::process(float* leftIO, float* rightIO, int frames,
     for (int w = 0; w < kNumWalls; ++w)
         m_taps[w].buffer.write(m_monoScratch.data(), frames);
 
-    // For each reflection: read delayed mono, apply gain, pan to stereo, sum in.
+    // Accumulate per-tap wet into scratch buffers - then mix BOTH the
+    // direct early-reflection wet AND a Schroeder-derived diffuse late
+    // tail into the output. The tail is the difference between this
+    // ShoeboxRoom's output and the old "discrete echoes only" code: it
+    // smooths the decay so the room sounds like a real space instead of
+    // 6 ping-pong echoes.
+    std::fill_n(m_leftScratch .begin(), frames, 0.0f);
+    std::fill_n(m_rightScratch.begin(), frames, 0.0f);
+
     for (int w = 0; w < kNumWalls; ++w) {
         ReflectionTap& tap = m_taps[w];
         if (tap.gain < 1e-6f) continue;
 
-        // Crackle / frying buzz fix on rotating sources (8D preset + Leia):
-        // computeReflections() sets a fresh integer delaySamples every
-        // block. As the source rotates, the image-source distance moves
-        // by a few samples per block, and the previous readFixed() jumped
-        // the delay-line read offset stepwise - producing a per-block
-        // discontinuity in the reflection signal that summed to a ~187 Hz
-        // (48 kHz / kBlock 256) frying tone around the head. Replace the
-        // stepwise read with a per-sample fractional read that lerps the
-        // delay from the previous block's value to the target across the
-        // block. Sub-sample precision + smooth slew = doppler-like sweep
-        // instead of zipper noise.
+        // Crackle fix: per-sample fractional read across the block so
+        // a rotating source does not jump delay every block boundary.
         float prev = tap.prevDelaySamples;
-        if (prev < 0.0f) prev = tap.delaySamples;       // first call: no slew
+        if (prev < 0.0f) prev = tap.delaySamples;
         float target = tap.delaySamples;
         float dD = (frames > 0) ? (target - prev) / static_cast<float>(frames)
                                 : 0.0f;
         for (int i = 0; i < frames; ++i)
             m_delayRamp[i] = prev + dD * static_cast<float>(i);
-        tap.buffer.readFractional(m_delayRamp.data(), m_monoScratch.data(), frames);
+        tap.buffer.readFractional(m_delayRamp.data(),
+                                   m_monoScratch.data(), frames);
         tap.prevDelaySamples = target;
 
         float g = tap.gain * m_reflLevel;
 
-        // Pan from sin(azimuth), not (az+180)/360. The linear mapping
-        // jumped L<->R at the -180/+180 wrap when a rotating source
-        // crossed straight-behind; sin() is continuous and collapses
-        // front/rear to centre, matching the median-plane cue.
+        // sin(az) panning - continuous through the -180/+180 wrap.
         float azRad = tap.azimuthDeg * static_cast<float>(M_PI / 180.0);
         float lateral = std::sin(azRad);
         if (lateral < -1.0f) lateral = -1.0f;
@@ -135,13 +185,99 @@ void ShoeboxRoom::process(float* leftIO, float* rightIO, int frames,
         float azNorm = (lateral + 1.0f) * 0.5f;
         float panR = azNorm;
         float panL = 1.0f - azNorm;
-        float gainL = g * std::sqrt(panL);
-        float gainR = g * std::sqrt(panR);
+        float gainLTarget = g * std::sqrt(panL);
+        float gainRTarget = g * std::sqrt(panR);
 
-        for (int i = 0; i < frames; ++i) {
-            leftIO[i]  += m_monoScratch[i] * gainL;
-            rightIO[i] += m_monoScratch[i] * gainR;
+        // Per-sample lerp of pan gain across the block. The previous
+        // implementation locked gain at the block boundary which produced
+        // a step every ~5 ms on a rotating source - audible as a fast
+        // crackle / fry riding the reflection. Slewing per sample
+        // eliminates the boundary, the lerp time constant matches the
+        // rotation slew already applied to the delay line.
+        float prevGL = tap.prevGainL;
+        float prevGR = tap.prevGainR;
+        if (prevGL == 0.0f && prevGR == 0.0f) {
+            prevGL = gainLTarget;
+            prevGR = gainRTarget;
         }
+        float dGL = (gainLTarget - prevGL) / static_cast<float>(frames);
+        float dGR = (gainRTarget - prevGR) / static_cast<float>(frames);
+        for (int i = 0; i < frames; ++i) {
+            float gl = prevGL + dGL * static_cast<float>(i);
+            float gr = prevGR + dGR * static_cast<float>(i);
+            float x = m_monoScratch[i];
+            tap.lpStateL += (1.0f - tap.lpCoef) * (x * gl - tap.lpStateL);
+            tap.lpStateR += (1.0f - tap.lpCoef) * (x * gr - tap.lpStateR);
+            m_leftScratch [i] += tap.lpStateL;
+            m_rightScratch[i] += tap.lpStateR;
+        }
+        tap.prevGainL = gainLTarget;
+        tap.prevGainR = gainRTarget;
+    }
+
+    // ---- Schroeder diffuse late tail ------------------------------------
+    // Feed the DRY signal (leftIO + rightIO mono mix) into the comb
+    // network so the tail produces a real audible wash. The previous
+    // build fed the early-reflection wet into the combs, but those wets
+    // were already ~30 dB below source so even Cathedral feedback of
+    // 0.92 produced an inaudible tail. Drying the input lets each
+    // preset show its actual character (Underwater LP-heavy mud,
+    // Cathedral long wash, Outdoor stays silent because lateLevel=0).
+    float lateMix = m_lateLevel * m_reflLevel;
+    if (lateMix > 1e-6f) {
+        for (int i = 0; i < frames; ++i) {
+            float dryMono = (leftIO[i] + rightIO[i]) * 0.5f;
+            float inL = dryMono;
+            float inR = dryMono;
+            float combOutL = 0.0f, combOutR = 0.0f;
+            for (int c = 0; c < kNumCombs; ++c) {
+                CombFilter &cf = m_combs[c];
+                int szL = static_cast<int>(cf.bufL.size());
+                int szR = static_cast<int>(cf.bufR.size());
+                int idxL = cf.idx % szL;
+                int idxR = cf.idx % szR;
+                float yL = cf.bufL[idxL];
+                float yR = cf.bufR[idxR];
+                // One-pole HF damping inside the loop. Smoother decay
+                // tail; less metallic ring.
+                cf.dampL = yL * (1.0f - cf.damp) + cf.dampL * cf.damp;
+                cf.dampR = yR * (1.0f - cf.damp) + cf.dampR * cf.damp;
+                cf.bufL[idxL] = inL + cf.dampL * cf.feedback;
+                cf.bufR[idxR] = inR + cf.dampR * cf.feedback;
+                combOutL += yL;
+                combOutR += yR;
+            }
+            for (int c = 0; c < kNumCombs; ++c) m_combs[c].idx++;
+
+            // Series allpasses for diffusion.
+            float yL = combOutL;
+            float yR = combOutR;
+            for (int a = 0; a < kNumAllpass; ++a) {
+                AllPass &ap = m_allpass[a];
+                int szL = static_cast<int>(ap.bufL.size());
+                int szR = static_cast<int>(ap.bufR.size());
+                int idxL = ap.idx % szL;
+                int idxR = ap.idx % szR;
+                float bL = ap.bufL[idxL];
+                float bR = ap.bufR[idxR];
+                float outL = -yL + bL;
+                float outR = -yR + bR;
+                ap.bufL[idxL] = yL + bL * ap.feedback;
+                ap.bufR[idxR] = yR + bR * ap.feedback;
+                yL = outL;
+                yR = outR;
+                ap.idx++;
+            }
+
+            m_leftScratch [i] += yL * lateMix;
+            m_rightScratch[i] += yR * lateMix;
+        }
+    }
+
+    // Sum the combined early + late wet into the output buffers.
+    for (int i = 0; i < frames; ++i) {
+        leftIO [i] += m_leftScratch [i];
+        rightIO[i] += m_rightScratch[i];
     }
 }
 
@@ -155,7 +291,7 @@ void ShoeboxRoom::computeReflections(float srcAz, float srcEl)
         m_taps[w].elevationDeg = el;
 
         static constexpr float kSpeedOfSound = 343.0f;
-        float delaySamplesF = dist / kSpeedOfSound * m_sampleRate;
+        float delaySamplesF = (dist * m_presetErDelayScale) / kSpeedOfSound * m_sampleRate;
 
         float maxDelay = static_cast<float>(m_taps[w].buffer.capacity - m_blockSize - 2);
         if (maxDelay < 0.0f) maxDelay = 0.0f;
@@ -165,7 +301,27 @@ void ShoeboxRoom::computeReflections(float srcAz, float srcEl)
 
         float absCoef = m_absorption[w];
         m_taps[w].gain = (1.0f - absCoef) / std::max(dist, 0.1f);
+
+        // Frequency-dependent damping. Per-preset tapLpHz scales the
+        // per-wall absorption curve - Bathroom keeps 18 kHz, Underwater
+        // forces a hard 600 Hz LP no matter the surface absorption.
+        float cutoffHz = 200.0f + (1.0f - absCoef) * (m_presetTapLpHz - 200.0f);
+        if (cutoffHz < 100.0f)  cutoffHz = 100.0f;
+        if (cutoffHz > 18000.0f) cutoffHz = 18000.0f;
+        float a = std::exp(-2.0f * static_cast<float>(M_PI) * cutoffHz / m_sampleRate);
+        if (a < 0.0f)   a = 0.0f;
+        if (a > 0.999f) a = 0.999f;
+        m_taps[w].lpCoef = a;
     }
+
+    // Late-tail character is driven by the active preset, not derived
+    // from absorption alone. Outdoor explicitly sends 0 wet so it stays
+    // dry. Underwater has heavy damping. Cathedral feedback near 0.92.
+    for (int c = 0; c < kNumCombs; ++c) {
+        m_combs[c].feedback = m_presetLateFeedback;
+        m_combs[c].damp     = m_presetLateDamp;
+    }
+    m_lateLevel = m_presetLateMix;
 }
 
 void ShoeboxRoom::computeImageSource(int   wallIdx,
@@ -220,8 +376,22 @@ void ShoeboxRoom::reset()
 {
     for (int w = 0; w < kNumWalls; ++w) {
         m_taps[w].buffer.clear();
-        // Force the first post-reset block to NOT slew from the prior
-        // session's delay (which would resample the empty ring oddly).
         m_taps[w].prevDelaySamples = -1.0f;
+        m_taps[w].lpStateL = 0.0f;
+        m_taps[w].lpStateR = 0.0f;
+    }
+    // Drain the Schroeder network so a stop/resume does not start the
+    // next playback with a tail from the previous source.
+    for (int c = 0; c < kNumCombs; ++c) {
+        std::fill(m_combs[c].bufL.begin(), m_combs[c].bufL.end(), 0.0f);
+        std::fill(m_combs[c].bufR.begin(), m_combs[c].bufR.end(), 0.0f);
+        m_combs[c].dampL = 0.0f;
+        m_combs[c].dampR = 0.0f;
+        m_combs[c].idx = 0;
+    }
+    for (int a = 0; a < kNumAllpass; ++a) {
+        std::fill(m_allpass[a].bufL.begin(), m_allpass[a].bufL.end(), 0.0f);
+        std::fill(m_allpass[a].bufR.begin(), m_allpass[a].bufR.end(), 0.0f);
+        m_allpass[a].idx = 0;
     }
 }

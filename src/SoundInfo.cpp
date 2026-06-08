@@ -28,6 +28,8 @@
 #define NAME_IS_MACRO "isMacro"
 #define NAME_MACRO_STATE "macroState"
 #define NAME_IMAGE_PATH "imagePath"
+#define NAME_REVERSE "reverse"
+#define NAME_AUTO_NORM "autoNormalize"
 
 #define DEFAULT_PATH ""
 #define DEFAULT_CUSTOM_TEXT ""
@@ -83,7 +85,9 @@ SoundInfo::SoundInfo() :
 	fxSyncPitchSpeed(DEFAULT_FX_SYNC_PITCH_SPEED),
 	isMacro(DEFAULT_IS_MACRO),
 	macroState(),
-	imagePath()
+	imagePath(),
+	reverse(false),
+	autoNormalize(false)
 {
 
 }
@@ -113,6 +117,8 @@ void SoundInfo::readFromConfig( const QSettings &settings )
 	isMacro = settings.value(NAME_IS_MACRO, DEFAULT_IS_MACRO).toBool();
 	macroState = settings.value(NAME_MACRO_STATE, QByteArray()).toByteArray();
 	imagePath = settings.value(NAME_IMAGE_PATH, QString()).toString();
+	reverse       = settings.value(NAME_REVERSE, false).toBool();
+	autoNormalize = settings.value(NAME_AUTO_NORM, false).toBool();
 }
 
 
@@ -140,6 +146,8 @@ void SoundInfo::saveToConfig( QSettings &settings ) const
 	settings.setValue(NAME_IS_MACRO, isMacro);
 	settings.setValue(NAME_MACRO_STATE, macroState);
 	settings.setValue(NAME_IMAGE_PATH, imagePath);
+	settings.setValue(NAME_REVERSE, reverse);
+	settings.setValue(NAME_AUTO_NORM, autoNormalize);
 }
 
 

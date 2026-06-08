@@ -16,6 +16,66 @@ constexpr double kFreq[EqRack::kNumBands] = {
 
 EqRack::EqRack() {
     for (int i = 0; i < kNumBands; ++i) recompute(i);
+    // FFT analysis buffers. Hann window precomputed; ring zeroed.
+    m_fftRing.assign(kFftSize, 0.0f);
+    m_fftWin .assign(kFftSize, 0.0f);
+    m_fftFreq.assign(kFftSize + 2, 0.0f);
+    for (int i = 0; i < kFftSize; ++i) {
+        float t = float(i) / float(kFftSize - 1);
+        m_fftWin[i] = 0.5f - 0.5f * std::cos(2.0f * 3.14159265358979323846f * t);
+    }
+    m_fft.reset(new SimpleFFT(kFftSize));
+    for (int i = 0; i < kNumBands; ++i)
+        m_bandLevel[i].store(0.0f, std::memory_order_relaxed);
+}
+
+float EqRack::bandLevel(int b) const {
+    if (b < 0 || b >= kNumBands) return 0.0f;
+    return m_bandLevel[b].load(std::memory_order_relaxed);
+}
+
+void EqRack::runFftAnalysis() {
+    static thread_local std::vector<float> buf;
+    if ((int)buf.size() < kFftSize) buf.assign(kFftSize, 0.0f);
+    // Linearise the ring starting from the oldest sample, applying
+    // the Hann window in one pass.
+    for (int i = 0; i < kFftSize; ++i) {
+        int idx = (m_fftWrite + i) % kFftSize;
+        buf[i] = m_fftRing[idx] * m_fftWin[i];
+    }
+    m_fft->forward(buf.data(), m_fftFreq.data());
+    const int    bins   = kFftSize / 2 + 1;
+    const double binF   = m_sampleRate / double(kFftSize);
+    if (binF <= 0.0) return;
+    for (int b = 0; b < kNumBands; ++b) {
+        double fc = bandFrequency(b);
+        // 2/3-octave window (~factor 1.26) clamped to neighbouring bins.
+        int binLo = int(fc * 0.79 / binF);
+        int binHi = int(fc * 1.26 / binF);
+        if (binLo < 1)     binLo = 1;
+        if (binHi >= bins) binHi = bins - 1;
+        if (binHi < binLo) binHi = binLo;
+        double sumMag = 0.0;
+        int    n      = 0;
+        for (int k = binLo; k <= binHi; ++k) {
+            float re = m_fftFreq[k * 2];
+            float im = m_fftFreq[k * 2 + 1];
+            sumMag += std::sqrt(double(re) * re + double(im) * im);
+            n++;
+        }
+        double avg = (n > 0) ? sumMag / n : 0.0;
+        // Map bin magnitude to [0..1]. Full-scale sine -> peak bin
+        // magnitude ~ N/4 with the Hann window, so /150 gives a
+        // reasonable headroom while still saturating on hot signals.
+        float level = float(avg / 150.0);
+        if (level > 1.0f) level = 1.0f;
+        if (level < 0.0f) level = 0.0f;
+        float prev = m_bandLevel[b].load(std::memory_order_relaxed);
+        float smoothed = (level > prev)
+            ? prev + 0.55f * (level - prev)
+            : prev + 0.12f * (level - prev);
+        m_bandLevel[b].store(smoothed, std::memory_order_relaxed);
+    }
 }
 
 double EqRack::bandFrequency(int band) {
@@ -67,14 +127,23 @@ void EqRack::recompute(int band) {
 }
 
 void EqRack::processStereo(float &l, float &r) {
-    // Bypass flat bands entirely. Cascading 16 unity-gain biquads is
-    // mathematically a passthrough but each one carries IIR state that
-    // can pick up tiny FP residues at runtime and feed them forward;
-    // 16 cascaded copies of that residue rendered as an audible buzz.
     for (int i = 0; i < kNumBands; ++i) {
         if (std::abs(m_gainDb[i]) < 0.05f) continue;
         l = m_left[i].process(l);
         r = m_right[i].process(r);
+    }
+}
+
+void EqRack::feedAnalysis(float l, float r) {
+    // Input already in float-normalised domain (SlotDsp scales 1/32768
+    // up front). Mono mix into the ring; trigger an FFT every kHop
+    // samples for the band-level atomics the GUI reads.
+    float mono = (l + r) * 0.5f;
+    m_fftRing[m_fftWrite] = mono;
+    m_fftWrite = (m_fftWrite + 1) % kFftSize;
+    if (++m_fftHop >= 512) {
+        m_fftHop = 0;
+        runFftAnalysis();
     }
 }
 

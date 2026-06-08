@@ -408,7 +408,6 @@ static struct PluginMenuItem* createMenuItem(enum PluginMenuType type, int id, c
 enum {
 	MENU_ID_SHOW_CONFIG = 1,
 	MENU_ID_SHOW_ABOUT,
-	MENU_ID_SHOW_HOWTO,
 	MENU_ID_CHECK_FOR_UPDATES,
 };
 
@@ -437,10 +436,9 @@ void ts3plugin_initMenus(struct PluginMenuItem*** menuItems, char** menuIcon)
 	 * e.g. for "test_plugin.dll", icon "1.png" is loaded from <TeamSpeak 3 Client install dir>\plugins\test_plugin\1.png
 	 */
 
-	BEGIN_CREATE_MENUS(4);  /* IMPORTANT: Number of menu items must be correct! */
+	BEGIN_CREATE_MENUS(3);  /* IMPORTANT: Number of menu items must be correct! */
 	CREATE_MENU_ITEM(PLUGIN_MENU_TYPE_GLOBAL,  MENU_ID_SHOW_CONFIG,  "Open GameBaiters Soundboard",  "rpmb_icon_16.png");
 	CREATE_MENU_ITEM(PLUGIN_MENU_TYPE_GLOBAL,  MENU_ID_SHOW_ABOUT,  "About",  "rpmb_icon_16.png");
-	CREATE_MENU_ITEM(PLUGIN_MENU_TYPE_GLOBAL,  MENU_ID_SHOW_HOWTO,  "How to use the soundboard",  "rpmb_icon_16.png");
 	CREATE_MENU_ITEM(PLUGIN_MENU_TYPE_GLOBAL, MENU_ID_CHECK_FOR_UPDATES, "Check for update", "rpmb_icon_16.png");
 	END_CREATE_MENUS;  /* Includes an assert checking if the number of menu items matched */
 
@@ -594,9 +592,6 @@ void ts3plugin_onMenuItemEvent(uint64 serverConnectionHandlerID, enum PluginMenu
 					break;
 				case MENU_ID_SHOW_ABOUT:
 					sb_openAbout();
-					break;
-				case MENU_ID_SHOW_HOWTO:
-					sb_openHowTo();
 					break;
 				case MENU_ID_CHECK_FOR_UPDATES:
 					sb_checkForUpdates();

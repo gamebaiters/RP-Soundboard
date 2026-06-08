@@ -38,6 +38,11 @@ public:
     explicit Channel(int channelId, QWidget *parent = nullptr);
 
     int             channelId() const { return m_id; }
+    // Reassign the channel's positional id after a sibling channel was
+    // removed - keeps m_id in lock-step with the channel's index in
+    // MainPage::m_channels so persistence + sandbox dialogs stay in
+    // sync. Refreshes the sandbox dialog window title in passing.
+    void            setChannelId(int newId);
     ChannelState    state()     const;
     void            applyState(const ChannelState &s);
 
@@ -77,6 +82,16 @@ public:
     // Notify the sandbox dialog (if open) that the channel title
     // changed, so the dialog window title stays in sync.
     void                pushTitleToSandboxDialog();
+    // Push a rolling DSP CPU% reading into the sandbox dialog when it
+    // is currently visible. No-op when the dialog has not been opened
+    // yet (lazy build).
+    void                pushSandboxCpu(double pct);
+    // Push the channel's current peak level into the sandbox dialog so
+    // the EQ band widgets animate. No-op when dialog not visible.
+    void                pushSandboxLevel(float peakL, float peakR);
+    // Per-band spectrum levels (16 floats, 0..1) from the slot's FFT.
+    // The dialog forwards them straight to the matching band widgets.
+    void                pushSandboxEqLevels(const float bands[16]);
 
 signals:
     void stateChanged(int channelId);

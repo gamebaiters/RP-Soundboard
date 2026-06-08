@@ -26,6 +26,10 @@ void WaveformPlayer::setSandboxState(const SandboxState &s) {
     m_wave->setSandboxState(s);
 }
 
+void WaveformPlayer::setLiveFx(int pitch, int speed, int reverb) {
+    m_wave->setLiveFx(pitch, speed, reverb);
+}
+
 void WaveformPlayer::notifySeek() {
     m_wave->notifySeek();
 }
@@ -52,10 +56,12 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     , m_playPause(new QPushButton(this))
     , m_fwd5(new QPushButton("+5s", this))
     , m_loop(new QPushButton(tr("Loop"), this))
+    , m_reverse(new QPushButton(this))
     , m_fwd10(new QPushButton("+10s", this))
     , m_playing(false)
     , m_paused(false)
     , m_looping(false)
+    , m_reversed(false)
 {
     m_filenameLabel->setText(tr("(no file)"));
     m_filenameLabel->setMinimumWidth(80);
@@ -69,6 +75,15 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     m_loop->setCheckable(true);
     m_loop->setToolTip(tr("Loop: repeat the sound endlessly until deactivated"));
     m_loop->setMinimumHeight(28);
+    m_reverse->setCheckable(true);
+    m_reverse->setIcon(IconFactory::reverse());
+    m_reverse->setIconSize(QSize(20, 20));
+    m_reverse->setMinimumWidth(36);
+    m_reverse->setMinimumHeight(28);
+    m_reverse->setToolTip(tr("Reverse playback: play the sound from end to start"));
+    m_reverse->setStyleSheet(
+        "QPushButton:checked { background-color: #c6691c; color: white;"
+        " border: 1px solid #8a4a14; border-radius: 3px; }");
     m_fwd10->setMinimumWidth(40);
 
     m_stop->setIcon(IconFactory::stop());
@@ -103,6 +118,7 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     transport->addWidget(m_fwd10);
     transport->addSpacing(4);
     transport->addWidget(m_loop);
+    transport->addWidget(m_reverse);
     transport->addSpacing(8);
     transport->addWidget(m_filenameLabel, 1);
     transport->addWidget(m_timeLabel);
@@ -125,6 +141,9 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     connect(m_loop,      &QPushButton::toggled, this, [this](bool on){
         m_looping = on; emit loopToggled(on);
     });
+    connect(m_reverse,   &QPushButton::toggled, this, [this](bool on){
+        m_reversed = on; emit reverseToggled(on);
+    });
     connect(m_stop,      &QPushButton::clicked, this, &WaveformPlayer::onStop);
     connect(m_playPause, &QPushButton::clicked, this, &WaveformPlayer::onPlayPause);
     connect(m_wave,      &SoundView::seekRequested, this, &WaveformPlayer::onWaveSeek);
@@ -144,6 +163,7 @@ QString WaveformPlayer::filename() const  { return m_fullPath; }
 bool    WaveformPlayer::isPlaying() const { return m_playing; }
 bool    WaveformPlayer::isPaused()  const { return m_paused;  }
 bool    WaveformPlayer::isLooping() const { return m_looping; }
+bool    WaveformPlayer::isReversed() const { return m_reversed; }
 
 void WaveformPlayer::setLooping(bool on) {
     if (m_looping == on) return;
@@ -152,12 +172,26 @@ void WaveformPlayer::setLooping(bool on) {
     m_loop->setChecked(on);
 }
 
+void WaveformPlayer::setReversed(bool on) {
+    if (m_reversed == on) return;
+    m_reversed = on;
+    QSignalBlocker b(m_reverse);
+    m_reverse->setChecked(on);
+}
+
 void WaveformPlayer::setSound(const SoundInfo &info) {
     m_wave->setSound(info);
     setFilename(info.filename);
 }
 
 void WaveformPlayer::setFilename(const QString &name) {
+    // Any new filename (including the empty "(no file)" reset that
+    // fires on stop) must wipe the error banner so the red bold from
+    // a prior failure does not leak into the next playback.
+    if (m_errorActive) {
+        m_errorActive = false;
+        m_filenameLabel->setStyleSheet(QString());
+    }
     m_fullPath = name;
     // Display only the basename so the channel header doesn't get cluttered
     // with C:/Users/.../foo.mp3 style absolute paths.
@@ -166,6 +200,28 @@ void WaveformPlayer::setFilename(const QString &name) {
     if (slash >= 0) display = name.mid(slash + 1);
     m_filenameLabel->setText(display.isEmpty() ? tr("(no file)") : display);
     m_filenameLabel->setToolTip(name);
+}
+
+void WaveformPlayer::setError(const QString &message) {
+    // Replace the filename label with an in-line red banner. Scoped
+    // QSS on the QLabel only -> no qApp / TS3 host leak (CLAUDE.md).
+    // Hardcoded hex is deliberate: HSL math would have to dodge the
+    // h=-1 grey trap on invalid QColors, and red is theme-agnostic
+    // anyway.
+    m_errorActive = true;
+    m_fullPath.clear();
+    const QString prefixed = QString::fromUtf8("\xE2\x9A\xA0 ") + message;
+    m_filenameLabel->setText(prefixed);
+    m_filenameLabel->setToolTip(message);
+    m_filenameLabel->setStyleSheet(
+        "QLabel { color: #ff5555; font-weight: bold;"
+        " background-color: rgba(255, 80, 80, 32);"
+        " border: 1px solid #ff5555; border-radius: 3px;"
+        " padding: 0px 4px; }");
+    // Time readout becomes meaningless once playback failed; reset it
+    // so the user does not see a leftover "1:23 / 0:00" next to the
+    // error.
+    m_timeLabel->setText("0:00 / 0:00");
 }
 
 void WaveformPlayer::setPosition(double seconds, double total) {

@@ -24,7 +24,7 @@
 #include <cmath>
 
 class InputFile;
-class SoundInfo;
+#include "SoundInfo.h"
 class SlotDsp;
 struct SandboxState;
 
@@ -114,6 +114,10 @@ public:
 	// Apply / replace the slot's sandbox state. Lazily allocates the DSP
 	// block the first time a non-default state hits a slot.
 	void setSlotLoop(int slot, bool on);
+	// Per-channel reverse-playback override. Toggling mid-playback
+	// stops the slot and re-triggers the last sound with the new
+	// reverse flag so the user gets immediate audible feedback.
+	void setSlotReverse(int slot, bool on);
 	void setSlotSandboxState(int slot, const SandboxState &s);
 	// Drop the slot's DSP block (frees ~few hundred KB). Used by the
 	// "Reset all sandbox" command in Settings.
@@ -121,6 +125,17 @@ public:
 	// Latest peak |L|, |R| (0..1) measured at the slot's DSP output. The
 	// channel meter widget polls these via QTimer at ~25 Hz.
 	void getSlotPeak(int slot, float &peakL, float &peakR) const;
+	// Rolling CPU% spent in the slot's DSP chain over the last poll
+	// window. 0 when the slot has no DSP block. Self-resets the counter
+	// at read, so consecutive calls report consecutive windows.
+	double getSlotCpuPercent(int slot);
+	// Read this slot's playback-path EQ band levels (16 floats, 0..1).
+	// Out array zeroed when the slot has no DSP block yet.
+	void   getSlotEqBandLevels(int slot, float out[16]) const;
+	// True when ANY slot is in ePLAYING or ePAUSED. Cheap atomic-only
+	// scan, no mutex. GUI timers gate their per-channel iteration on
+	// this so they idle to zero when nothing is playing.
+	bool   anyPlaying() const;
 	// Crop range (seconds) currently applied to a slot. endSec < 0 means
 	// no end point. Both 0 / negative means the slot has no crop.
 	void getSlotCrop(int slot, double &startSec, double &endSec) const;
@@ -189,6 +204,20 @@ private:
 		// re-applied whenever the slot's dsp is created/cleared.
 		float fxReverbWet = 0.0f;
 		bool loop = false;
+		// Per-channel reverse-playback toggle (set from the WaveformPlayer
+		// reverse button via setSlotReverse). When ON, every new play
+		// through this slot is forced to reverse mode regardless of
+		// SoundInfo.reverse. Toggling mid-play triggers a stop + replay
+		// of the last sound with the new flag.
+		bool channelReverse = false;
+		SoundInfo lastSound;
+		bool      lastSoundValid = false;
+		// Latest pitch factor pushed via setSlotPitchFactor by the
+		// wiring layer (FxPanel slider). Stored so the loop-restart
+		// jitter code can apply random multipliers ON TOP of the
+		// channel's intended pitch instead of clobbering it with
+		// the global m_pitchFactor (which defaults to identity).
+		float  lastSlotPitchFactor = 1.0f;
 		double stretchBaseTime = 0.0;
 		// Trim start (seconds) of the currently loaded sound. A looping
 		// slot must restart from here, not from the file start, otherwise
@@ -197,6 +226,25 @@ private:
 		// Trim end (seconds), or < 0 when the cell has no end point set.
 		// Used only to drive the waveform crop markers.
 		double cropEnd = -1.0;
+
+		// Per-playback random pitch jitter feature. The audio thread
+		// re-reads the live SandboxState (slot.dsp->state()) at every
+		// loop restart, so when the user disables random mid-playback
+		// the next loop iteration drops the jitter immediately. The
+		// `randomActive` flag is just a fast-path skip for the
+		// common no-random case.
+		bool   randomActive    = false;
+
+		// Sidechain ducking. duckSource: when this slot is playing it
+		// attenuates every OTHER slot's output by duckOthersDb. duckGain:
+		// the smoothly attacked / released gain currently APPLIED to
+		// this slot's output (so a slot can simultaneously be a source
+		// and be ducked by another source). Both copies are pushed
+		// from the sandbox state at applyState / playSoundInSlot time
+		// so the audio thread reads them lock-free.
+		bool                duckSource       = false;
+		float               duckOthersDb     = -12.0f;
+		std::atomic<float>  duckGain         { 1.0f };
 
 		PlaybackSlot();
 		~PlaybackSlot();

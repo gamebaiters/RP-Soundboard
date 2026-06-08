@@ -98,6 +98,14 @@ set(sources
 	src/modules/onboarding_overlay.cpp
 	src/modules/icon_factory.h
 	src/modules/icon_factory.cpp
+	src/modules/file_metadata.h
+	src/modules/file_metadata.cpp
+	src/modules/whats_new_dialog.h
+	src/modules/whats_new_dialog.cpp
+	src/modules/eq_band_widget.h
+	src/modules/eq_band_widget.cpp
+	src/modules/log_viewer_dialog.h
+	src/modules/log_viewer_dialog.cpp
 	src/modules/theme.h
 	src/modules/theme.cpp
 	src/modules/main_page.h

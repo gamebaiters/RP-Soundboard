@@ -1,3 +1,156 @@
+GameBaiters Soundboard v2.2.8
+=============================
+
+Reverse-playback release on top of v2.2.7. New: per-cell and per-channel
+REVERSE button that plays a sound backwards in real time with pitch /
+speed / reverb / loop / crop markers all behaving exactly as in forward
+playback. The EQ visualiser was rewritten from scratch (FFT-driven
+per-band LED column, preset dropdown). The Leia spatial engine now
+ships 13 room presets with dramatically different character (Schroeder
+diffuse tail + per-preset absorption / damping signatures). Cluster of
+GUI bug fixes around stale visuals after audio stops.
+
+---------------------------------------------------------------------
+REVERSE PLAYBACK
+---------------------------------------------------------------------
+* New: REVERSE button on the waveform player (next to LOOP) plays the
+  current sound backwards. Cursor tracks from the right edge toward
+  the left, crop start / end markers swap roles, the time label still
+  reads forward-time (so "12 s / 30 s" means 12 seconds since playback
+  start). Toggling reverse mid-playback keeps the audible position
+  exactly where it was (no skip forward / backward).
+* New: per-cell "Play in reverse" flag in the cell editor that makes
+  a specific sound always trigger in reverse without touching the
+  channel-wide button.
+* Reverse + pitch / speed / reverb is now seamless. Previously the
+  filter graph and reverse pre-decode were built BEFORE the active
+  pitch / speed / reverb factors had been applied, so the first ~250
+  ms of every reverse-mode play would briefly leak unprocessed audio
+  before the debounced rebuild caught up. The factors are now staged
+  into the new InputFile BEFORE open(), so the pre-decoded reverse
+  buffer is built directly at the user's current pitch / speed and
+  the filter graph adopts the reverb mix from the first sample.
+* Live slider drags during reverse playback no longer cause cursor
+  jumps. The buffered-time math used the Sampler-global speedFactor
+  against samples that had been produced at the per-slot factor; with
+  reverse engaged the cursor saw the discrepancy as a jump backward.
+  Position cache now uses the per-slot speed factor exactly like
+  forward playback, with monotonic-direction-aware guards.
+* Loop + reverse + crop now restarts the input from cropEnd (or full
+  length when no crop is set) instead of cropStart, so a looping
+  reverse-mode sound starts each iteration from the right marker
+  and walks back to the left, matching what the cursor shows.
+
+---------------------------------------------------------------------
+EQ VISUALISER REWRITE
+---------------------------------------------------------------------
+* New: custom EqBandWidget replaces the stock QSlider for every band.
+  Vertical 5-stop LED gradient (deep blue at the bottom, hot red at
+  the top), level overlay reacts in real time to per-band energy.
+  Band energies are driven by a dedicated FFT analysis pass in EqRack
+  (Hann-windowed 2048-pt, 2/3-octave bin aggregation) so each band
+  only lights up on its OWN frequency content - the bug where every
+  band moved in sync with broadband level is gone.
+* New: EQ preset dropdown. Built-in presets (Flat / Low cut / High
+  cut / Smile / Voice) are always available and cannot be deleted.
+  User presets save / delete from the same dropdown via persistent
+  storage (PresetManager, sandbox_eq_presets section).
+* Slider drag now stays smooth - earlier custom mousePressEvent did
+  not engage QStyle's drag-tracking machinery, so drags missed clicks
+  near the thumb. Wheel = +/- 1 dB (Shift = +/- 3 dB), middle-click
+  resets to 0 dB, right-click opens a context menu.
+* The "Restore session" path now re-feeds analysis into EqRack so
+  channels restored at TS3 startup don't sit with frozen LED bars
+  until the next playback.
+
+---------------------------------------------------------------------
+LEIA HRTF: 13 ROOM PRESETS
+---------------------------------------------------------------------
+* New: ShoeboxRoom now exposes 13 named presets (Tight booth /
+  Bedroom / Bathroom / Hall / Cathedral / Underwater / Cave /
+  Hangar / Stage / Studio / Vintage / Forest / Outdoor) with
+  full character signatures: per-band absorption[6], lateFeedback,
+  lateDamp, lateMix, tapLpHz, erDelayScale. Switching presets
+  produces audibly distinct rooms - bathroom is bright and short,
+  cathedral is wash + long tail, underwater is heavily LP-filtered.
+* The diffuse tail is now a Schroeder reverb (4 parallel damped
+  combs + 2 series allpasses) fed by the DRY signal so a real
+  audible wash develops on top of the early-reflection pattern,
+  rather than the earlier "feed ER taps into the tail" design
+  which produced an almost inaudible tail at long decay times.
+* Per-tap one-pole low-pass cutoff is derived from the preset's
+  absorption[6] + per-preset bias, so high-frequency damping
+  matches the room character at every reflection bounce.
+* Per-tap gain ramping (prevGainL / prevGainR -> targetGainL /
+  targetGainR over the block) kills the rotation zipper that
+  used to ride the reflections when a moving source crossed
+  the per-tap pan-law boundaries.
+
+---------------------------------------------------------------------
+GUI / VISUAL BUGFIXES
+---------------------------------------------------------------------
+* Fixed: EQ LED bars and channel meter peak-hold froze on the last
+  frame the instant the user stopped the last playing sound. The
+  meter timer early-returned on !sampler->anyPlaying(), so the
+  (0, 0) drain frames that fade decays back to floor were never
+  pushed. Timer now keeps pumping for ~3 s after anyPlaying() goes
+  false (75 ticks @ 40 ms), enough for every decay (EqBandWidget
+  release coefficient 0.10, peak-hold multiplicative decay) to
+  reach >99% settled. Counter resets to 75 every tick while audio
+  is playing, so a new sound restarts the drain window from
+  scratch. EqBandWidget setLevel now change-detects against the
+  smoothed display value and snaps to floor below 0.002, so the
+  silent-channel drain ticks settle to a clean stop with zero
+  paint cost once everything is at rest.
+* Fixed: TS3 crash on close when the log-viewer dialog had been
+  opened during the session. logViewerDialog was new'd lazily on
+  first open but never delete'd in sb_kill, so TS3's plugin
+  unload sequence ran into a Qt widget whose parent was already
+  destroyed. The dialog is now explicitly deleted + nulled at
+  the top of sb_kill alongside aboutDialog / howToDialog /
+  updateChecker.
+* Fixed: pitch slider in the per-channel FX panel was broken
+  (the slider's valueChanged was wired but the resulting
+  pitchFactor never reached the active InputFile). The
+  ConfigModel -> Sampler -> InputFile chain now propagates
+  pitch changes through setSlotPitchFactor exactly like speed.
+
+---------------------------------------------------------------------
+DSP SANDBOX
+---------------------------------------------------------------------
+* New: per-channel Random Pitch module in the DSP accordion area.
+  Each play triggers a random offset within +/- a user-set range,
+  baked into the InputFile's pitchFactor before open() so the
+  variation is audible from the first sample.
+* New: per-channel Sidechain Ducking module. When another channel
+  is selected as the sidechain source, this channel's output is
+  attenuated by the source's RMS envelope (attack / release
+  user-controlled). Useful for VO-over-music cells.
+* Both new modules respect the sandbox master ENABLED gate so
+  the dialog's "Enabled" master switch correctly turns them off
+  in one click.
+* Sandbox dialog initial size 1240x940 -> 1360x1000 so the EQ
+  column + DSP accordion both fit without scrolling on a
+  1080p display. EQ band slider width tightened (22 -> 14 px)
+  so the EQ column takes ~30% less horizontal space.
+
+---------------------------------------------------------------------
+HOUSEKEEPING
+---------------------------------------------------------------------
+* New: in-app "What's new" dialog shown once per version. Reads
+  the changelog section for the running version from the
+  embedded release-notes.txt resource.
+* New: in-app log viewer dialog (Settings -> Diagnostics ->
+  View log file). Streams rpsb_debug.log in real time so the
+  user does not need to dig into %APPDATA% to share a log.
+* New: file metadata module surfaces the audio file's actual
+  sample rate / channel count / codec / duration in the cell
+  editor tooltip, so the user can tell at a glance whether a
+  cell will resample on play.
+* Italian localisation refreshed (574 messages, all new strings
+  translated).
+
+=====================================================================
 GameBaiters Soundboard v2.2.7
 =============================
 

@@ -17,6 +17,8 @@
 #include <QSlider>
 #include <QScrollArea>
 #include <QSettings>
+#include <QFileDialog>
+#include <QMessageBox>
 #include "../common.h"
 
 namespace {
@@ -187,10 +189,78 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     resetHkRow->addStretch(1);
     hotkeyLay->addLayout(resetHkRow);
 
+    // ============== Custom Leia SOFA dataset section ==============
+    auto *sofaLay = new QVBoxLayout;
+    auto *sofaRow = new QHBoxLayout;
+    auto *sofaPathLbl = new QLabel(tr("(using bundled default)"), this);
+    auto *sofaPickBtn = new QPushButton(tr("Pick custom SOFA..."), this);
+    auto *sofaClearBtn = new QPushButton(tr("Use default"), this);
+    sofaPathLbl->setStyleSheet("color: #aaa;");
+    sofaPathLbl->setWordWrap(true);
+    sofaRow->addWidget(sofaPickBtn);
+    sofaRow->addWidget(sofaClearBtn);
+    sofaRow->addStretch(1);
+    sofaLay->addLayout(sofaRow);
+    sofaLay->addWidget(sofaPathLbl);
+    auto loadSofaPath = [sofaPathLbl, this]{
+        QSettings sset(QStringLiteral("GameBaiters"),
+                       QStringLiteral("Soundboard"));
+        QString p = sset.value(QStringLiteral("leia/custom_sofa_path"))
+                       .toString();
+        sofaPathLbl->setText(p.isEmpty()
+            ? tr("(using bundled default)")
+            : tr("Custom: %1").arg(p));
+    };
+    loadSofaPath();
+    connect(sofaPickBtn, &QPushButton::clicked, this, [this, loadSofaPath]{
+        QString p = QFileDialog::getOpenFileName(
+            this, tr("Pick a SOFA HRTF dataset"), QString(),
+            tr("SOFA datasets (*.sofa);;All files (*.*)"));
+        if (p.isEmpty()) return;
+        QSettings sset(QStringLiteral("GameBaiters"),
+                       QStringLiteral("Soundboard"));
+        sset.setValue(QStringLiteral("leia/custom_sofa_path"), p);
+        loadSofaPath();
+        QMessageBox::information(this, tr("Custom HRTF"),
+            tr("Reopen the soundboard to apply the new dataset."));
+    });
+    connect(sofaClearBtn, &QPushButton::clicked, this, [this, loadSofaPath]{
+        QSettings sset(QStringLiteral("GameBaiters"),
+                       QStringLiteral("Soundboard"));
+        sset.remove(QStringLiteral("leia/custom_sofa_path"));
+        loadSofaPath();
+    });
+
     // ============== Logging section ==============
     auto *logLay = new QVBoxLayout;
     logLay->addLayout(checkRow(m_logsEnabled, tr(
         "Writes a debug log file (rpsb_debug.log) inside your TeamSpeak config folder."), this));
+    // Hidden-by-design real-time log viewer button. Plain link-style so
+    // it does not draw a casual user's eye - this is an advanced
+    // diagnostic surface. When the user enables "Write debug log file"
+    // above, the viewer mirrors EXACTLY the same lines the file gets.
+    m_logViewerBtn = new QPushButton(tr("Show real-time log..."), this);
+    m_logViewerBtn->setFlat(true);
+    m_logViewerBtn->setCursor(Qt::PointingHandCursor);
+    m_logViewerBtn->setStyleSheet(
+        "QPushButton { color: #8aa6c0; text-align: left;"
+        " border: none; padding: 0px; font-size: 10px;"
+        " text-decoration: underline; }"
+        "QPushButton:hover { color: #b6cee4; }");
+    auto *copyDebugBtn = new QPushButton(tr("Copy sandbox debug snapshot"), this);
+    copyDebugBtn->setFlat(true);
+    copyDebugBtn->setCursor(Qt::PointingHandCursor);
+    copyDebugBtn->setStyleSheet(m_logViewerBtn->styleSheet());
+    auto *logBtnRow = new QHBoxLayout;
+    logBtnRow->addWidget(m_logViewerBtn);
+    logBtnRow->addSpacing(12);
+    logBtnRow->addWidget(copyDebugBtn);
+    logBtnRow->addStretch(1);
+    logLay->addLayout(logBtnRow);
+    connect(m_logViewerBtn, &QPushButton::clicked, this,
+            &SettingsWindow::showLogViewerRequested);
+    connect(copyDebugBtn, &QPushButton::clicked, this,
+            &SettingsWindow::copySandboxDebugRequested);
 
     // ============== Audio sandbox section ==============
     auto *sandboxLay = new QVBoxLayout;
@@ -393,6 +463,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     body->addWidget(makeSection(tr("Hotkeys"),        hotkeyLay,   this, "hotkeys"));
     body->addWidget(makeSection(tr("Logging"),        logLay,      this, "logging"));
     body->addWidget(makeSection(tr("Audio sandbox"),  sandboxLay,  this, "sandbox"));
+    body->addWidget(makeSection(tr("HRTF dataset (Leia)"), sofaLay, this, "sofa", false));
     body->addWidget(makeSection(tr("Profiles"),       profileLay,  this, "profiles"));
     body->addWidget(makeSection(tr("Custom theme"),   themeWrapLay,this, "theme"));
     body->addWidget(makeSection(tr("Reset behaviour"),resetBehLay, this, "reset", false));

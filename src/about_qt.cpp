@@ -10,6 +10,7 @@
 #include "buildinfo.h"
 #include "main.h"
 #include "modules/theme.h"
+#include "modules/version_history_dialog.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -148,7 +149,9 @@ AboutQt::AboutQt(QWidget *parent) :
 
     // Full user guide moved out of the TS3 plugin menu into the About
     // dialog so the menu stays short and the guide lives next to the
-    // quick-start it complements.
+    // quick-start it complements. A second button next to it opens the
+    // Version history — the full change log of every documented
+    // release, browsable by version on one side of a split view.
     auto *howToRow = new QHBoxLayout;
     howToRow->addStretch(1);
     auto *howToBtn = new QPushButton(tr("How to use the soundboard"), this);
@@ -159,9 +162,22 @@ AboutQt::AboutQt(QWidget *parent) :
         " padding: 6px 14px; font-weight: bold; }"
         "QPushButton:hover { background-color: #3d77d6; }");
     howToRow->addWidget(howToBtn);
+    auto *historyBtn = new QPushButton(tr("Version history"), this);
+    historyBtn->setCursor(Qt::PointingHandCursor);
+    historyBtn->setStyleSheet(
+        "QPushButton { background-color: #3a3a3a; color: white;"
+        " border: 1px solid #1f1f1f; border-radius: 5px;"
+        " padding: 6px 14px; font-weight: bold; }"
+        "QPushButton:hover { background-color: #4a4a4a; }");
+    howToRow->addWidget(historyBtn);
     howToRow->addStretch(1);
     root->addLayout(howToRow);
     connect(howToBtn, &QPushButton::clicked, this, []{ sb_openHowTo(); });
+    connect(historyBtn, &QPushButton::clicked, this, [this]{
+        auto *dlg = new VersionHistoryDialog(this);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+        dlg->show();
+    });
 
     root->addSpacing(4);
 

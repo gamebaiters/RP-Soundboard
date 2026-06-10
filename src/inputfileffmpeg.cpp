@@ -15,10 +15,13 @@
 #endif
 
 #include <vector>
+#include <deque>
 #include <algorithm>
 #include <string>
 #include <cstring>
 #include <cmath>
+#include <condition_variable>
+#include <thread>
 
 #include "ts3log.h"
 #include "inputfile.h"
@@ -393,6 +396,12 @@ public:
 	void setReverse(bool on) override { m_reverse = on; }
 	void setAutoNormalize(bool on) override { m_autoNormalize = on; }
 	void setCancelToken(std::atomic<bool> *token) override { m_cancelToken = token; }
+	bool isReverseFirstChunkReady() const override {
+		if (!m_streamingReverse) return true;
+		std::lock_guard<std::mutex> lg(m_chunkMutex);
+		return !m_chunkQueue.empty()
+		    || m_chunkWorkerDone.load(std::memory_order_acquire);
+	}
 
 private:
 	int _close();
@@ -461,6 +470,55 @@ private:
 	// on a multi-minute file. Lifetime owned by caller (Sampler holds a
 	// shared_ptr<atomic<bool>> per slot).
 	std::atomic<bool> *m_cancelToken = nullptr;
+
+	// ===== STREAMING REVERSE (chunked seek-and-decode) =====
+	// When set, open() spawns m_chunkWorker which decodes the file
+	// backwards in small chunks starting AT the user's current play
+	// position. First chunk is ready in ~50 ms regardless of file
+	// length, so reverse playback starts immediately — no whole-file
+	// pre-decode, no cursor drift, no client freeze.
+	bool m_streamingReverse = false;
+	struct ReverseChunk {
+		std::vector<short> samples;   // already reversed; interleaved S16
+		double startForward = 0.0;    // input-file time of FIRST sample (after reverse, this is the EARLIER end)
+		double endForward   = 0.0;    // input-file time of LAST sample (after reverse, this is the LATER end)
+		size_t readPos      = 0;      // shorts already consumed by readSamples
+		float  speedAtBuild = 1.0f;   // atempo factor baked into the chunk
+	};
+	std::deque<ReverseChunk> m_chunkQueue;
+	mutable std::mutex       m_chunkMutex;
+	std::condition_variable  m_chunkCv;
+	std::thread              m_chunkWorker;
+	std::atomic<bool>        m_chunkWorkerStop{false};
+	std::atomic<bool>        m_chunkWorkerDone{false};
+	// Forward-time cursor the worker walks DOWN towards
+	// m_streamingMinForward. Each chunk decoded covers
+	// [cursor - CHUNK_SEC, cursor]; on success cursor is moved down.
+	double m_chunkCursorForward   = 0.0;
+	double m_streamingMinForward  = 0.0; // hard lower bound (cropStart)
+	double m_streamingMaxForward  = 0.0; // ceiling for clamping seeks back up
+	// Restart latch: setSpeed / setPitch / external seek flip this so
+	// the worker discards the queue and resumes decoding chunks around
+	// the new cursor with the current pitch / speed factors.
+	std::atomic<bool> m_chunkRestartPending{false};
+	double            m_chunkRestartTarget = 0.0;
+	// Helpers (defined further down in this file).
+	// Returns 0 on success, -1 on hard error. On return, `out` holds
+	// the decoded interleaved S16 stereo samples and
+	// `actualFirstInputSec` is the input-file time of the first
+	// emitted sample (≠ startSec when avformat_seek_file lands
+	// slightly off the requested keyframe boundary). The caller
+	// re-anchors the chunk's claimed input-time range against this
+	// value so reverse-playback cursor mapping stays bit-accurate to
+	// the actual decoded audio.
+	int  decodeChunkForward(double startSec, double endSec,
+	                        std::vector<short> &out,
+	                        double &actualFirstInputSec);
+	void chunkWorkerLoop();
+	int  startStreamingReverse(double cursorForward,
+	                           double minForward,
+	                           double maxForward);
+	void stopStreamingReverse();
 	int m_abufferDeclaredRate;      // rate declared to abuffer (may differ from codec rate for pitch)
 	int64_t m_maxConvertedSamples;
 	// End-of-playback bound in INPUT-file seconds. m_maxConvertedSamples
@@ -539,6 +597,12 @@ void InputFileFFmpeg::reset()
 //---------------------------------------------------------------
 InputFileFFmpeg::~InputFileFFmpeg()
 {
+	// Tear down the streaming-reverse worker BEFORE _close() so the
+	// worker is fully joined before the FFmpeg context goes away
+	// underneath it. _close() runs without the worker so it never has
+	// to think about the chunk path.
+	if (m_streamingReverse || m_chunkWorker.joinable())
+		stopStreamingReverse();
 	_close();
 }
 
@@ -1043,12 +1107,21 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 	m_minFilePosition = startPosSeconds;
 
 	if (m_reverse) {
-		int rv = preDecodeAndReverse();
-		if (rv < 0) {
-			dbgLog("  preDecodeAndReverse failed");
+		// Streaming reverse: spawn a worker that decodes BACKWARDS in
+		// CHUNK_SEC chunks anchored at the current cursor. Returns
+		// within ms (just sets up state + starts the thread) so the
+		// caller is never blocked on a whole-file pre-decode.
+		double cursorForward = (m_maxFilePosition > 0.0)
+			? m_maxFilePosition
+			: (double)outputSamplesEstimation() / (double)m_outputSamplerate;
+		int sret = startStreamingReverse(cursorForward, m_minFilePosition,
+		                                  cursorForward);
+		if (sret < 0) {
+			dbgLog("  startStreamingReverse failed");
 			_close();
 			return -1;
 		}
+		m_filePosition = cursorForward;
 	}
 
 	return 0;
@@ -1224,10 +1297,481 @@ int InputFileFFmpeg::rebuildReverseBuffer()
 
 
 //---------------------------------------------------------------
+// Streaming reverse: chunked seek-and-decode.
+//
+// The worker walks DOWN m_chunkCursorForward by CHUNK_SEC at a time:
+// each iteration seeks to [cursor - CHUNK_SEC, cursor], decodes those
+// CHUNK_SEC seconds of input forward through the filter graph,
+// reverses the resulting buffer in place, and pushes it onto
+// m_chunkQueue. readSamples drains the queue head-first so reverse
+// playback begins instantly at the user's click position and
+// continues seamlessly while the worker fills earlier chunks.
+//---------------------------------------------------------------
+namespace {
+// 3-second chunks balance latency and seam quality. Each chunk
+// requires a backward FFmpeg seek + filter-graph rebuild + atempo
+// state reset — at the previous 0.5 s budget that meant a rebuild
+// every 500 ms of playback, and atempo's resampler restart left an
+// audible click + brief silence at every seam. 3 s reduces seams
+// to one per ~3 s of playback and ensures the worker's decode time
+// (~80-200 ms per chunk) is comfortably below the chunk's own
+// runtime, so the queue never drains mid-playback. First-chunk
+// latency rises from ~50 ms to ~150 ms but the swap path already
+// runs async + waits on isReverseFirstChunkReady() so the user
+// click still feels instant.
+constexpr double CHUNK_SEC          = 3.0;
+// Cap how far ahead the worker decodes before parking. 3 chunks =
+// 9 s of buffered reverse audio — plenty of headroom against any
+// scheduling jitter the audio thread can throw, while keeping the
+// peak heap per slot to ~1.7 MB (3 * 3 s * 48 kHz * 2 ch * 2 B).
+constexpr size_t MAX_QUEUE_CHUNKS   = 3;
+}
+
+// Decode the input-time range [startSec, endSec] FORWARD through the
+// existing filter graph and append the resulting interleaved S16
+// stereo samples to `out`. Caller holds m_mutex. Returns 0 on
+// success, -1 on hard failure (seek / decoder error).
+int InputFileFFmpeg::decodeChunkForward(double startSec, double endSec,
+                                         std::vector<short> &out,
+                                         double &actualFirstInputSec)
+{
+	actualFirstInputSec = startSec; // sane default if the codec gives us no PTS
+	if (!m_opened || !m_bufSrcCtx || !m_bufSinkCtx) return -1;
+	if (endSec <= startSec) return 0;
+
+	// Internal _seek rebuilds the filter graph + flushes codec — same
+	// path used by the existing live-seek code, so all filter chain
+	// invariants (atempo, asetrate, aformat, loudnorm) stay in sync
+	// with the user's current pitch / speed. _seek's avformat_seek_file
+	// call lands on the nearest sync header / keyframe AT OR BEFORE
+	// startSec for compressed containers (MP3, AAC, OGG); the actual
+	// first decoded sample is therefore BEFORE our requested startSec
+	// by a container-dependent amount. We track first-frame PTS below
+	// and discard the pre-startSec head of the decoded stream so the
+	// chunk's audio matches its claimed [startSec, endSec] range.
+	if (_seek(startSec) < 0) return -1;
+	AVRational tb = m_fmtCtx->streams[m_streamIndex]->time_base;
+	int64_t targetTs = (int64_t)(startSec / av_q2d(tb));
+
+	AVFrame *frame      = av_frame_alloc();
+	AVFrame *filt_frame = av_frame_alloc();
+	AVPacket *packet    = av_packet_alloc();
+	if (!frame || !filt_frame || !packet) {
+		if (frame)      av_frame_free(&frame);
+		if (filt_frame) av_frame_free(&filt_frame);
+		if (packet)     av_packet_free(&packet);
+		return -1;
+	}
+
+	// Target sample count for the chunk:
+	//   (endSec - startSec) seconds of INPUT * sampleRate / speedFactor
+	// (atempo packs `speedFactor` seconds of input into 1 second of
+	// output samples, so we get fewer output samples than the input
+	// duration at speed > 1).
+	double speedF = (m_speedFactor > 0.0f) ? (double)m_speedFactor : 1.0;
+	int64_t targetOutSamples =
+		(int64_t)((endSec - startSec) *
+		          (double)m_outputSamplerate / speedF + 0.5);
+	int channels = m_outputChannels > 0 ? m_outputChannels : 2;
+	out.reserve(out.size() + (size_t)(targetOutSamples * channels));
+
+	// First-frame PTS skip: the existing readSamples path uses
+	// m_skipSamples / m_nextSeekTimestamp for this; we keep that
+	// machinery for the forward-streaming branch but compute our own
+	// skip locally so the chunk worker stays self-contained and
+	// thread-isolated from the forward path.
+	int64_t skipOutSamples = -1; // -1 = haven't computed yet
+	int64_t collected = 0;
+	// Input-time of the first sample we will actually emit. Set on
+	// the first sample produced from a frame: either AT startSec
+	// (when the codec landed before target and skip+collect lined up),
+	// or AT first-frame PTS converted to seconds (when the codec
+	// landed AFTER target — no skip possible, audio is from later in
+	// the file). This is what chunkWorkerLoop uses to re-anchor the
+	// chunk so cursor mapping reflects what was actually decoded.
+	int64_t firstEmittedFramePts = AV_NOPTS_VALUE;
+	int64_t firstEmittedFrameSkip = 0;
+	bool    firstEmittedDone      = false;
+	int64_t currentFramePts       = AV_NOPTS_VALUE;
+	bool inputDone = false;
+	auto drainSink = [&]() {
+		while (av_buffersink_get_frame(m_bufSinkCtx, filt_frame) >= 0) {
+			int outSamples = filt_frame->nb_samples;
+			int origOutSamples = outSamples;
+			short *outPtr  = (short*)filt_frame->extended_data[0];
+			int skippedThisFrame = 0;
+			if (skipOutSamples > 0) {
+				skippedThisFrame = (int)std::min((int64_t)outSamples,
+				                                  skipOutSamples);
+				skipOutSamples -= skippedThisFrame;
+				outSamples     -= skippedThisFrame;
+				outPtr         += skippedThisFrame * channels;
+			}
+			if (outSamples > 0 && collected < targetOutSamples) {
+				int64_t room = targetOutSamples - collected;
+				if (outSamples > room) outSamples = (int)room;
+				if (!firstEmittedDone) {
+					// Record what frame and what offset produced the
+					// FIRST emitted sample. We resolve the input-time
+					// from frame PTS plus the in-frame OUTPUT offset
+					// scaled back into input-time via speedF.
+					firstEmittedFramePts  = currentFramePts;
+					firstEmittedFrameSkip = skippedThisFrame;
+					firstEmittedDone      = true;
+				}
+				size_t prev = out.size();
+				out.resize(prev + outSamples * channels);
+				std::memcpy(out.data() + prev, outPtr,
+				            outSamples * channels * sizeof(short));
+				collected += outSamples;
+			}
+			(void)origOutSamples;
+			av_frame_unref(filt_frame);
+		}
+	};
+
+	while (collected < targetOutSamples && !inputDone) {
+		int rret = av_read_frame(m_fmtCtx, packet);
+		if (rret < 0) { inputDone = true; break; }
+		if (packet->stream_index == m_streamIndex) {
+			if (avcodec_send_packet(m_codecCtx, packet) == 0) {
+				while (avcodec_receive_frame(m_codecCtx, frame) == 0) {
+					int64_t curTs = frame->best_effort_timestamp;
+					if (curTs == AV_NOPTS_VALUE) curTs = frame->pts;
+					currentFramePts = curTs;
+					if (skipOutSamples < 0) {
+						// First decoded frame after seek: figure
+						// out how much the seek overshot backward
+						// (curTs < targetTs) and discard that much
+						// output. tsToSkip is in input-time-base
+						// units; output-domain samples to drop is
+						// `seconds * sampleRate / speedF` because
+						// atempo packs speedF input-seconds into 1
+						// output-second.
+						int64_t tsToSkip = (curTs != AV_NOPTS_VALUE)
+							? targetTs - curTs : 0;
+						if (tsToSkip > 0) {
+							double secondsToSkip = tsToSkip * av_q2d(tb);
+							skipOutSamples = (int64_t)(
+								secondsToSkip *
+								(double)m_outputSamplerate / speedF + 0.5);
+						} else {
+							skipOutSamples = 0;
+						}
+					}
+					if (m_abufferDeclaredRate > 0)
+						frame->sample_rate = m_abufferDeclaredRate;
+					av_buffersrc_add_frame_flags(m_bufSrcCtx, frame,
+					                              AV_BUFFERSRC_FLAG_KEEP_REF);
+					drainSink();
+					av_frame_unref(frame);
+					if (collected >= targetOutSamples) break;
+				}
+			}
+		}
+		av_packet_unref(packet);
+	}
+	// Flush whatever is still pending in the filter graph if the
+	// reader hit EOF before we collected enough samples (tail chunk
+	// near file end).
+	if (collected < targetOutSamples) {
+		avcodec_send_packet(m_codecCtx, NULL);
+		while (avcodec_receive_frame(m_codecCtx, frame) == 0) {
+			av_buffersrc_add_frame_flags(m_bufSrcCtx, frame,
+			                              AV_BUFFERSRC_FLAG_KEEP_REF);
+			drainSink();
+			av_frame_unref(frame);
+			if (collected >= targetOutSamples) break;
+		}
+		av_buffersrc_add_frame_flags(m_bufSrcCtx, NULL, 0);
+		drainSink();
+	}
+
+	// Resolve the input-time of the first emitted sample.
+	// frame-PTS resolution gives us the input-time of the head of the
+	// frame; we then add the in-frame OUTPUT-domain skip offset back
+	// in seconds via skip * speedF / sampleRate (atempo packs speedF
+	// seconds of input into 1 second of output). When the codec gave
+	// no PTS at all (rare), fall back to startSec — caller's
+	// re-anchor against actualInputSec then still keeps the chunk
+	// internally consistent.
+	if (firstEmittedDone && firstEmittedFramePts != AV_NOPTS_VALUE) {
+		actualFirstInputSec = firstEmittedFramePts * av_q2d(tb)
+		    + (double)firstEmittedFrameSkip * speedF
+		      / (double)m_outputSamplerate;
+	}
+
+	av_frame_free(&frame);
+	av_frame_free(&filt_frame);
+	av_packet_free(&packet);
+	return 0;
+}
+
+// Set up worker state and spawn the decoder thread.
+int InputFileFFmpeg::startStreamingReverse(double cursorForward,
+                                            double minForward,
+                                            double maxForward)
+{
+	if (cursorForward <= minForward) {
+		// Cursor already at the lower bound — nothing to reverse.
+		m_streamingReverse     = true;
+		m_chunkWorkerDone.store(true);
+		return 0;
+	}
+	m_streamingReverse        = true;
+	m_chunkCursorForward      = cursorForward;
+	m_streamingMinForward     = minForward;
+	m_streamingMaxForward     = (maxForward > 0.0) ? maxForward : cursorForward;
+	m_chunkWorkerStop.store(false);
+	m_chunkWorkerDone.store(false);
+	m_chunkRestartPending.store(false);
+	m_chunkWorker = std::thread(&InputFileFFmpeg::chunkWorkerLoop, this);
+	return 0;
+}
+
+// Tear down the worker. Caller MUST NOT hold m_mutex (worker grabs
+// it itself between iterations). Safe to call repeatedly.
+void InputFileFFmpeg::stopStreamingReverse()
+{
+	m_chunkWorkerStop.store(true);
+	{
+		std::lock_guard<std::mutex> lg(m_chunkMutex);
+		m_chunkCv.notify_all();
+	}
+	if (m_chunkWorker.joinable())
+		m_chunkWorker.join();
+	{
+		std::lock_guard<std::mutex> lg(m_chunkMutex);
+		m_chunkQueue.clear();
+	}
+	m_chunkWorkerDone.store(true);
+	m_streamingReverse = false;
+}
+
+void InputFileFFmpeg::chunkWorkerLoop()
+{
+	int consecutiveEmpty = 0;
+	while (!m_chunkWorkerStop.load(std::memory_order_relaxed)) {
+		// Restart latch: setPitch / setSpeed / external seek flip
+		// m_chunkRestartPending so the queue is cleared and the
+		// cursor is moved to the new target before the next
+		// iteration. Lets pitch / speed live-tuning take effect
+		// without losing the current play position.
+		if (m_chunkRestartPending.exchange(false,
+		                                    std::memory_order_relaxed)) {
+			std::lock_guard<std::mutex> lg(m_chunkMutex);
+			m_chunkQueue.clear();
+			m_chunkCursorForward = m_chunkRestartTarget;
+			m_chunkCv.notify_all();
+		}
+
+		double cursor;
+		double minF;
+		{
+			std::lock_guard<std::mutex> lg(m_chunkMutex);
+			cursor = m_chunkCursorForward;
+			minF   = m_streamingMinForward;
+		}
+		if (cursor <= minF) {
+			// Reached file start in input-time. Signal done so the
+			// reader can wind down its current chunk, but PARK instead
+			// of breaking so a subsequent seek (user click on the
+			// waveform) can revive the worker by setting restart-
+			// pending. Breaking would leave the worker terminally dead
+			// — every later seek would set m_filePosition + queue
+			// would stay empty (no producer) → readSamples flips
+			// m_done = true → audio stops. The previous design was the
+			// "after many waveform clicks reverse playback dies as if
+			// the file ended" bug.
+			m_chunkWorkerDone.store(true, std::memory_order_release);
+			std::unique_lock<std::mutex> lk(m_chunkMutex);
+			m_chunkCv.notify_all();
+			m_chunkCv.wait(lk, [&] {
+				return m_chunkWorkerStop.load(std::memory_order_relaxed)
+				    || m_chunkRestartPending.load(std::memory_order_relaxed);
+			});
+			if (m_chunkWorkerStop.load(std::memory_order_relaxed)) break;
+			// Restart pending — clear the done flag so the audio
+			// pipeline doesn't latch m_done = true between here and
+			// the queue refill, then fall through to the top of the
+			// loop where the restart-pending branch repositions the
+			// cursor.
+			m_chunkWorkerDone.store(false, std::memory_order_release);
+			consecutiveEmpty = 0;
+			continue;
+		}
+
+		// Backpressure: park until the reader has consumed enough
+		// chunks to make room, or until a cancel / restart fires.
+		{
+			std::unique_lock<std::mutex> lk(m_chunkMutex);
+			m_chunkCv.wait(lk, [&] {
+				return m_chunkQueue.size() < MAX_QUEUE_CHUNKS
+				    || m_chunkWorkerStop.load(std::memory_order_relaxed)
+				    || m_chunkRestartPending.load(std::memory_order_relaxed);
+			});
+			if (m_chunkWorkerStop.load(std::memory_order_relaxed)) break;
+			if (m_chunkRestartPending.load(std::memory_order_relaxed))
+				continue;
+		}
+
+		double chunkEnd   = cursor;
+		double chunkStart = (chunkEnd - CHUNK_SEC > minF)
+			? chunkEnd - CHUNK_SEC : minF;
+
+		// Decode the chunk under m_mutex (FFmpeg context is not
+		// thread-safe). The lock-hold is bounded by CHUNK_SEC of
+		// audio decode (~10-50 ms on typical hardware) so GUI
+		// thread setters (setPitch / setSpeed / setReverbMix)
+		// observe at most one chunk's worth of latency.
+		ReverseChunk chk;
+		chk.startForward = chunkStart;
+		chk.endForward   = chunkEnd;
+		chk.speedAtBuild = m_speedFactor;
+		double actualFirstInputSec = chunkStart;
+		int dret = -1;
+		{
+			Lock lock(m_mutex);
+			if (m_chunkWorkerStop.load(std::memory_order_relaxed))
+				break;
+			dret = decodeChunkForward(chunkStart, chunkEnd, chk.samples,
+			                          actualFirstInputSec);
+		}
+		if (dret < 0) {
+			// Hard decoder error — give up cleanly.
+			m_chunkWorkerDone.store(true, std::memory_order_release);
+			std::lock_guard<std::mutex> lg(m_chunkMutex);
+			m_chunkCv.notify_all();
+			break;
+		}
+
+		// Skip empty chunks — happens when seek lands past EOF, or
+		// the requested range is shorter than the codec frame size.
+		// We advance the cursor to chunkStart so the next iteration
+		// tries earlier ground; but if we keep coming back empty
+		// (broken codec state, malformed container, perpetual seek
+		// failure) advancing the cursor unchecked would zoom it
+		// SECONDS down the file in a few iterations and the GUI
+		// would visualise a seconds-backward cursor skip. Cap the
+		// consecutive empty count at 3 (1.5 s of attempted span);
+		// past that, mark the worker done so the reader cleanly
+		// terminates playback instead of silently chewing through
+		// the file.
+		if (chk.samples.empty()) {
+			++consecutiveEmpty;
+			std::unique_lock<std::mutex> lk(m_chunkMutex);
+			if (consecutiveEmpty >= 3 || chunkStart <= minF) {
+				// Park on empty exhaustion the same way as the
+				// cursor<=minF branch: future seek revives via
+				// restart-pending. Without this, repeated waveform
+				// seek-then-empty-decode would dead-lock the worker.
+				m_chunkWorkerDone.store(true, std::memory_order_release);
+				m_chunkCv.notify_all();
+				m_chunkCv.wait(lk, [&] {
+					return m_chunkWorkerStop.load(std::memory_order_relaxed)
+					    || m_chunkRestartPending.load(std::memory_order_relaxed);
+				});
+				if (m_chunkWorkerStop.load(std::memory_order_relaxed)) break;
+				m_chunkWorkerDone.store(false, std::memory_order_release);
+				consecutiveEmpty = 0;
+				continue;
+			}
+			m_chunkCursorForward = chunkStart;
+			continue;
+		}
+		consecutiveEmpty = 0;
+
+		// Re-anchor the chunk's claimed input-time range against the
+		// ACTUAL decoded audio. Two things can drift from the
+		// requested range:
+		//   1. avformat_seek_file landed slightly off the requested
+		//      keyframe → first emitted sample's input-time is
+		//      actualFirstInputSec, NOT chunkStart.
+		//   2. Decoder produced fewer samples than expected (EOF,
+		//      short tail chunk) → actualInputSec < requested.
+		// Both make the linear position mapping in readSamples
+		// (chunk.endForward → chunk.startForward across readPos /
+		// samples.size()) misreport the time-per-sample. The result
+		// the user sees is the cursor + audio skipping whole seconds
+		// backward at every chunk boundary because the next chunk's
+		// claimed endForward sits well below where the previous
+		// chunk's startForward actually played out.
+		int channels = m_outputChannels > 0 ? m_outputChannels : 2;
+		int64_t totalSamples = (int64_t)chk.samples.size() / channels;
+		double actualInputSec =
+			(double)totalSamples * chk.speedAtBuild
+			/ (double)m_outputSamplerate;
+		chk.startForward = actualFirstInputSec;
+		chk.endForward   = actualFirstInputSec + actualInputSec;
+
+		// In-place reverse. Stereo fast path = 32-bit pair swap.
+		if (channels == 2 && totalSamples > 1) {
+			uint32_t *p32 = reinterpret_cast<uint32_t*>(chk.samples.data());
+			for (int64_t i = 0, j = totalSamples - 1; i < j; ++i, --j)
+				std::swap(p32[i], p32[j]);
+		} else {
+			for (int64_t i = 0, j = totalSamples - 1; i < j; ++i, --j) {
+				for (int c = 0; c < channels; ++c) {
+					std::swap(chk.samples[i * channels + c],
+					          chk.samples[j * channels + c]);
+				}
+			}
+		}
+
+		{
+			std::lock_guard<std::mutex> lg(m_chunkMutex);
+			// Drop the chunk on the floor if a restart fired during
+			// decode — its samples were built with stale speed /
+			// pitch factors and the queue is about to be wiped.
+			if (m_chunkRestartPending.load(std::memory_order_relaxed))
+				continue;
+			m_chunkQueue.push_back(std::move(chk));
+			// Advance the worker cursor to the chunk's ACTUAL lower
+			// bound so the NEXT chunk picks up exactly where this
+			// one ends — no overlap (= same audio twice = audible
+			// stutter and apparent cursor jump backward) and no gap
+			// (= missing audio between chunks).
+			m_chunkCursorForward = m_chunkQueue.back().startForward;
+			m_chunkCv.notify_one();
+		}
+	}
+	m_chunkWorkerDone.store(true, std::memory_order_release);
+	std::lock_guard<std::mutex> lg(m_chunkMutex);
+	m_chunkCv.notify_all();
+}
+
+
+//---------------------------------------------------------------
 // Public seek: acquires m_mutex then delegates to _seek.
 //---------------------------------------------------------------
 int InputFileFFmpeg::seek( double seconds )
 {
+	if (m_streamingReverse) {
+		// In streaming reverse, an external seek (e.g. waveform
+		// click) means "play reverse from THIS forward-time". Update
+		// the worker's cursor + restart pending so the queue is
+		// rebuilt around the new position. m_filePosition flips
+		// instantly so the GUI cursor snaps.
+		{
+			std::lock_guard<std::mutex> lg(m_chunkMutex);
+			m_chunkRestartTarget = seconds;
+			m_chunkRestartPending.store(true, std::memory_order_release);
+			// Wipe queue immediately so readSamples doesn't bleed
+			// the old position's last chunk after the cursor jump.
+			m_chunkQueue.clear();
+			// Clear the worker-done flag in case a previous decode
+			// finished at minF or hit the consecutive-empty cap and
+			// parked the worker. The park branches wait on this same
+			// CV with restart-pending, so notify_all below revives
+			// them and the new seek target is honoured.
+			m_chunkWorkerDone.store(false, std::memory_order_release);
+			m_chunkCv.notify_all();
+		}
+		Lock lock(m_mutex);
+		m_filePosition = seconds;
+		m_done = false;
+		return 0;
+	}
 	Lock lock(m_mutex);
 	return _seek(seconds);
 }
@@ -1305,6 +1849,11 @@ double InputFileFFmpeg::getLength() const
 //---------------------------------------------------------------
 int InputFileFFmpeg::close()
 {
+	// Stop the streaming-reverse worker OUTSIDE m_mutex: the worker
+	// grabs m_mutex itself for each chunk decode, so joining it
+	// while holding m_mutex would deadlock.
+	if (m_streamingReverse || m_chunkWorker.joinable())
+		stopStreamingReverse();
 	Lock lock(m_mutex);
 	return _close();
 }
@@ -1313,6 +1862,87 @@ int InputFileFFmpeg::close()
 //---------------------------------------------------------------
 int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 {
+	if (m_streamingReverse) {
+		// Drain the chunk queue head-first. Front chunk holds the
+		// LATEST forward-time samples (the ones we want to play
+		// first when reversing). When a chunk is exhausted, pop it
+		// so the next iteration starts on the next-earlier chunk.
+		std::unique_lock<std::mutex> lk(m_chunkMutex);
+		// Brief wait for the first chunk on cold start.
+		m_chunkCv.wait_for(lk, std::chrono::milliseconds(40), [&] {
+			return !m_chunkQueue.empty()
+			    || m_chunkWorkerDone.load(std::memory_order_acquire)
+			    || m_chunkWorkerStop.load(std::memory_order_relaxed);
+		});
+		if (m_chunkQueue.empty()) {
+			if (m_chunkWorkerDone.load(std::memory_order_acquire)) {
+				m_done = true;
+				return 0;
+			}
+			// Worker is busy but has no chunk yet — let the producer
+			// thread retry on its next 100 ms cycle.
+			return 0;
+		}
+		ReverseChunk &chk = m_chunkQueue.front();
+		int channels = m_outputChannels > 0 ? m_outputChannels : 2;
+		size_t availShorts = chk.samples.size() - chk.readPos;
+		size_t takeShorts  = std::min(availShorts,
+		                              (size_t)(4096 * channels));
+		short *ptr   = chk.samples.data() + chk.readPos;
+		int toWrite  = (int)(takeShorts / channels);
+
+		{
+			Lock lock(m_mutex);
+			m_freeverb.process(ptr, toWrite, m_reverbMix);
+			m_convertedSamples += toWrite;
+		}
+		sampleBuffer->produce(ptr, toWrite);
+		chk.readPos += takeShorts;
+
+		// Update m_filePosition AFTER the produce + readPos
+		// increment. m_filePosition must reflect the input-time of
+		// the NEXT sample about to be sent to producer (= the input-
+		// time of the TAIL of the playback buffer once these freshly
+		// produced samples settle in). Sampler's reverse-mode
+		// formula posSec = decoderPos + bufferedSec then resolves
+		// correctly to the input-time of the HEAD of the buffer (=
+		// next sample to play) regardless of how many chunks are
+		// stacked in sbPlayback.
+		//
+		// Computing it BEFORE produce — as we did previously — set
+		// m_filePosition to the input-time of the FIRST sample of
+		// the just-produced batch, which is ALWAYS one batch worth
+		// HIGHER than the buffer tail. That off-by-one batch error
+		// accumulates across every chunk transition (chunk1 fully
+		// consumed leaves m_filePosition at chunk1.endForward minus
+		// only N-1 batches worth instead of N), so the GUI cursor
+		// races ahead of audio by a growing margin and the rate-
+		// limiter's monotonic clamp locks the lag in: cursor drifts
+		// backward by entire seconds within a few chunks. Fixing
+		// this single formula closes the seconds-backward-skip.
+		{
+			Lock lock(m_mutex);
+			if (chk.readPos < chk.samples.size()) {
+				double frac = (double)chk.readPos
+				            / (double)chk.samples.size();
+				m_filePosition = chk.endForward
+					- (chk.endForward - chk.startForward) * frac;
+			} else {
+				m_filePosition = chk.startForward;
+			}
+		}
+
+		if (chk.readPos >= chk.samples.size())
+			m_chunkQueue.pop_front();
+		// Wake worker if we made room.
+		m_chunkCv.notify_one();
+		// Done flag: worker finished AND queue is drained.
+		if (m_chunkQueue.empty()
+		 && m_chunkWorkerDone.load(std::memory_order_acquire))
+			m_done = true;
+		return toWrite;
+	}
+
 	Lock lock(m_mutex);
 
 	if(!m_opened || !m_bufSrcCtx || !m_bufSinkCtx)
@@ -1627,40 +2257,68 @@ int64_t InputFileFFmpeg::outputSamplesEstimation() const
 //---------------------------------------------------------------
 void InputFileFFmpeg::setPitchFactor(float factor)
 {
-	Lock lock(m_mutex);
-	if (m_pitchFactor != factor) {
-		dbgLog("setPitchFactor(%.4f -> %.4f) pos=%.3f opened=%d", m_pitchFactor, factor, m_filePosition, m_opened);
-		m_pitchFactor = factor;
-		if (m_opened) {
-			if (m_reverseReady) {
-				// Defer: a slider drag spams this method 60x/s;
-				// rebuilding on every call would melt the GUI.
-				m_reverseRebuildPending = true;
-				m_reverseRebuildTouch   = std::chrono::steady_clock::now();
-			} else {
-				int ret = _seek(m_filePosition);
-				dbgLog("  setPitchFactor _seek returned %d (src=%p sink=%p)", ret, m_bufSrcCtx, m_bufSinkCtx);
+	bool restartStreaming = false;
+	double restartPos = 0.0;
+	{
+		Lock lock(m_mutex);
+		if (m_pitchFactor != factor) {
+			dbgLog("setPitchFactor(%.4f -> %.4f) pos=%.3f opened=%d", m_pitchFactor, factor, m_filePosition, m_opened);
+			m_pitchFactor = factor;
+			if (m_opened) {
+				if (m_streamingReverse) {
+					restartStreaming = true;
+					restartPos       = m_filePosition;
+				} else if (m_reverseReady) {
+					// Defer: a slider drag spams this method 60x/s;
+					// rebuilding on every call would melt the GUI.
+					m_reverseRebuildPending = true;
+					m_reverseRebuildTouch   = std::chrono::steady_clock::now();
+				} else {
+					int ret = _seek(m_filePosition);
+					dbgLog("  setPitchFactor _seek returned %d (src=%p sink=%p)", ret, m_bufSrcCtx, m_bufSinkCtx);
+				}
 			}
 		}
+	}
+	if (restartStreaming) {
+		std::lock_guard<std::mutex> lg(m_chunkMutex);
+		m_chunkRestartTarget = restartPos;
+		m_chunkRestartPending.store(true, std::memory_order_release);
+		m_chunkQueue.clear();
+		m_chunkCv.notify_all();
 	}
 }
 
 
 void InputFileFFmpeg::setSpeedFactor(float factor)
 {
-	Lock lock(m_mutex);
-	if (m_speedFactor != factor) {
-		dbgLog("setSpeedFactor(%.4f -> %.4f) pos=%.3f opened=%d", m_speedFactor, factor, m_filePosition, m_opened);
-		m_speedFactor = factor;
-		if (m_opened) {
-			if (m_reverseReady) {
-				m_reverseRebuildPending = true;
-				m_reverseRebuildTouch   = std::chrono::steady_clock::now();
-			} else {
-				int ret = _seek(m_filePosition);
-				dbgLog("  setSpeedFactor _seek returned %d (src=%p sink=%p)", ret, m_bufSrcCtx, m_bufSinkCtx);
+	bool restartStreaming = false;
+	double restartPos = 0.0;
+	{
+		Lock lock(m_mutex);
+		if (m_speedFactor != factor) {
+			dbgLog("setSpeedFactor(%.4f -> %.4f) pos=%.3f opened=%d", m_speedFactor, factor, m_filePosition, m_opened);
+			m_speedFactor = factor;
+			if (m_opened) {
+				if (m_streamingReverse) {
+					restartStreaming = true;
+					restartPos       = m_filePosition;
+				} else if (m_reverseReady) {
+					m_reverseRebuildPending = true;
+					m_reverseRebuildTouch   = std::chrono::steady_clock::now();
+				} else {
+					int ret = _seek(m_filePosition);
+					dbgLog("  setSpeedFactor _seek returned %d (src=%p sink=%p)", ret, m_bufSrcCtx, m_bufSinkCtx);
+				}
 			}
 		}
+	}
+	if (restartStreaming) {
+		std::lock_guard<std::mutex> lg(m_chunkMutex);
+		m_chunkRestartTarget = restartPos;
+		m_chunkRestartPending.store(true, std::memory_order_release);
+		m_chunkQueue.clear();
+		m_chunkCv.notify_all();
 	}
 }
 

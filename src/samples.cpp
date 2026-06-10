@@ -163,6 +163,13 @@ void Sampler::setSlotReverse(int slot, bool on)
 		PlaybackSlot &s = m_slots[slot];
 		if (s.channelReverse == on) return;
 		s.channelReverse = on;
+		// Mirror onto audioReverse so the reverse cursor branch picks up
+		// the new direction at the very next audio cycle, even before
+		// the new InputFile swap completes. Without this flip the cursor
+		// branch would still treat the slot as forward for the ~tens of
+		// ms between the click and the swap, drifting upward at exactly
+		// the moment the user expects "engage reverse here".
+		s.audioReverse = on;
 		state_e st = s.state.load();
 		if (!((st == ePLAYING || st == ePAUSED) && s.lastSoundValid))
 			return;
@@ -256,6 +263,28 @@ void Sampler::reverseWorkerProc(int slot, uint64_t epoch, bool wantReverse,
 	// setSlotReverse re-spawning.
 	newFile->setCancelToken(nullptr);
 
+	// Wait for the streaming-reverse worker to populate the first
+	// chunk before swapping. Without this the audio thread sees an
+	// empty queue right after the swap and m_filePosition (the GUI
+	// cursor source) stays anchored at the file end / seek target
+	// while the producer thread spins on a 100 ms cycle waiting for
+	// data. The user-visible effect on long files was a cursor that
+	// "jumped seconds backward" the moment reverse engaged — the
+	// real cursor + the displayed cursor briefly diverged because
+	// the producer/audio pipeline had nothing to anchor against. A
+	// short bounded wait (~300 ms cap) is enough to cover the
+	// CHUNK_SEC decode budget on every container we ship; if the
+	// worker can't produce a chunk in that window (very slow disk,
+	// huge file, malformed container) we swap anyway and accept the
+	// brief silence — never block the user click indefinitely.
+	for (int waitMs = 0; waitMs < 300; waitMs += 5) {
+		if (newFile->isReverseFirstChunkReady()) break;
+		if (cancel && cancel->load(std::memory_order_relaxed)) break;
+		if (m_shuttingDown.load(std::memory_order_relaxed)) break;
+		if (s.reverseEpoch.load(std::memory_order_relaxed) != epoch) break;
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+
 	// Phase 4 — disconnect the producer thread from the OLD inputFile
 	// OUTSIDE m_mutex. setSource(NULL) only contends on the producer
 	// thread's own recursive mutex; meanwhile the audio thread is
@@ -305,7 +334,12 @@ void Sampler::reverseWorkerProc(int slot, uint64_t epoch, bool wantReverse,
 			s.sbCapture.consume(NULL, s.sbCapture.avail());
 			s.sbPlayback.consume(NULL, s.sbPlayback.avail());
 		}
-		if (s.dsp) s.dsp->reset();
+		// Reset filter delay lines + ring buffers, but PRESERVE the 8D
+		// rotation phase. Otherwise toggling reverse mid-orbit snaps
+		// the source back to the front-azimuth start position, which
+		// is jarring when the user is mid-listening to a 3D Rotate /
+		// 8D source and momentarily flips the direction.
+		if (s.dsp) s.dsp->resetPreservingRotation();
 
 		s.inputFile = newFile;
 		s.cachedPositionSec.store(resumeSec, std::memory_order_relaxed);
@@ -815,6 +849,53 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 				posSec = slot.stretchBaseTime + slot.dsp->stretchPlaybackPosition();
 				if (lenSec > 0.0 && posSec > lenSec) posSec = std::fmod(posSec, lenSec);
 				if (posSec < 0.0) posSec = 0.0;
+			} else if (slot.audioReverse) {
+				// Reverse cursor: track via samples actually consumed
+				// by this audio cycle (written), descending at exactly
+				// the playback rate. The chunked-streaming decoder's
+				// decoderPos + bufferedSec formula is brittle (every
+				// chunk transition + every codec seek-overshoot adds
+				// drift on the position read, and the monotonic rate
+				// limiter locks each tiny error in as a permanent
+				// downward step), so a few seconds into reverse the
+				// displayed cursor races SECONDS below the actual
+				// audible playback head. The audio itself plays
+				// correctly — only the cursor mapping is broken.
+				//
+				// Tracking by "written" makes the cursor descend at
+				// playback rate by definition: each output frame at
+				// 48 kHz corresponds to 1 / 48 000 output seconds,
+				// scaled by speedFactor to input-time. Cursor never
+				// drifts because the source of truth is "how much
+				// audio was just sent out", not a decoder-internal
+				// timestamp that can be off-by-batch.
+				double sf = (double)slot.inputFile->getSpeedFactor();
+				if (sf <= 0.0) sf = 1.0;
+				if (slot.posCacheValid) {
+					double prev = slot.cachedPositionSec.load(
+					                std::memory_order_relaxed);
+					double consumedSec =
+					    (double)written / 48000.0 * sf;
+					posSec = prev - consumedSec;
+				} else {
+					// First cycle after seek / swap / play start —
+					// use the seeded cachedPositionSec (set by
+					// playSoundInSlot to cropStart, by seek to the
+					// target, by the reverse swap to resumeSec, by
+					// loop wrap to loopStartSec). NOT the decoder's
+					// getPosition(): in streaming reverse the decoder
+					// scans FORWARD ahead of the playback head to
+					// emit reversed chunks, so getPosition() returns
+					// a value seconds away from where the audible
+					// cursor actually is. Reading it on the first
+					// cycle after a mid-playback reverse toggle was
+					// the "cursor jumps several seconds back" bug.
+					posSec = slot.cachedPositionSec.load(
+					           std::memory_order_relaxed);
+				}
+				double minBound = (slot.cropStart > 0.0) ? slot.cropStart : 0.0;
+				if (posSec < minBound) posSec = minBound;
+				if (posSec > lenSec)   posSec = lenSec;
 			} else {
 				double decoderPos = slot.inputFile->getPosition();
 				double sf = (double)slot.inputFile->getSpeedFactor();
@@ -825,16 +906,8 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 					availSamples = slot.sbPlayback.avail();
 				}
 				double bufferedSec = availSamples / 48000.0 * sf;
-				// Reverse: decoder runs file backward, so samples still
-				// in the playback buffer correspond to forward times
-				// HIGHER than decoderPos. Add instead of subtract.
-				if (slot.channelReverse) {
-					posSec = decoderPos + bufferedSec;
-					if (posSec > lenSec) posSec = lenSec;
-				} else {
-					posSec = decoderPos - bufferedSec;
-					if (posSec < 0.0) posSec = 0.0;
-				}
+				posSec = decoderPos - bufferedSec;
+				if (posSec < 0.0) posSec = 0.0;
 			}
 			// Rate-limit + monotonic guard. Direction depends on the
 			// slot's reverse flag - forward play is monotonic up,
@@ -845,7 +918,7 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 				double accepted = posSec;
 				if (slot.posCacheValid) {
 					constexpr double kMaxPerCycle = 0.20;
-					if (!slot.channelReverse) {
+					if (!slot.audioReverse) {
 						if (accepted < prev) accepted = prev;
 						else if (accepted > prev + kMaxPerCycle)
 							accepted = prev + kMaxPerCycle;
@@ -1331,6 +1404,11 @@ void Sampler::stopSlotInternal(int slot)
 		s.cachedPositionSec.store(0.0, std::memory_order_relaxed);
 		s.cachedLengthSec.store(0.0, std::memory_order_relaxed);
 		s.posCacheValid = false;
+		// Drop audioReverse: it tracks the active stream's direction.
+		// Leaving it set after stop would pin the next play's first
+		// cursor cycle into the reverse rate-limiter branch even when
+		// the new sound plays forward.
+		s.audioReverse = false;
 
 		// Drop the per-playback random-variation footprint so the next
 		// play starts with a fresh roll (the audio thread reads these
@@ -1485,7 +1563,26 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 	// so the GUI's first poll (before the audio thread has run a fetch)
 	// reads the file length we just opened instead of a stale 0 from
 	// a previous slot owner.
-	s.cachedPositionSec.store(s.cropStart, std::memory_order_relaxed);
+	// Reverse playback starts at the upper bound (cropEnd or file
+	// length) and walks downward. Seeding to cropStart was the
+	// "cursor stuck at start in reverse" bug — the first audio
+	// cycle reads the seeded value (see fetchInputSamples reverse
+	// branch's first-cycle path) and from there consumed-samples
+	// descent locks the cursor at the bottom of the file. Pull the
+	// initial position straight from the decoder, which open() set
+	// to cursorForward (cropEnd / file length) on the reverse path
+	// and to cropStart on the forward path.
+	const bool isReverse = (sound.reverse || s.channelReverse);
+	s.audioReverse = isReverse;
+	double initialPos = s.cropStart;
+	if (isReverse) {
+		initialPos = s.inputFile->getPosition();
+		if (initialPos <= s.cropStart) {
+			initialPos = (s.cropEnd > 0.0)
+				? s.cropEnd : s.inputFile->getLength();
+		}
+	}
+	s.cachedPositionSec.store(initialPos, std::memory_order_relaxed);
 	s.cachedLengthSec.store(s.inputFile->getLength(), std::memory_order_relaxed);
 	// Fresh playback: invalidate the rate-limiter anchor so the first
 	// audio-thread cache refresh snaps to the actual decoder position

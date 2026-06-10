@@ -63,6 +63,7 @@ LogViewerDialog::LogViewerDialog(QWidget *parent)
     , m_timer(new QTimer(this))
     , m_minLevel(LogLevel_INFO)
 {
+    setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     setProperty("isGBSoundboard", true);
     setWindowTitle(tr("GameBaiters Soundboard - Plugin log"));
     resize(820, 500);

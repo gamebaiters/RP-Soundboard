@@ -62,15 +62,27 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ffmpeg-static
-          key: ffmpeg-static-msvc-x64-n6.1.1-v5-enc
+          key: ffmpeg-static-msvc-x64-n8.1.1-v6-ffmpeg8-cbs-noschan
 
       - name: Build static FFmpeg with MSVC toolchain
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: |
           set -e
-          git clone --depth 1 --branch n6.1.1 https://git.ffmpeg.org/ffmpeg.git ffmpeg-src
+          git clone --depth 1 --branch n8.1.1 https://git.ffmpeg.org/ffmpeg.git ffmpeg-src
           cd ffmpeg-src
+          # FFmpeg 8.x's libavformat/Makefile unconditionally drops
+          # cbs.o into the MOV/MP4 muxer object set. With every CBS_xx
+          # subtype disabled (audio-only build), cbs_type_table[] in
+          # libavcodec/cbs.c is empty — MSVC trips a C1001 ICE. Patch
+          # the source pre-configure: add a NULL sentinel + null-guard
+          # the lookup loop. Smallest possible patch, identical runtime
+          # behaviour (the loop never matches NULL against a codec_id).
+          CBS=libavcodec/cbs.c
+          if ! grep -q "RPSB_CBS_SENTINEL" "$CBS"; then
+              sed -i 's|static const CodedBitstreamType \*const cbs_type_table\[\] = {|static const CodedBitstreamType *const cbs_type_table[] = {\n    NULL, /* RPSB_CBS_SENTINEL */|' "$CBS"
+              sed -i '0,/if (cbs_type_table\[i\]->codec_id == codec_id) {/{s||if (!cbs_type_table[i]) continue; /* RPSB_CBS_SENTINEL */\n        if (cbs_type_table[i]->codec_id == codec_id) {|}' "$CBS"
+          fi
           # --toolchain=msvc tells configure to use cl.exe + lib.exe so the
           # produced archives are MSVC-compatible static .lib files.
           ./configure \
@@ -79,6 +91,10 @@ jobs:
               --enable-static --disable-shared \
               --disable-programs --disable-doc --disable-debug \
               --disable-everything \
+              --disable-bsfs \
+              --disable-protocols \
+              --disable-schannel --disable-securetransport --disable-sdl2 \
+              --disable-network --disable-iconv --disable-zlib \
               --enable-decoder=mp3,mp3float,aac,vorbis,opus,flac,pcm_s16le,pcm_s16be,pcm_u16le,pcm_u16be,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le,pcm_u8,pcm_alaw,pcm_mulaw,wmav2,wmapro,ac3,eac3 \
               --enable-encoder=pcm_s16le,flac,vorbis,aac \
               --enable-demuxer=mp3,wav,ogg,flac,mov,matroska,avi,aac,asf,flv \

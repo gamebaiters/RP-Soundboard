@@ -151,7 +151,7 @@ SandboxState SandboxState::fromJson(const QJsonObject &o)
     s.rotateRadiusM   = static_cast<float>(o.value("rotateRadiusM").toDouble(1.5));
     s.rotateCcw       = o.value("rotateCcw").toBool(false);
     s.rotateElev      = static_cast<float>(o.value("rotateElev").toDouble(0.0));
-    s.spatialEngine   = o.value("spatialEngine").toInt(Engine_Classic);
+    s.spatialEngine   = o.value("spatialEngine").toInt(Engine_Leia);
     s.leiaReflEnable  = o.value("leiaReflEnable").toBool(true);
     s.leiaReflLevel   = static_cast<float>(o.value("leiaReflLevel").toDouble(-6.0));
     s.leiaRoomSize    = static_cast<float>(o.value("leiaRoomSize").toDouble(12.0));

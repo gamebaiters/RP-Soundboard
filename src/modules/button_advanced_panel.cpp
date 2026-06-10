@@ -56,6 +56,7 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     , m_ok(new QPushButton(tr("OK"), this))
     , m_cancel(new QPushButton(tr("Cancel"), this))
 {
+    setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     setWindowTitle(tr("Button Options"));
     setModal(false);
     setProperty("isGBSoundboard", true);

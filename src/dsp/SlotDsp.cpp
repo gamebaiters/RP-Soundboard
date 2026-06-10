@@ -147,6 +147,18 @@ void SlotDsp::reset() {
     m_peakL = m_peakR = 0.0f;
 }
 
+void SlotDsp::resetPreservingRotation() {
+    double savedPhasePlay = m_play.rotPhase;
+    int    savedBlockPlay = m_play.rotBlockCounter;
+    double savedPhaseCap  = m_cap.rotPhase;
+    int    savedBlockCap  = m_cap.rotBlockCounter;
+    reset();
+    m_play.rotPhase        = savedPhasePlay;
+    m_play.rotBlockCounter = savedBlockPlay;
+    m_cap.rotPhase         = savedPhaseCap;
+    m_cap.rotBlockCounter  = savedBlockCap;
+}
+
 void SlotDsp::resetPeak() {
     m_peakL = m_peakR = 0.0f;
 }
@@ -383,16 +395,23 @@ void SlotDsp::advanceRotationIfNeeded(PathState &p) {
         --p.rotBlockCounter;
         return;
     }
+    // Push the speaker pair at the CURRENT phase FIRST, then advance
+    // for the next block. Without this the first non-trivial call
+    // emits at +dPhase (already to the right of front by one tick)
+    // and the listener never hears the "starts at front" cue — the
+    // orbit appears to spawn already off-axis. Pre-emit fixes the
+    // perception "8D starts from the side".
+    float ph0 = static_cast<float>(p.rotPhase);
+    float x0 =  std::sin(ph0) * m_state.rotateRadiusM;
+    float y0 = -std::cos(ph0) * m_state.rotateRadiusM;
+    pushSpeakerPair(p, x0, y0, m_state.rotateElev);
+
     int dir = m_state.rotateCcw ? -1 : +1;
     double dPhase = 2.0 * 3.14159265358979323846 * m_state.rotateRpm /
                     60.0 * (kRotateUpdateBlock / m_fs);
     p.rotPhase += dir * dPhase;
     if (p.rotPhase >  6.28318530717958647692) p.rotPhase -= 6.28318530717958647692;
     if (p.rotPhase < -6.28318530717958647692) p.rotPhase += 6.28318530717958647692;
-    float ph = static_cast<float>(p.rotPhase);
-    float x =  std::sin(ph) * m_state.rotateRadiusM;
-    float y = -std::cos(ph) * m_state.rotateRadiusM;
-    pushSpeakerPair(p, x, y, m_state.rotateElev);
     p.rotBlockCounter = kRotateUpdateBlock;
 }
 
@@ -416,17 +435,21 @@ void SlotDsp::updateLeiaDirection(PathState &p) {
         az = std::atan2(ux, -uy) * kRad2Deg;
         el = std::atan2(uz, std::sqrt(ux*ux + uy*uy)) * kRad2Deg;
     } else {
-        // Rotate / 8D preset: advance the orbit phase.
+        // Rotate / 8D preset: emit the CURRENT phase to the Leia
+        // direction setter, THEN advance for the next block. Without
+        // the pre-emit the first non-trivial block already sat at
+        // +dPhase, so the orbit "starts from the side" instead of
+        // visibly from front.
+        az = static_cast<float>(p.rotPhase) * kRad2Deg;
+        float radius = m_state.rotateRadiusM;
+        if (radius < 0.05f) radius = 0.05f;
+        el = std::atan2(m_state.rotateElev, radius) * kRad2Deg;
         int dir = m_state.rotateCcw ? -1 : +1;
         double dPhase = 2.0 * kPi * m_state.rotateRpm / 60.0 *
                         (kRotateUpdateBlock / m_fs);
         p.rotPhase += dir * dPhase;
         if (p.rotPhase >  2.0 * kPi) p.rotPhase -= 2.0 * kPi;
         if (p.rotPhase < -2.0 * kPi) p.rotPhase += 2.0 * kPi;
-        az = static_cast<float>(p.rotPhase) * kRad2Deg;
-        float radius = m_state.rotateRadiusM;
-        if (radius < 0.05f) radius = 0.05f;
-        el = std::atan2(m_state.rotateElev, radius) * kRad2Deg;
     }
     p.leia.setDirection(az, el);
 }

@@ -35,6 +35,7 @@ AudioEffectsDialog::AudioEffectsDialog(Sampler *sampler, QWidget *parent)
 	: QDialog(parent),
 	  m_sampler(sampler)
 {
+	setWindowFlag(Qt::WindowContextHelpButtonHint, false);
 	setWindowTitle("Audio Effects");
 	setMinimumWidth(350);
 	setStyleSheet(StyleHelper::loadDarkStyle());

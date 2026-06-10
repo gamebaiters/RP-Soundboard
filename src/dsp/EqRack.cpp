@@ -55,19 +55,28 @@ void EqRack::runFftAnalysis() {
         if (binLo < 1)     binLo = 1;
         if (binHi >= bins) binHi = bins - 1;
         if (binHi < binLo) binHi = binLo;
-        double sumMag = 0.0;
-        int    n      = 0;
+        // PEAK bin magnitude across the 2/3-octave window, NOT the
+        // mean. High bands (16 k, 8 k) span 150+ FFT bins at our
+        // sample rate / FFT size; even a full-scale sine at the band
+        // centre only lights 1-3 of those, so the mean is ~peak/100
+        // and the meter never saturated (the user-reported bug
+        // "earrape never reaches max"). Peak keeps the band-shape
+        // response sharp regardless of how many bins the window
+        // covers.
+        double peakMag = 0.0;
         for (int k = binLo; k <= binHi; ++k) {
             float re = m_fftFreq[k * 2];
             float im = m_fftFreq[k * 2 + 1];
-            sumMag += std::sqrt(double(re) * re + double(im) * im);
-            n++;
+            double mag = std::sqrt(double(re) * re + double(im) * im);
+            if (mag > peakMag) peakMag = mag;
         }
-        double avg = (n > 0) ? sumMag / n : 0.0;
-        // Map bin magnitude to [0..1]. Full-scale sine -> peak bin
-        // magnitude ~ N/4 with the Hann window, so /150 gives a
-        // reasonable headroom while still saturating on hot signals.
-        float level = float(avg / 150.0);
+        // Map peak magnitude to [0..1]. Full-scale sine through a Hann
+        // window of length kFftSize produces a peak bin magnitude of
+        // ~ kFftSize / 4 (coherent gain 0.5 then magnitude-of-complex).
+        // /160 keeps the meter saturating slightly BEFORE 0 dBFS so
+        // realistic loud material (RMS ~ -6 dBFS, peak ~ 0 dBFS) hits
+        // the top of the strip cleanly.
+        float level = float(peakMag / 160.0);
         if (level > 1.0f) level = 1.0f;
         if (level < 0.0f) level = 0.0f;
         float prev = m_bandLevel[b].load(std::memory_order_relaxed);

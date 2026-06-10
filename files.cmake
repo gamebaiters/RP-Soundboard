@@ -102,6 +102,8 @@ set(sources
 	src/modules/file_metadata.cpp
 	src/modules/whats_new_dialog.h
 	src/modules/whats_new_dialog.cpp
+	src/modules/version_history_dialog.h
+	src/modules/version_history_dialog.cpp
 	src/modules/eq_band_widget.h
 	src/modules/eq_band_widget.cpp
 	src/modules/log_viewer_dialog.h

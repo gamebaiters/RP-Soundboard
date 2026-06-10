@@ -214,6 +214,13 @@ private:
 		// playing in the original direction until the worker swaps a
 		// fully-built new one in under a micro-lock.
 		bool channelReverse = false;
+		// True whenever audio is currently flowing in reverse, regardless
+		// of WHICH source flipped the bit on (per-channel override or
+		// per-cell SoundInfo.reverse flag). Drives the reverse cursor
+		// branch in fetchInputSamples — without this flag a SoundInfo-
+		// flagged reverse cell would render reverse audio but the GUI
+		// would walk the forward cursor, locking the cursor at the start.
+		bool audioReverse = false;
 		// Background worker that builds the new (reverse / forward)
 		// InputFile off the audio path. Replaced on every rapid click;
 		// the prior worker is signalled via reverseWorkerCancel and

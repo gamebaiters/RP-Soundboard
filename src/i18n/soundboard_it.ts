@@ -5,13 +5,13 @@
     <name>AboutQt</name>
     <message>
         <location filename="../about_qt.ui" line="32"/>
-        <location filename="../about_qt.cpp" line="51"/>
+        <location filename="../about_qt.cpp" line="52"/>
         <source>About GameBaiters Soundboard</source>
         <translation>Info GameBaiters Soundboard</translation>
     </message>
     <message>
         <location filename="../about_qt.ui" line="61"/>
-        <location filename="../about_qt.cpp" line="78"/>
+        <location filename="../about_qt.cpp" line="79"/>
         <source>GameBaiters Soundboard</source>
         <translation>GameBaiters Soundboard</translation>
     </message>
@@ -31,27 +31,32 @@
         <translation>Questo software usa librerie del progetto FFmpeg sotto licenza LGPLv2.1. Il sorgente FFmpeg di questa build si ottiene da &lt;a href=&quot;https://ffmpeg.org/download.html&quot;&gt;ffmpeg.org/download.html&lt;/a&gt; (tag n6.1.1) o su richiesta su &lt;a href=&quot;https://gamebaiters.net&quot;&gt;gamebaiters.net&lt;/a&gt;.</translation>
     </message>
     <message>
-        <location filename="../about_qt.cpp" line="81"/>
+        <location filename="../about_qt.cpp" line="82"/>
         <source>by GameBaitersCrew</source>
         <translation>by GameBaitersCrew</translation>
     </message>
     <message>
-        <location filename="../about_qt.cpp" line="111"/>
+        <location filename="../about_qt.cpp" line="112"/>
         <source>Copyright &amp;copy; 2026 &lt;b&gt;GameBaitersCrew&lt;/b&gt;&lt;br&gt;&lt;a style=&apos;color:#6cb4ee;&apos; href=&apos;https://github.com/gamebaiters/RP-Soundboard&apos;&gt;github.com/gamebaiters/RP-Soundboard&lt;/a&gt; &amp;nbsp;|&amp;nbsp; &lt;a style=&apos;color:#6cb4ee;&apos; href=&apos;https://www.gamebaiters.net&apos;&gt;www.gamebaiters.net&lt;/a&gt;&lt;br&gt;&lt;br&gt;Fork rewritten from scratch on top of the original&lt;br&gt;RP Soundboard source by Marius Gr&amp;auml;fe (2015&amp;ndash;2019).&lt;br&gt;&lt;br&gt;&lt;span style=&apos;font-size:10px; color:#888;&apos;&gt;Uses FFmpeg (LGPLv2.1) &amp;mdash; source: &lt;a style=&apos;color:#6cb4ee;&apos; href=&apos;https://ffmpeg.org/download.html&apos;&gt;ffmpeg.org&lt;/a&gt; tag n6.1.1&lt;/span&gt;</source>
         <translation>Copyright &amp;copy; 2026 &lt;b&gt;GameBaitersCrew&lt;/b&gt;&lt;br&gt;&lt;a style=&apos;color:#6cb4ee;&apos; href=&apos;https://github.com/gamebaiters/RP-Soundboard&apos;&gt;github.com/gamebaiters/RP-Soundboard&lt;/a&gt; &amp;nbsp;|&amp;nbsp; &lt;a style=&apos;color:#6cb4ee;&apos; href=&apos;https://www.gamebaiters.net&apos;&gt;www.gamebaiters.net&lt;/a&gt;&lt;br&gt;&lt;br&gt;Fork riscritto da zero sul codice&lt;br&gt;originale di RP Soundboard di Marius Gr&amp;auml;fe (2015&amp;ndash;2019).&lt;br&gt;&lt;br&gt;&lt;span style=&apos;font-size:10px; color:#888;&apos;&gt;Usa FFmpeg (LGPLv2.1) &amp;mdash; sorgente: &lt;a style=&apos;color:#6cb4ee;&apos; href=&apos;https://ffmpeg.org/download.html&apos;&gt;ffmpeg.org&lt;/a&gt; tag n6.1.1&lt;/span&gt;</translation>
     </message>
     <message>
-        <location filename="../about_qt.cpp" line="135"/>
+        <location filename="../about_qt.cpp" line="136"/>
         <source>&lt;b style=&apos;color:#e8e8e8;&apos;&gt;Quick start&lt;/b&gt;&lt;br&gt;&amp;bull;&amp;nbsp; Connect to a TeamSpeak server — the soundboard sends audio into your voice channel.&lt;br&gt;&amp;bull;&amp;nbsp; Drag an audio file onto a grid button to assign it, then click the button to play.&lt;br&gt;&amp;bull;&amp;nbsp; Each channel has a &lt;b&gt;Local&lt;/b&gt; volume (what you hear) and a &lt;b&gt;Remote&lt;/b&gt; volume (what others hear).&lt;br&gt;&amp;bull;&amp;nbsp; &lt;b&gt;Stop all&lt;/b&gt; / &lt;b&gt;Pause all&lt;/b&gt; control every channel at once.&lt;br&gt;&amp;bull;&amp;nbsp; For the complete guide click &lt;b&gt;How to use the soundboard&lt;/b&gt; below.</source>
-        <translation type="unfinished"></translation>
+        <translation>&lt;b style=&apos;color:#e8e8e8;&apos;&gt;Avvio rapido&lt;/b&gt;&lt;br&gt;&amp;bull;&amp;nbsp; Collegati a un server TeamSpeak — la soundboard manda l&apos;audio nel canale vocale.&lt;br&gt;&amp;bull;&amp;nbsp; Trascina un file audio su un pulsante della griglia per assegnarlo, poi clicca per riprodurlo.&lt;br&gt;&amp;bull;&amp;nbsp; Ogni canale ha un volume &lt;b&gt;Locale&lt;/b&gt; (quello che senti tu) e un volume &lt;b&gt;Remoto&lt;/b&gt; (quello che sentono gli altri).&lt;br&gt;&amp;bull;&amp;nbsp; &lt;b&gt;Ferma tutto&lt;/b&gt; / &lt;b&gt;Pausa tutto&lt;/b&gt; agiscono su ogni canale insieme.&lt;br&gt;&amp;bull;&amp;nbsp; Per la guida completa clicca &lt;b&gt;Come usare la soundboard&lt;/b&gt; qui sotto.</translation>
     </message>
     <message>
-        <location filename="../about_qt.cpp" line="154"/>
+        <location filename="../about_qt.cpp" line="157"/>
         <source>How to use the soundboard</source>
-        <translation type="unfinished">Come usare la soundboard</translation>
+        <translation>Come usare la soundboard</translation>
     </message>
     <message>
-        <location filename="../about_qt.cpp" line="169"/>
+        <location filename="../about_qt.cpp" line="165"/>
+        <source>Version history</source>
+        <translation>Cronologia versioni</translation>
+    </message>
+    <message>
+        <location filename="../about_qt.cpp" line="185"/>
         <source>&lt;span style=&apos;font-size:9px; color:#666;&apos;&gt;Un vero e proprio mixer da DJ a portata di mano.&lt;/span&gt;</source>
         <translation>&lt;span style=&apos;font-size:9px; color:#666;&apos;&gt;Un mixer da DJ a portata di mano.&lt;/span&gt;</translation>
     </message>
@@ -130,9 +135,9 @@
     </message>
     <message>
         <location filename="../modules/button_advanced_panel.cpp" line="34"/>
-        <location filename="../modules/button_advanced_panel.cpp" line="377"/>
-        <location filename="../modules/button_advanced_panel.cpp" line="410"/>
-        <location filename="../modules/button_advanced_panel.cpp" line="443"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="378"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="411"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="444"/>
         <source>Preview</source>
         <translation>Anteprima</translation>
     </message>
@@ -153,7 +158,7 @@
     </message>
     <message>
         <location filename="../modules/button_advanced_panel.cpp" line="54"/>
-        <location filename="../modules/button_advanced_panel.cpp" line="297"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="298"/>
         <source>Set hotkey...</source>
         <translation>Imposta tasto...</translation>
     </message>
@@ -173,151 +178,153 @@
         <translation>Annulla</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="59"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="60"/>
         <source>Button Options</source>
         <translation>Opzioni pulsante</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="72"/>
-        <location filename="../modules/button_advanced_panel.cpp" line="74"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="73"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="75"/>
         <source>ms</source>
         <translation>ms</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="72"/>
-        <location filename="../modules/button_advanced_panel.cpp" line="74"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="73"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="75"/>
         <source>s</source>
         <translation>s</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="76"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="77"/>
         <source>after</source>
         <translation>dopo</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="76"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="77"/>
         <source>at</source>
         <translation>a</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="79"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="80"/>
         <source>Sound file</source>
         <translation>File audio</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="98"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="99"/>
         <source>Display</source>
         <translation>Aspetto</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="100"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="101"/>
         <source>Custom text</source>
         <translation>Testo pers.</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="105"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="106"/>
         <source>Currently selected button color.</source>
         <translation>Colore del pulsante selezionato.</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="111"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="112"/>
         <source>Color</source>
         <translation>Colore</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="116"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="117"/>
         <source>(no image)</source>
         <translation>(nessuna)</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="121"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="122"/>
         <source>Image</source>
         <translation>Immagine</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="123"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="124"/>
         <source>Volume modifier</source>
         <translation>Volume</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="132"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="133"/>
         <source>Crop</source>
         <translation>Ritaglio</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="139"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="140"/>
         <source>Start</source>
         <translation>Inizio</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="144"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="145"/>
         <source>Stop</source>
         <translation>Fine</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="151"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="152"/>
         <source>Custom FX (override channel)</source>
         <translation>FX pers. (ignora canale)</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="156"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="157"/>
         <source>Reverse playback</source>
         <translation>Riproduzione inversa</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="157"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="158"/>
         <source>Play the sample back-to-front. Best on short cells; very long
 files use more memory.</source>
-        <translation type="unfinished"></translation>
+        <translation>Riproduce il sample al contrario. Meglio su clip brevi; i file molto
+lunghi usano più memoria.</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="161"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="162"/>
         <source>Auto-normalize loudness (EBU R128)</source>
         <translation>Normalizza volume (EBU R128)</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="162"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="163"/>
         <source>Bring the cell to a consistent loudness so loud samples don&apos;t
 drown quiet ones.</source>
-        <translation type="unfinished"></translation>
+        <translation>Porta la clip a un volume costante così i sample forti non coprono
+quelli più deboli.</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="167"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="168"/>
         <source>Hotkey</source>
         <translation>Tasto</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="190"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="191"/>
         <source>Pick button image</source>
         <translation>Scegli immagine pulsante</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="192"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="193"/>
         <source>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All files (*.*)</source>
         <translation>Immagini (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;Tutti i file (*.*)</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="297"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="298"/>
         <source>Hotkey: %1</source>
         <translation>Tasto: %1</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="311"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="312"/>
         <source>Choose sound file</source>
         <translation>Scegli file audio</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="312"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="313"/>
         <source>Audio (*.mp3 *.wav *.flac *.ogg *.opus *.aac *.m4a);;All files (*.*)</source>
         <translation>Audio (*.mp3 *.wav *.flac *.ogg *.opus *.aac *.m4a);;Tutti i file (*.*)</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="319"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="320"/>
         <source>Button color</source>
         <translation>Colore pulsante</translation>
     </message>
     <message>
-        <location filename="../modules/button_advanced_panel.cpp" line="401"/>
+        <location filename="../modules/button_advanced_panel.cpp" line="402"/>
         <source>Stop preview</source>
         <translation>Ferma anteprima</translation>
     </message>
@@ -462,22 +469,22 @@ Le impostazioni sono salvate per canale e incluse nelle macro.</translation>
         <translation>R %1</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="155"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="156"/>
         <source>Channel %1</source>
         <translation>Canale %1</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="158"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="159"/>
         <source>%1 - Audio Sandbox</source>
         <translation>%1 - Audio Sandbox</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="202"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="203"/>
         <source>Enable the Audio Sandbox on this channel</source>
         <translation>Abilita l&apos;Audio Sandbox sul canale</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="203"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="204"/>
         <source>Master per-channel switch. When OFF, the entire DSP chain is
 bypassed (zero CPU cost) but every value below is preserved
 so re-enabling brings everything back exactly as set.</source>
@@ -486,7 +493,7 @@ so re-enabling brings everything back exactly as set.</source>
 così riabilitandolo tutto torna come prima.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="208"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="209"/>
         <source>Master switch. When OFF the entire DSP chain is bypassed and
 consumes zero CPU. Every parameter below is preserved on disk
 so you can re-enable later and pick up exactly where you left.</source>
@@ -495,23 +502,24 @@ e non usa CPU. Ogni parametro sotto è salvato su disco,
 così puoi riabilitarlo e riprendere da dove avevi lasciato.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="213"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="214"/>
         <source>CPU --</source>
         <translation>CPU --</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="215"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="216"/>
         <source>DSP CPU used by this channel over the last second.
 High values mean a heavy effect is engaged.</source>
-        <translation type="unfinished"></translation>
+        <translation>CPU DSP usata da questo canale nell&apos;ultimo secondo.
+Valori alti significano un effetto pesante attivo.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="226"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="227"/>
         <source>Spatial mode — choose how the sound is positioned in 3D space:</source>
         <translation>Modalità spaziale — scegli la posizione del suono nello spazio 3D:</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="239"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="240"/>
         <source>Spatial mode:
   - Off: pure passthrough.
   - L/R Pan: equal-power balance (cheap, no HRTF).
@@ -532,87 +540,92 @@ High values mean a heavy effect is engaged.</source>
     la classica ricetta &apos;remix 8D di YouTube&apos;.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="265"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="266"/>
         <source>L/R Pan</source>
         <translation>L/R Pan</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="269"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="270"/>
         <source>Balance</source>
         <translation>Bilanc.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="279"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="280"/>
         <source>3D HRTF</source>
         <translation>3D HRTF</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="288"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="289"/>
         <source>HRTF engine</source>
         <translation>Motore HRTF</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="292"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="293"/>
         <source>Classic (parametric)</source>
         <translation>Classico (parametrico)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="293"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="294"/>
         <source>Leia (measured HRTF)</source>
         <translation>Leia (HRTF misurato)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="298"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="299"/>
         <source>Classic: the original lightweight parametric HRTF.
 Leia: convolution with a measured HRTF dataset plus
 image-source room reflections - correct front/back
 localisation and a far more convincing sense of space.
 If the Leia data cannot load, playback falls back to
 Classic automatically.</source>
-        <translation type="unfinished"></translation>
+        <translation>Classic: l&apos;HRTF parametrico leggero originale.
+Leia: convoluzione con dataset HRTF misurato più
+riflessioni image-source di stanza - localizzazione
+front/back corretta e senso di spazio molto più convincente.
+Se i dati Leia non si caricano, la riproduzione torna
+a Classic automaticamente.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="314"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="315"/>
         <source>x=0.00 y=0.00</source>
         <translation>x=0.00 y=0.00</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="322"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="323"/>
         <source>Elevation</source>
         <translation>Elevazione</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="327"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="328"/>
         <source>Distance</source>
         <translation>Distanza</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="332"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="333"/>
         <source>Stereo width</source>
         <translation>Ampiezza</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="337"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="338"/>
         <source>RPM</source>
         <translation>RPM</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="342"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="343"/>
         <source>Orbit radius</source>
         <translation>Raggio orbita</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="347"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="348"/>
         <source>Counter-clockwise (left first)</source>
         <translation>Antiorario (prima a sinistra)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="349"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="350"/>
         <source>Head sway (cone-of-confusion break)</source>
         <translation>Oscillazione testa (rompe il cono di confusione)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="350"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="351"/>
         <source>Adds a slow 0.3 Hz wobble to the source position simulating
 the tiny head movements humans make. Strongly improves the
 &apos;sound is OUT of my head&apos; feel on static positions.</source>
@@ -621,12 +634,12 @@ simulando i piccoli movimenti della testa. Migliora molto
 la sensazione di &apos;suono FUORI dalla testa&apos; nelle posizioni statiche.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="358"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="359"/>
         <source>Spatial mix</source>
         <translation>Mix spaziale</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="361"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="362"/>
         <source>Wet/dry crossfade between the HRTF processed signal and
 the raw stereo input. 100 = full HRTF placement, 0 =
 bypass (raw stereo). Pull back to ~70 if the spatialised
@@ -639,12 +652,12 @@ così riporti lo stereo originale senza perdere
 l&apos;indizio di posizione.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="368"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="369"/>
         <source>Ambience</source>
         <translation>Ambiente</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="371"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="372"/>
         <source>Stereo room ambience reverb (Freeverb-style). Pushes the
 HRTF placement OUT of the head by adding subtle room
 reflections. Independent from the per-button FxPanel
@@ -655,136 +668,140 @@ Indipendente dal Riverbero del FxPanel per pulsante
 (che modella il suono, non spazializza).</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="382"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="383"/>
         <source>Leia engine - room &amp; tone</source>
         <translation>Motore Leia - stanza e tono</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="387"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="388"/>
         <source>Early reflections (room)</source>
         <translation>Prime riflessioni (stanza)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="388"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="389"/>
         <source>Image-source early reflections. They place the sound in a
 real room - the single strongest &apos;out of the head&apos; cue.
 Turn off for a dry, anechoic placement.</source>
-        <translation type="unfinished"></translation>
+        <translation>Riflessioni precoci image-source. Collocano il suono in una
+stanza reale - il singolo segnale &apos;fuori dalla testa&apos; più forte.
+Disattiva per un posizionamento secco e anecoico.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="394"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="395"/>
         <source>Reflection level</source>
         <translation>Livello riflessioni</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="399"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="400"/>
         <source>Room size</source>
         <translation>Dimensione stanza</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="408"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="409"/>
         <source>Room type</source>
         <translation>Tipo di stanza</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="410"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="411"/>
         <source>Drapes (most absorbent)</source>
         <translation>Tendaggi (massima assorbenza)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="411"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="412"/>
         <source>Studio</source>
         <translation>Studio</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="412"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="413"/>
         <source>Tiles</source>
         <translation>Piastrelle</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="413"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="414"/>
         <source>Concrete</source>
         <translation>Cemento</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="414"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="415"/>
         <source>Glass (most reflective)</source>
         <translation>Vetro (massima riflessione)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="415"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="416"/>
         <source>Living room</source>
         <translation>Soggiorno</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="416"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="417"/>
         <source>Wood cabin</source>
         <translation>Cabina in legno</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="417"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="418"/>
         <source>Hall</source>
         <translation>Sala</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="418"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="419"/>
         <source>Cathedral</source>
         <translation>Cattedrale</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="419"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="420"/>
         <source>Bathroom</source>
         <translation>Bagno</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="420"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="421"/>
         <source>Car</source>
         <translation>Auto</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="421"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="422"/>
         <source>Outdoor (anechoic)</source>
         <translation>Esterno (anecoico)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="422"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="423"/>
         <source>Underwater</source>
         <translation>Sott&apos;acqua</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="430"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="431"/>
         <source>Clarity</source>
         <translation>Chiarezza</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="433"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="434"/>
         <source>Level of the direct (dry HRTF) path. 100 = full direct
 sound; lower values lean on the room reflections.</source>
-        <translation type="unfinished"></translation>
+        <translation>Livello del percorso diretto (HRTF dry). 100 = suono
+diretto pieno; valori più bassi si appoggiano alle riflessioni di stanza.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="438"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="439"/>
         <source>Width</source>
         <translation>Larghezza</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="441"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="442"/>
         <source>Amount of room reflection blended in. 0 = pure direct,
 higher = a wider, more enveloping space.</source>
-        <translation type="unfinished"></translation>
+        <translation>Quantità di riflessione di stanza miscelata. 0 = solo diretto,
+più alto = spazio più ampio e avvolgente.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="450"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="451"/>
         <source>16-band EQ (-12..+12 dB)</source>
         <translation>EQ 16 bande (-12..+12 dB)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="453"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="454"/>
         <source>Enable EQ</source>
         <translation>Abilita EQ</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="454"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="455"/>
         <source>Master bypass for the 16-band graphic EQ. Off = the entire
 EQ chain is skipped (zero CPU cost, signal passes untouched).
 Slider values are kept on disk so you can A/B with one click.</source>
@@ -793,7 +810,7 @@ catena EQ è saltata (CPU nulla, segnale intatto).
 I valori sono salvati su disco per fare A/B con un clic.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="459"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="460"/>
         <source>ISO-aligned 2/3-octave centres at 20, 25, 40, 63, 100, 160,
 250, 400, 630, 1k, 1.6k, 2.5k, 4k, 6.3k, 10k, 16k Hz with
 matched Q (= 2.145) so adjacent bands sum to about +/-12 dB
@@ -806,46 +823,46 @@ senza esplodere in earrape. I grandi salti azzerano
 lo stato IIR per eliminare i transienti a cascata.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="465"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="466"/>
         <source>Copy EQ</source>
         <translation>Copia EQ</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="466"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="2251"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="2256"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="467"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="2258"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="2263"/>
         <source>Paste EQ</source>
         <translation>Incolla EQ</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="651"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="654"/>
         <source>DSP Modules</source>
         <translation>Moduli DSP</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="657"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="660"/>
         <source>Pipeline order — drag to reorder, click a block to open it:</source>
         <translation>Ordine pipeline — trascina per riordinare, clicca un blocco per aprirlo:</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="661"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="664"/>
         <source>Reset order</source>
         <translation>Reset ordine</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="662"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="665"/>
         <source>Restore the default DSP processing order. Effect parameters
 are left untouched — only the chain order is reset.</source>
         <translation>Ripristina l&apos;ordine DSP predefinito. I parametri degli effetti
 restano invariati — si azzera solo l&apos;ordine della catena.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="673"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="676"/>
         <source>Fold output to mono</source>
         <translation>Uscita in mono</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="674"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="677"/>
         <source>Sum left + right into a single mono signal sent equally to
 both ears. Applied at the very end of the chain — it is not
 a reorderable module.</source>
@@ -854,7 +871,7 @@ entrambe le orecchie. Applicato alla fine della catena — non
 è un modulo riordinabile.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="679"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="682"/>
         <source>Mono fold-down collapses the stereo image to one centred
 signal. Handy for compatibility checks or to feed the spatial
 stage from a clean mono source.</source>
@@ -863,27 +880,27 @@ centrato. Utile per verifiche di compatibilità o per alimentare
 lo stadio spaziale da una sorgente mono pulita.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="688"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="691"/>
         <source>Search DSP modules...</source>
         <translation>Cerca moduli DSP...</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="704"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="707"/>
         <source>Reset this module to defaults</source>
         <translation>Ripristina il modulo ai valori predefiniti</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="711"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="714"/>
         <source>Paulstretch</source>
         <translation>Paulstretch</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="715"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="718"/>
         <source>Enable Paulstretch</source>
         <translation>Abilita Paulstretch</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="716"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="719"/>
         <source>Paul Nasca&apos;s phase-randomisation time-stretch. Source plays back
 much slower (1x..50x) while keeping pitch. Stereo channels get
 independent random phases for a wide diffuse texture.</source>
@@ -892,7 +909,7 @@ riprodotta molto più lenta (1x..50x) mantenendo l&apos;intonazione.
 I canali stereo ricevono fasi casuali per una texture ampia e diffusa.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="721"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="724"/>
         <source>Paulstretch is a LOCAL effect: only you hear the stretched
 audio — the server gets a clean mic stream while it is on,
 exactly like preview-only mode. Its pipeline slot is fixed
@@ -905,17 +922,17 @@ fissa per prima: gira su un flusso separato prima
 del resto della catena.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="730"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="733"/>
         <source>Factor</source>
         <translation>Fattore</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="733"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="736"/>
         <source>Window</source>
         <translation>Finestra</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="735"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="738"/>
         <source>FFT analysis window in milliseconds. Bigger = smoother /
 more &apos;frozen-in-amber&apos; drone, blurred high frequencies.
 Smaller = grittier with more transient detail.</source>
@@ -924,258 +941,258 @@ più morbido / &apos;congelato&apos;, alte frequenze sfocate.
 Più piccola = più ruvido con maggiore dettaglio.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="745"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="981"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="748"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="984"/>
         <source>Compressor</source>
         <translation>Compressore</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="749"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="752"/>
         <source>Enable Compressor</source>
         <translation>Abilita Compressore</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="756"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="759"/>
         <source>Threshold</source>
         <translation>Soglia</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="759"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="995"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="762"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="998"/>
         <source>Ratio</source>
         <translation>Rapporto</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="762"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="765"/>
         <source>Attack</source>
         <translation>Attacco</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="765"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="992"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="768"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="995"/>
         <source>Release</source>
         <translation>Rilascio</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="768"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="771"/>
         <source>Knee</source>
         <translation>Ginocchio</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="771"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="774"/>
         <source>Makeup</source>
         <translation>Compens.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="779"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="782"/>
         <source>Saturator</source>
         <translation>Saturatore</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="783"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="786"/>
         <source>Enable Saturator</source>
         <translation>Abilita Saturatore</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="790"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="979"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="793"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="982"/>
         <source>Mode:</source>
         <translation>Modo:</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="792"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="795"/>
         <source>Soft (tanh)</source>
         <translation>Soft (tanh)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="792"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="795"/>
         <source>Tube</source>
         <translation>Valvola</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="792"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="795"/>
         <source>Tape</source>
         <translation>Nastro</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="792"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="795"/>
         <source>Hard clip</source>
         <translation>Hard clip</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="797"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="800"/>
         <source>Drive</source>
         <translation>Drive</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="800"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="803"/>
         <source>Tone</source>
         <translation>Tono</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="803"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="834"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="865"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="899"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="930"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="960"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="806"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="837"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="868"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="902"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="933"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="963"/>
         <source>Mix</source>
         <translation>Mix</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="811"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="814"/>
         <source>Chorus</source>
         <translation>Chorus</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="815"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="818"/>
         <source>Enable Chorus</source>
         <translation>Abilita Chorus</translation>
-    </message>
-    <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="822"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="853"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="884"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="918"/>
-        <source>Rate</source>
-        <translation>Velocità</translation>
     </message>
     <message>
         <location filename="../modules/channel_sandbox_dialog.cpp" line="825"/>
         <location filename="../modules/channel_sandbox_dialog.cpp" line="856"/>
         <location filename="../modules/channel_sandbox_dialog.cpp" line="887"/>
         <location filename="../modules/channel_sandbox_dialog.cpp" line="921"/>
+        <source>Rate</source>
+        <translation>Velocità</translation>
+    </message>
+    <message>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="828"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="859"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="890"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="924"/>
         <source>Depth</source>
         <translation>Profondità</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="828"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="862"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="831"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="865"/>
         <source>Delay</source>
         <translation>Delay</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="831"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="893"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="834"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="896"/>
         <source>Voices</source>
         <translation>Voci</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="842"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="845"/>
         <source>Flanger</source>
         <translation>Flanger</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="846"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="849"/>
         <source>Enable Flanger</source>
         <translation>Abilita Flanger</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="859"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="890"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="924"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="952"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="862"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="893"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="927"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="955"/>
         <source>Feedback</source>
         <translation>Feedback</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="873"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="876"/>
         <source>Flangus</source>
         <translation>Flangus</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="877"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="880"/>
         <source>Enable Flangus</source>
         <translation>Abilita Flangus</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="896"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="899"/>
         <source>Spread</source>
         <translation>Diffusione</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="907"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="910"/>
         <source>Phaser</source>
         <translation>Phaser</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="911"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="914"/>
         <source>Enable Phaser</source>
         <translation>Abilita Phaser</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="927"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="930"/>
         <source>Stages</source>
         <translation>Stadi</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="938"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="941"/>
         <source>Delay / Echo</source>
         <translation>Delay / Eco</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="942"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="945"/>
         <source>Enable Delay</source>
         <translation>Abilita Delay</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="949"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="952"/>
         <source>Time</source>
         <translation>Tempo</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="955"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="958"/>
         <source>Damping</source>
         <translation>Smorzam.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="958"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="961"/>
         <source>Ping-pong (L/R bounce)</source>
         <translation>Ping-pong (rimbalzo L/R)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="968"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="981"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="971"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="984"/>
         <source>Limiter</source>
         <translation>Limiter</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="972"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="975"/>
         <source>Enable Limiter</source>
         <translation>Abilita Limiter</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="981"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="984"/>
         <source>Gate</source>
         <translation>Gate</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="986"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="989"/>
         <source>Ceiling</source>
         <translation>Tetto</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="989"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="992"/>
         <source>Lookahead</source>
         <translation>Lookahead</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="998"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1001"/>
         <source>Gate Thresh</source>
         <translation>Soglia Gate</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1006"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1009"/>
         <source>Bitcrusher (quality degradation)</source>
         <translation>Bitcrusher (degrada la qualità)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1010"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1013"/>
         <source>Enable Bitcrusher</source>
         <translation>Abilita Bitcrusher</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1011"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1014"/>
         <source>Degrade audio quality by reducing bit depth and/or effective
 sample rate. At maximum settings (16 bit, 48 kHz) the signal
 is untouched. Lower values add grit and lo-fi character.</source>
@@ -1184,69 +1201,69 @@ frequenza di campionamento. Al massimo (16 bit, 48 kHz)
 il segnale è intatto. Valori bassi danno ruvidità lo-fi.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1021"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1024"/>
         <source>Custom</source>
         <translation>Pers.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1021"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1024"/>
         <source>HiFi (CD quality)</source>
         <translation>HiFi (qualità CD)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1021"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1024"/>
         <source>Radio</source>
         <translation>Radio</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1021"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1024"/>
         <source>Telephone</source>
         <translation>Telefono</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1021"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1024"/>
         <source>Retro (8-bit)</source>
         <translation>Retro (8-bit)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1021"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1024"/>
         <source>Garbage</source>
         <translation>Spazzatura</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1022"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1025"/>
         <source>Quick quality presets - select one to set bit depth and sample rate automatically</source>
         <translation>Preset rapidi - selezionane uno per impostare bit e frequenza</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1025"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1028"/>
         <source>Bit Depth</source>
         <translation>Bit</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1027"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1030"/>
         <source>Bit depth controls how many amplitude levels are available.
 16 = CD quality, 12 = radio, 8 = telephone, 4 = retro, 1 = extreme.</source>
         <translation>I bit controllano quanti livelli di ampiezza ci sono.
 16 = qualità CD, 12 = radio, 8 = telefono, 4 = retro, 1 = estremo.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1031"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1034"/>
         <source>Sample Rate</source>
         <translation>Frequenza</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1039"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1042"/>
         <source>Generation Loss</source>
         <translation>Generation Loss</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1043"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1046"/>
         <source>Enable Generation Loss</source>
         <translation>Abilita Generation Loss</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1044"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1047"/>
         <source>Simulates the quality loss of re-encoding audio multiple
 times (like a video re-uploaded to YouTube 20 times).
 Adds cumulative low-pass filtering, quantization noise,
@@ -1257,12 +1274,12 @@ Aggiunge passa-basso cumulativo, rumore di quantizzazione,
 rumore casuale e compressione soft.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1055"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1058"/>
         <source>Generations</source>
         <translation>Generazioni</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1057"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1060"/>
         <source>Number of simulated re-encoding passes.
 Like re-rendering a video over and over:
 1 = clean, 20 = YouTube reupload, 100 = deep fried,
@@ -1273,147 +1290,151 @@ Come ri-renderizzare un video più volte:
 500 = corrotto, 1000 = distrutto.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1069"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1072"/>
         <source>Random pitch per fire</source>
         <translation>Pitch casuale ad ogni riproduzione</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1073"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1076"/>
         <source>Enable random pitch jitter</source>
         <translation>Attiva variazione casuale di pitch</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1074"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1077"/>
         <source>Roll a fresh random pitch offset every fire and on every
 loop. Keeps repeated triggers from sounding mechanical.</source>
-        <translation type="unfinished"></translation>
+        <translation>Genera un nuovo offset di pitch casuale a ogni esecuzione e a ogni
+loop. Evita che i trigger ripetuti suonino meccanici.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1081"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1091"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1084"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1094"/>
         <source>Pitch range +/-</source>
         <translation>Intervallo pitch +/-</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1082"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1089"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1085"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1092"/>
         <source> cents</source>
         <translation> cents</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1100"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1103"/>
         <source>Sidechain ducking</source>
         <translation>Sidechain ducking</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1104"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1107"/>
         <source>Duck other channels while I play</source>
         <translation>Abbassa altri canali mentre suono</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1105"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1108"/>
         <source>While this channel produces audio every other slot&apos;s
 output is attenuated by the amount below. Smooth attack /
 release. Music channel + SFX channel pair: music dips
 under the SFX and returns when it ends.</source>
-        <translation type="unfinished"></translation>
+        <translation>Mentre questo canale produce audio, l&apos;uscita di ogni altro slot
+viene attenuata della quantità sotto. Attack / release smussati.
+Coppia canale musica + canale SFX: la musica si abbassa sotto
+gli SFX e torna su quando finiscono.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1120"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1123"/>
         <source>Amount:</source>
         <translation>Quantità:</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1171"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1174"/>
         <source>Preset:</source>
         <translation>Preset:</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1174"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1177"/>
         <source>Load a saved sandbox preset</source>
         <translation>Carica un preset sandbox salvato</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1176"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1179"/>
         <source>Save</source>
         <translation>Salva</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1177"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1180"/>
         <source>Save current sandbox settings as a named preset</source>
         <translation>Salva le impostazioni come preset con nome</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="492"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1178"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="493"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1181"/>
         <source>Delete</source>
         <translation>Elimina</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1179"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1182"/>
         <source>Delete the selected preset</source>
         <translation>Elimina il preset selezionato</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1187"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1190"/>
         <source>(none)</source>
         <translation>(nessuno)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1210"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1213"/>
         <source>Save Sandbox Preset</source>
         <translation>Salva preset Sandbox</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="550"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1211"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="551"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1214"/>
         <source>Preset name:</source>
         <translation>Nome preset:</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1230"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1233"/>
         <source>Delete Preset</source>
         <translation>Elimina preset</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="584"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1231"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="585"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1234"/>
         <source>Delete preset &quot;%1&quot;?</source>
         <translation>Eliminare il preset &quot;%1&quot;?</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="491"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="492"/>
         <source>Save...</source>
         <translation>Salva...</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="502"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="503"/>
         <source>(select preset)</source>
         <translation>(seleziona preset)</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="549"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="558"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="550"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="559"/>
         <source>Save EQ preset</source>
         <translation>Salva preset EQ</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="559"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="560"/>
         <source>&quot;%1&quot; is a built-in preset; pick another name.</source>
-        <translation>"%1" è un preset predefinito; scegli un altro nome.</translation>
+        <translation>&quot;%1&quot; è un preset predefinito; scegli un altro nome.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="583"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="584"/>
         <source>Delete EQ preset</source>
         <translation>Elimina preset EQ</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1245"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1248"/>
         <source>Reset audio sandbox for this channel</source>
         <translation>Ripristina audio sandbox per questo canale</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1250"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1253"/>
         <source>Reset only this channel&apos;s sandbox settings to defaults.
 Volume, FX panel, file and the channel&apos;s other state are
 left untouched.</source>
@@ -1422,49 +1443,49 @@ Volume, pannello FX, file e gli altri stati del canale
 restano invariati.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1255"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1258"/>
         <source>Copy Sandbox</source>
         <translation>Copia Sandbox</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1256"/>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="2276"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1259"/>
         <location filename="../modules/channel_sandbox_dialog.cpp" line="2283"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="2290"/>
         <source>Paste Sandbox</source>
         <translation>Incolla Sandbox</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="1262"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="1265"/>
         <source>Close</source>
         <translation>Chiudi</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="2054"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="2057"/>
         <source>CPU &lt;0.1%</source>
         <translation>CPU &lt;0,1%</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="2056"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="2059"/>
         <source>CPU %1%</source>
         <translation>CPU %1%</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="2251"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="2258"/>
         <source>Invalid EQ preset string.</source>
         <translation>Stringa preset EQ non valida.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="2256"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="2263"/>
         <source>EQ string must have 16 values.</source>
         <translation>La stringa EQ deve avere 16 valori.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="2276"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="2283"/>
         <source>Invalid sandbox preset string.</source>
         <translation>Stringa preset sandbox non valida.</translation>
     </message>
     <message>
-        <location filename="../modules/channel_sandbox_dialog.cpp" line="2283"/>
+        <location filename="../modules/channel_sandbox_dialog.cpp" line="2290"/>
         <source>Failed to parse sandbox preset.</source>
         <translation>Lettura del preset sandbox fallita.</translation>
     </message>
@@ -1631,17 +1652,17 @@ restano invariati.</translation>
 <context>
     <name>EqBandWidget</name>
     <message>
-        <location filename="../modules/eq_band_widget.cpp" line="230"/>
+        <location filename="../modules/eq_band_widget.cpp" line="241"/>
         <source>Reset to 0 dB</source>
         <translation>Reimposta a 0 dB</translation>
     </message>
     <message>
-        <location filename="../modules/eq_band_widget.cpp" line="231"/>
+        <location filename="../modules/eq_band_widget.cpp" line="242"/>
         <source>Set to +12 dB</source>
         <translation>Imposta a +12 dB</translation>
     </message>
     <message>
-        <location filename="../modules/eq_band_widget.cpp" line="232"/>
+        <location filename="../modules/eq_band_widget.cpp" line="243"/>
         <source>Set to -12 dB</source>
         <translation>Imposta a -12 dB</translation>
     </message>
@@ -1836,192 +1857,358 @@ velocità / riverbero.</translation>
         <translation>Come usare la soundboard</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="72"/>
+        <location filename="../howto_qt.cpp" line="73"/>
         <source>1. Getting started</source>
         <translation>1. Per iniziare</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="72"/>
-        <source>&lt;p&gt;The soundboard runs as a plugin inside TeamSpeak 3. Open it from the &lt;b&gt;Plugins&lt;/b&gt; menu &amp;rarr; &lt;b&gt;Open GameBaiters Soundboard&lt;/b&gt;.&lt;/p&gt;&lt;p&gt;You must be &lt;b&gt;connected to a server&lt;/b&gt; for sound to be sent. While disconnected the window is dimmed and shows a notice &amp;mdash; the interface still lets you arrange buttons and tweak effects.&lt;/p&gt;&lt;p&gt;The window has three areas: the &lt;b&gt;sound button grid&lt;/b&gt; on top, the &lt;b&gt;channels&lt;/b&gt; in the middle, and the &lt;b&gt;control bar&lt;/b&gt; at the bottom (add channel, stop/pause all, profiles, settings).&lt;/p&gt;</source>
-        <translation>&lt;p&gt;La soundboard è un plugin di TeamSpeak 3. Aprila dal menu &lt;b&gt;Plugin&lt;/b&gt; &amp;rarr; &lt;b&gt;Apri GameBaiters Soundboard&lt;/b&gt;.&lt;/p&gt;&lt;p&gt;Devi essere &lt;b&gt;connesso a un server&lt;/b&gt; per inviare il suono. Da disconnesso la finestra è oscurata con un avviso &amp;mdash; puoi comunque organizzare i pulsanti e regolare gli effetti.&lt;/p&gt;&lt;p&gt;La finestra ha tre aree: la &lt;b&gt;griglia dei pulsanti&lt;/b&gt; in alto, i &lt;b&gt;canali&lt;/b&gt; al centro e la &lt;b&gt;barra dei controlli&lt;/b&gt; in basso (canale, ferma/pausa tutto, profili, impostazioni).&lt;/p&gt;</translation>
+        <location filename="../howto_qt.cpp" line="73"/>
+        <source>&lt;p&gt;The soundboard is a TeamSpeak 3 plugin. Open it from &lt;b&gt;Plugins&lt;/b&gt; &amp;rarr; &lt;b&gt;Open GameBaiters Soundboard&lt;/b&gt;. The window is independent from TS3 and can be moved, resized or maximised.&lt;/p&gt;&lt;p&gt;You must be &lt;b&gt;connected to a server&lt;/b&gt; for sound to be sent into your voice channel. While disconnected the window dims and shows a notice, but you can still arrange buttons, edit effects and tune the layout.&lt;/p&gt;&lt;p&gt;The window has four areas:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Sound button grid&lt;/b&gt; at the top &amp;mdash; assign / fire sounds, drag to rearrange, filter via the search bar above.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Channels&lt;/b&gt; in the middle &amp;mdash; one playback lane each, stacked vertically.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Profile selector&lt;/b&gt; P1&amp;ndash;P4 &amp;mdash; switch between four independent layouts.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Control bar&lt;/b&gt; at the bottom &amp;mdash; add / remove channel, stop / pause all, settings.&lt;/li&gt;&lt;/ul&gt;</source>
+        <translation>&lt;p&gt;La soundboard è un plugin per TeamSpeak 3. Aprila da &lt;b&gt;Plugin&lt;/b&gt; &amp;rarr; &lt;b&gt;Apri GameBaiters Soundboard&lt;/b&gt;. La finestra è indipendente da TS3 e si può spostare, ridimensionare o massimizzare.&lt;/p&gt;&lt;p&gt;Devi essere &lt;b&gt;connesso a un server&lt;/b&gt; perché l&apos;audio venga inviato nel canale vocale. Quando sei disconnesso la finestra si oscura e mostra un avviso, ma puoi comunque sistemare i pulsanti, modificare gli effetti e regolare il layout.&lt;/p&gt;&lt;p&gt;La finestra ha quattro aree:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Griglia dei pulsanti&lt;/b&gt; in alto &amp;mdash; assegna / lancia suoni, trascina per riorganizzare, filtra con la barra di ricerca.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Canali&lt;/b&gt; al centro &amp;mdash; un canale per ogni linea di riproduzione, impilati verticalmente.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Selettore profilo&lt;/b&gt; P1&amp;ndash;P4 &amp;mdash; passa tra quattro layout indipendenti.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Barra di controllo&lt;/b&gt; in basso &amp;mdash; aggiungi / rimuovi canale, ferma / metti in pausa tutto, impostazioni.&lt;/li&gt;&lt;/ul&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="82"/>
+        <location filename="../howto_qt.cpp" line="93"/>
+        <source>&lt;p&gt;Every grid cell is a button. Three ways to assign a sound:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Drag &amp;amp; drop&lt;/b&gt; an audio file from Explorer / Finder onto a cell.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Right-click&lt;/b&gt; a cell &amp;rarr; &lt;b&gt;Edit&lt;/b&gt; to open the full button editor (file picker, label, colour, image, crop, hotkey, looping, per-button FX).&lt;/li&gt;&lt;li&gt;Drag an audio file directly onto a &lt;b&gt;channel&lt;/b&gt; instead of a button to play it immediately without saving a cell.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;b&gt;Supported formats:&lt;/b&gt; MP3, WAV, OGG, FLAC, AAC, M4A, MP4, MKV, AVI, WMA, FLV, OPUS &amp;mdash; anything FFmpeg can decode.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Three button types:&lt;/b&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Audio&lt;/b&gt; &amp;mdash; plays a sound file. Default for any drag &amp;amp; drop.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Macro&lt;/b&gt; &amp;mdash; restores a saved snapshot of every channel at once (see section 13).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Special&lt;/b&gt; &amp;mdash; bound actions such as stop-all.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;b&gt;Customising a button:&lt;/b&gt; in the editor you can set a custom label (overrides the filename), a custom background colour, a background image, looping, per-button volume, a TeamSpeak hotkey, and a crop range (see the next section). Drag buttons in the grid to rearrange them. The &lt;b&gt;search bar&lt;/b&gt; above the grid filters by label. Grid size (rows &amp;times; columns) is set in Settings &amp;rarr; &lt;b&gt;Layout&lt;/b&gt;.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;Ogni cella della griglia è un pulsante. Tre modi per assegnare un suono:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Trascina &amp;amp; rilascia&lt;/b&gt; un file audio da Esplora risorse / Finder sopra una cella.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Clic destro&lt;/b&gt; su una cella &amp;rarr; &lt;b&gt;Modifica&lt;/b&gt; per aprire l&apos;editor completo del pulsante (file picker, etichetta, colore, immagine, crop, hotkey, loop, FX per pulsante).&lt;/li&gt;&lt;li&gt;Trascina un file audio direttamente su un &lt;b&gt;canale&lt;/b&gt; invece che su un pulsante per riprodurlo subito senza salvare una cella.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;b&gt;Formati supportati:&lt;/b&gt; MP3, WAV, OGG, FLAC, AAC, M4A, MP4, MKV, AVI, WMA, FLV, OPUS &amp;mdash; tutto quello che FFmpeg riesce a decodificare.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Tre tipi di pulsante:&lt;/b&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Audio&lt;/b&gt; &amp;mdash; riproduce un file. Default per qualsiasi drag &amp;amp; drop.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Macro&lt;/b&gt; &amp;mdash; ripristina lo snapshot salvato di ogni canale tutto insieme (vedi sezione 13).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Speciale&lt;/b&gt; &amp;mdash; azioni come stop-all.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;b&gt;Personalizzare un pulsante:&lt;/b&gt; nell&apos;editor puoi impostare etichetta personalizzata (sovrascrive il nome file), colore di sfondo, immagine di sfondo, loop, volume per pulsante, una hotkey di TeamSpeak e un intervallo di crop (vedi sezione successiva). Trascina i pulsanti nella griglia per riorganizzarli. La &lt;b&gt;barra di ricerca&lt;/b&gt; sopra la griglia filtra per etichetta. La dimensione della griglia (righe &amp;times; colonne) si imposta in Impostazioni &amp;rarr; &lt;b&gt;Layout&lt;/b&gt;.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="122"/>
+        <source>3. Cropping and waveform editing</source>
+        <translation>3. Crop e modifica della forma d&apos;onda</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="122"/>
+        <source>&lt;p&gt;Every sound can be &lt;b&gt;cropped&lt;/b&gt; to play only a slice of the file. Two ways to do it:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Button editor:&lt;/b&gt; set start / end in seconds (or %) in the &lt;b&gt;Crop&lt;/b&gt; group.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Waveform right-click:&lt;/b&gt; while a channel is showing a sound, right-click the waveform &amp;rarr; &lt;b&gt;Set start here&lt;/b&gt; / &lt;b&gt;Set end here&lt;/b&gt;. The change is applied live to the running playback AND saved back to the originating button.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Coloured &lt;b&gt;start / end marker lines&lt;/b&gt; with a dim overlay show the crop range right on the waveform. The cursor is clamped inside the markers &amp;mdash; skip / seek can not escape the crop.&lt;/p&gt;&lt;p&gt;The crop marker overlay can be hidden via Settings &amp;rarr; &lt;b&gt;Channels&lt;/b&gt; &amp;rarr; &lt;b&gt;Show crop markers&lt;/b&gt;.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;Ogni suono può essere &lt;b&gt;croppato&lt;/b&gt; per riprodurre solo una porzione del file. Due modi:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Editor del pulsante:&lt;/b&gt; imposta inizio / fine in secondi (o %) nel gruppo &lt;b&gt;Crop&lt;/b&gt;.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Clic destro sulla forma d&apos;onda:&lt;/b&gt; mentre un canale mostra un suono, clic destro sulla waveform &amp;rarr; &lt;b&gt;Imposta inizio qui&lt;/b&gt; / &lt;b&gt;Imposta fine qui&lt;/b&gt;. La modifica si applica subito alla riproduzione corrente E viene salvata nel pulsante che ha originato il suono.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;b&gt;Marker colorati di inizio / fine&lt;/b&gt; con un overlay scuro mostrano l&apos;intervallo di crop direttamente sulla forma d&apos;onda. Il cursore resta bloccato dentro i marker &amp;mdash; skip / seek non possono uscire dal crop.&lt;/p&gt;&lt;p&gt;L&apos;overlay dei marker si può nascondere da Impostazioni &amp;rarr; &lt;b&gt;Canali&lt;/b&gt; &amp;rarr; &lt;b&gt;Mostra marker di crop&lt;/b&gt;.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="139"/>
+        <source>4. Playing and transport</source>
+        <translation>4. Riproduzione e controlli</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="139"/>
+        <source>&lt;p&gt;Click a button to play its sound on the next free channel. The &lt;b&gt;waveform view&lt;/b&gt; shows playback progress &amp;mdash; click anywhere on it to seek.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Transport controls&lt;/b&gt; (per channel):&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Play / Pause / Stop&lt;/b&gt;&lt;/li&gt;&lt;li&gt;&lt;b&gt;Skip&lt;/b&gt; &amp;plusmn;5 s and &amp;plusmn;10 s&lt;/li&gt;&lt;li&gt;&lt;b&gt;Loop&lt;/b&gt; &amp;mdash; restarts the sound at the crop start when it reaches the end&lt;/li&gt;&lt;li&gt;&lt;b&gt;Reverse&lt;/b&gt; &amp;mdash; plays the sound backwards in real time. Toggle it mid-playback and the direction flips instantly; pitch / speed / reverb / loop / crop markers all behave exactly as in forward play. From v2.2.9 the reverse start is decoded in 0.5 s chunks around the current cursor, so the flip is instant even on multi-minute files &amp;mdash; no more freeze.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;b&gt;Global controls&lt;/b&gt; in the bottom bar:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Stop all&lt;/b&gt; / &lt;b&gt;Pause all&lt;/b&gt; &amp;mdash; act on every channel.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Reset channels&lt;/b&gt; (in Settings) &amp;mdash; clears volume / FX / files on every channel after a confirmation prompt.&lt;/li&gt;&lt;/ul&gt;</source>
+        <translation>&lt;p&gt;Clicca un pulsante per riprodurre il suono sul prossimo canale libero. La &lt;b&gt;vista forma d&apos;onda&lt;/b&gt; mostra il progresso della riproduzione &amp;mdash; clicca un punto qualsiasi per fare seek.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Controlli di trasporto&lt;/b&gt; (per canale):&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Play / Pausa / Stop&lt;/b&gt;&lt;/li&gt;&lt;li&gt;&lt;b&gt;Skip&lt;/b&gt; &amp;plusmn;5 s e &amp;plusmn;10 s&lt;/li&gt;&lt;li&gt;&lt;b&gt;Loop&lt;/b&gt; &amp;mdash; riavvia il suono dall&apos;inizio del crop quando arriva alla fine&lt;/li&gt;&lt;li&gt;&lt;b&gt;Reverse&lt;/b&gt; &amp;mdash; riproduce il suono al contrario in tempo reale. Attivalo durante la riproduzione e la direzione si inverte istantaneamente; pitch / velocità / riverbero / loop / marker di crop si comportano esattamente come in forward. Dalla v2.2.9 l&apos;inizio del reverse viene decodificato in chunk da 0,5 s attorno al cursore corrente, quindi il cambio è immediato anche su file di diversi minuti &amp;mdash; niente più freeze.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;b&gt;Controlli globali&lt;/b&gt; nella barra in basso:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Ferma tutto&lt;/b&gt; / &lt;b&gt;Pausa tutto&lt;/b&gt; &amp;mdash; agiscono su ogni canale.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Reset canali&lt;/b&gt; (in Impostazioni) &amp;mdash; azzera volume / FX / file su ogni canale dopo una conferma.&lt;/li&gt;&lt;/ul&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="163"/>
+        <source>5. Channels</source>
+        <translation>5. Canali</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="163"/>
+        <source>&lt;p&gt;A &lt;b&gt;channel&lt;/b&gt; is one independent playback lane: it has its own file, volume, FX, waveform, transport, peak meter and audio sandbox. Add channels with &lt;b&gt;+ Add channel&lt;/b&gt;; the first channel is always present.&lt;/p&gt;&lt;p&gt;Channel titles are editable &amp;mdash; click the title to rename. The &lt;b&gt;peak meter&lt;/b&gt; shows level (cyan = normal, red = clipping) and the LED columns above each EQ band visualise the live per-band energy when the EQ is open.&lt;/p&gt;&lt;p&gt;Each channel&apos;s state (volume, FX, sandbox, current sound, position, loop / reverse toggles) is saved and restored across restarts when &lt;b&gt;Restore last session on startup&lt;/b&gt; is enabled in Settings.&lt;/p&gt;&lt;p&gt;The &lt;b&gt;Reverse&lt;/b&gt; button on a channel is sticky: every new sound you fire on that channel inherits the reverse direction. Toggle it off to go back to forward play.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;Un &lt;b&gt;canale&lt;/b&gt; è una linea di riproduzione indipendente: ha il suo file, volume, FX, forma d&apos;onda, controlli di trasporto, peak meter e audio sandbox. Aggiungi canali con &lt;b&gt;+ Aggiungi canale&lt;/b&gt;; il primo canale è sempre presente.&lt;/p&gt;&lt;p&gt;I titoli dei canali sono modificabili &amp;mdash; clicca il titolo per rinominare. Il &lt;b&gt;peak meter&lt;/b&gt; mostra il livello (ciano = normale, rosso = clipping) e le colonne LED sopra ogni banda EQ visualizzano l&apos;energia per banda in tempo reale quando l&apos;EQ è aperto.&lt;/p&gt;&lt;p&gt;Lo stato di ogni canale (volume, FX, sandbox, suono corrente, posizione, toggle loop / reverse) viene salvato e ripristinato tra un avvio e l&apos;altro se &lt;b&gt;Ripristina ultima sessione all&apos;avvio&lt;/b&gt; è attivo in Impostazioni.&lt;/p&gt;&lt;p&gt;Il pulsante &lt;b&gt;Reverse&lt;/b&gt; di un canale è persistente: ogni nuovo suono che lanci su quel canale eredita la direzione reverse. Disattivalo per tornare alla riproduzione normale.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="179"/>
+        <source>6. Volume control</source>
+        <translation>6. Controllo del volume</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="179"/>
+        <source>&lt;p&gt;Every channel has &lt;b&gt;two&lt;/b&gt; volume sliders:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Local&lt;/b&gt; &amp;mdash; how loud &lt;i&gt;you&lt;/i&gt; hear the sound.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Remote&lt;/b&gt; &amp;mdash; how loud &lt;i&gt;others&lt;/i&gt; on the server hear it. This is the value the TS3 client mixes into the voice stream.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;The &lt;b&gt;Link&lt;/b&gt; toggle moves both sliders together. A &lt;b&gt;Global volume&lt;/b&gt; master at the top scales everything before per-channel Local / Remote. Each button also has its own per-button volume in its editor &amp;mdash; it stacks on top of the channel volume.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Earrape protection&lt;/b&gt; in Settings clips your LOCAL output at a safe ceiling, so an accidental loud clip can never deafen you. It never touches the Remote stream.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;Ogni canale ha &lt;b&gt;due&lt;/b&gt; slider del volume:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Locale&lt;/b&gt; &amp;mdash; quanto forte senti il suono &lt;i&gt;tu&lt;/i&gt;.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Remoto&lt;/b&gt; &amp;mdash; quanto forte lo sentono &lt;i&gt;gli altri&lt;/i&gt; sul server. È il valore che il client TS3 mixa nel flusso vocale.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Il toggle &lt;b&gt;Link&lt;/b&gt; muove entrambi gli slider insieme. Un &lt;b&gt;Volume globale&lt;/b&gt; master in alto scala tutto prima dei Locale / Remoto per canale. Ogni pulsante ha anche un volume per pulsante nel suo editor &amp;mdash; si somma sopra al volume del canale.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Protezione earrape&lt;/b&gt; in Impostazioni clippa l&apos;uscita LOCALE a un tetto sicuro, così un clip improvvisamente forte non può mai assordarti. Non tocca mai il flusso Remoto.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="194"/>
+        <source>7. FX panel (pitch / speed / reverb)</source>
+        <translation>7. Pannello FX (pitch / velocità / riverbero)</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="194"/>
+        <source>&lt;p&gt;The compact &lt;b&gt;FX panel&lt;/b&gt; on each channel offers three quick, real-time effects:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Pitch&lt;/b&gt; &amp;mdash; shift pitch independently of speed (0.33&amp;times;&amp;ndash;3.0&amp;times;).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Speed&lt;/b&gt; &amp;mdash; change playback rate independently of pitch.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Reverb&lt;/b&gt; &amp;mdash; quick room ambience (0&amp;ndash;100).&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;The &lt;b&gt;Sync&lt;/b&gt; toggle locks pitch and speed together for a chipmunk / slow-motion effect.&lt;/p&gt;&lt;p&gt;With &lt;b&gt;Remember pitch / speed / reverb per channel&lt;/b&gt; enabled in Settings, these values persist across restarts. With &lt;b&gt;Enable custom FX&lt;/b&gt; off in Settings the panel is hidden &amp;mdash; useful if you only want clean playback.&lt;/p&gt;&lt;p&gt;The FX panel is the &lt;i&gt;quick&lt;/i&gt; effects strip. For the deep 14-effect chain, open the per-channel &lt;b&gt;Audio sandbox&lt;/b&gt; (next section).&lt;/p&gt;</source>
+        <translation>&lt;p&gt;Il &lt;b&gt;pannello FX&lt;/b&gt; compatto su ogni canale offre tre effetti rapidi in tempo reale:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Pitch&lt;/b&gt; &amp;mdash; sposta il pitch indipendentemente dalla velocità (0,33&amp;times;&amp;ndash;3,0&amp;times;).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Velocità&lt;/b&gt; &amp;mdash; cambia la velocità di riproduzione indipendentemente dal pitch.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Riverbero&lt;/b&gt; &amp;mdash; ambienza rapida (0&amp;ndash;100).&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Il toggle &lt;b&gt;Sync&lt;/b&gt; blocca pitch e velocità insieme per un effetto chipmunk / slow-motion.&lt;/p&gt;&lt;p&gt;Con &lt;b&gt;Ricorda pitch / velocità / riverbero per canale&lt;/b&gt; attivo in Impostazioni, questi valori persistono tra un avvio e l&apos;altro. Con &lt;b&gt;Abilita FX personalizzati&lt;/b&gt; disattivo in Impostazioni il pannello è nascosto &amp;mdash; utile se vuoi solo riproduzione pulita.&lt;/p&gt;&lt;p&gt;Il pannello FX è la striscia di effetti &lt;i&gt;rapidi&lt;/i&gt;. Per la catena profonda da 14 effetti, apri l&apos;&lt;b&gt;Audio sandbox&lt;/b&gt; per canale (sezione successiva).&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="213"/>
+        <source>8. The audio sandbox</source>
+        <translation>8. Audio sandbox</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="213"/>
+        <source>&lt;p&gt;The &lt;b&gt;audio sandbox&lt;/b&gt; is a per-channel rack of &lt;b&gt;14 DSP effects&lt;/b&gt; arranged in a re-orderable pipeline. Open it from the channel&apos;s sandbox button.&lt;/p&gt;&lt;p&gt;A single &lt;b&gt;master switch&lt;/b&gt; at the top enables or bypasses the whole chain at zero CPU cost when off &amp;mdash; every value is kept so you can A/B instantly.&lt;/p&gt;&lt;p&gt;The &lt;b&gt;Pipeline order&lt;/b&gt; bar near the top shows the chain as coloured blocks in processing order:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Drag&lt;/b&gt; a block to move it earlier / later in the chain.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Click&lt;/b&gt; a block (without dragging) to scroll to that effect&apos;s panel and open its accordion.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Paulstretch&lt;/b&gt; is pinned first and is not draggable &amp;mdash; it runs on a separate streaming feed before the rest of the chain.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Reset order&lt;/b&gt; restores the default chain (effect values are kept).&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;The panel list below mirrors the pipeline order. Use the &lt;b&gt;search box&lt;/b&gt; to filter by name. Each module has its own enable toggle and a small reset button (per-module defaults).&lt;/p&gt;&lt;p&gt;The &lt;b&gt;Fold output to mono&lt;/b&gt; checkbox collapses the stereo image and is always applied LAST &amp;mdash; it is not a reorderable module.&lt;/p&gt;&lt;p&gt;The whole sandbox state is saved per channel and travels inside sandbox presets, pipeline order included.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;L&apos;&lt;b&gt;audio sandbox&lt;/b&gt; è un rack per canale di &lt;b&gt;14 effetti DSP&lt;/b&gt; in una pipeline riorganizzabile. Aprila dal pulsante sandbox del canale.&lt;/p&gt;&lt;p&gt;Un &lt;b&gt;master switch&lt;/b&gt; in alto attiva o bypassa tutta la catena a costo CPU zero quando è spento &amp;mdash; ogni valore viene mantenuto, così puoi fare A/B subito.&lt;/p&gt;&lt;p&gt;La barra &lt;b&gt;Ordine pipeline&lt;/b&gt; vicino all&apos;alto mostra la catena come blocchi colorati in ordine di elaborazione:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Trascina&lt;/b&gt; un blocco per spostarlo prima / dopo nella catena.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Clicca&lt;/b&gt; un blocco (senza trascinare) per scorrere al pannello di quell&apos;effetto e aprire la sua fisarmonica.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Paulstretch&lt;/b&gt; è fissato come primo e non è trascinabile &amp;mdash; gira su un feed streaming separato prima del resto della catena.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Reset ordine&lt;/b&gt; ripristina la catena di default (i valori degli effetti restano).&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;La lista pannelli sotto rispecchia l&apos;ordine della pipeline. Usa la &lt;b&gt;casella di ricerca&lt;/b&gt; per filtrare per nome. Ogni modulo ha il suo toggle di attivazione e un pulsante di reset (default per modulo).&lt;/p&gt;&lt;p&gt;La checkbox &lt;b&gt;Riduci uscita a mono&lt;/b&gt; collassa l&apos;immagine stereo ed è sempre applicata PER ULTIMA &amp;mdash; non è un modulo riorganizzabile.&lt;/p&gt;&lt;p&gt;Tutto lo stato della sandbox viene salvato per canale e viaggia dentro i preset sandbox, ordine della pipeline incluso.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="240"/>
+        <source>9. 3D / HRTF spatial audio</source>
+        <translation>9. Audio spaziale 3D / HRTF</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="240"/>
+        <source>&lt;p&gt;The &lt;b&gt;Spatial&lt;/b&gt; stage places the sound in 3D space. Modes:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Off&lt;/b&gt; &amp;mdash; no spatial processing.&lt;/li&gt;&lt;li&gt;&lt;b&gt;L/R Pan&lt;/b&gt; &amp;mdash; simple equal-power stereo balance.&lt;/li&gt;&lt;li&gt;&lt;b&gt;3D Manual&lt;/b&gt; &amp;mdash; drag a virtual source on the positional pad; set elevation, distance and stereo width.&lt;/li&gt;&lt;li&gt;&lt;b&gt;3D Rotate&lt;/b&gt; &amp;mdash; the source orbits your head at a chosen RPM and radius.&lt;/li&gt;&lt;li&gt;&lt;b&gt;8D preset&lt;/b&gt; &amp;mdash; the classic &apos;YouTube 8D&apos; recipe: orbit + head sway + tight width.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;b&gt;Spatial mix&lt;/b&gt; crossfades between processed and raw stereo &amp;mdash; pull it back if the result feels too narrow. &lt;b&gt;Ambience&lt;/b&gt; adds room reflections that push the sound out of your head.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Engine choice (Classic vs Leia):&lt;/b&gt; the 3D modes can be rendered by two engines, selected per channel:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Classic&lt;/b&gt; &amp;mdash; the original Brown-Duda parametric model. Lightweight, zero dependencies, the original soundboard sound.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Leia&lt;/b&gt; &amp;mdash; measured-HRTF convolution using a MIT KEMAR SOFA dataset, plus a shoebox-room early-reflection engine. Much more convincing externalisation, especially through headphones.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Leia exposes its own controls: &lt;b&gt;Reflections&lt;/b&gt; on/off + level, &lt;b&gt;Room size&lt;/b&gt;, &lt;b&gt;Room type&lt;/b&gt; (13 presets ranging from Studio to Cathedral to Underwater &amp;mdash; each preset has a unique Schroeder diffuse-tail signature), &lt;b&gt;Clarity&lt;/b&gt; (early/late balance) and &lt;b&gt;Width&lt;/b&gt;. Switching from Classic to Leia is instant &amp;mdash; the audio thread keeps running while the SOFA loads in the background.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;Lo stadio &lt;b&gt;Spaziale&lt;/b&gt; colloca il suono nello spazio 3D. Modalità:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Off&lt;/b&gt; &amp;mdash; nessuna elaborazione spaziale.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Pan L/R&lt;/b&gt; &amp;mdash; bilanciamento stereo equal-power.&lt;/li&gt;&lt;li&gt;&lt;b&gt;3D Manuale&lt;/b&gt; &amp;mdash; trascina una sorgente virtuale sul pad posizionale; imposta elevazione, distanza e larghezza stereo.&lt;/li&gt;&lt;li&gt;&lt;b&gt;3D Rotate&lt;/b&gt; &amp;mdash; la sorgente orbita attorno alla tua testa a RPM e raggio scelti.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Preset 8D&lt;/b&gt; &amp;mdash; il classico &apos;YouTube 8D&apos;: orbita + head sway + larghezza stretta.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;b&gt;Mix spaziale&lt;/b&gt; fa il crossfade tra stereo elaborato e raw &amp;mdash; abbassalo se il risultato sembra troppo stretto. &lt;b&gt;Ambienza&lt;/b&gt; aggiunge riflessioni di stanza che spingono il suono fuori dalla testa.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Scelta engine (Classic vs Leia):&lt;/b&gt; le modalità 3D si possono renderizzare con due engine, scelti per canale:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Classic&lt;/b&gt; &amp;mdash; il modello parametrico Brown-Duda originale. Leggero, zero dipendenze, il suono soundboard originale.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Leia&lt;/b&gt; &amp;mdash; convoluzione HRTF misurata su dataset SOFA MIT KEMAR, più un motore di riflessioni precoci shoebox-room. Esternalizzazione molto più convincente, soprattutto in cuffia.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Leia espone i suoi controlli: &lt;b&gt;Riflessioni&lt;/b&gt; on/off + livello, &lt;b&gt;Dimensione stanza&lt;/b&gt;, &lt;b&gt;Tipo stanza&lt;/b&gt; (13 preset da Studio a Cattedrale ad Underwater &amp;mdash; ogni preset ha una firma di coda diffusa di Schroeder unica), &lt;b&gt;Clarity&lt;/b&gt; (bilanciamento early/late) e &lt;b&gt;Larghezza&lt;/b&gt;. Passare da Classic a Leia è istantaneo &amp;mdash; il thread audio continua a girare mentre il SOFA si carica in background.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="271"/>
+        <source>10. Paulstretch</source>
+        <translation>10. Paulstretch</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="271"/>
+        <source>&lt;p&gt;&lt;b&gt;Paulstretch&lt;/b&gt; is an extreme time-stretch (1&amp;times;&amp;ndash;50&amp;times;) that keeps pitch while slowing the sound into a wide, diffuse drone. It is the first module in the sandbox list and its pipeline position is fixed.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Factor&lt;/b&gt; sets how much slower it plays; &lt;b&gt;Window&lt;/b&gt; sets the FFT analysis size (bigger = smoother and more &apos;frozen&apos;, smaller = grittier and more rhythmic).&lt;/p&gt;&lt;p&gt;Paulstretch runs on a separate streaming feed before the rest of the chain. While it is on the server receives a clean, stretched stream &amp;mdash; the same audio you hear locally.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;&lt;b&gt;Paulstretch&lt;/b&gt; è un time-stretch estremo (1&amp;times;&amp;ndash;50&amp;times;) che mantiene il pitch rallentando il suono in un drone ampio e diffuso. È il primo modulo nella lista sandbox e la sua posizione nella pipeline è fissa.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Fattore&lt;/b&gt; imposta quanto rallenta; &lt;b&gt;Finestra&lt;/b&gt; imposta la dimensione di analisi FFT (più grande = più liscio e &apos;congelato&apos;, più piccolo = più sporco e ritmico).&lt;/p&gt;&lt;p&gt;Paulstretch gira su un feed streaming separato prima del resto della catena. Quando è attivo il server riceve uno stream pulito e stretchato &amp;mdash; lo stesso audio che senti localmente.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="283"/>
+        <source>11. The DSP effects (the other 13)</source>
+        <translation>11. Gli effetti DSP (gli altri 13)</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="283"/>
+        <source>&lt;p&gt;Listed in the default pipeline order:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;16-band EQ&lt;/b&gt; &amp;mdash; ISO 2/3-octave graphic equaliser, &amp;plusmn;12 dB per band, with live per-band LED level meters and Save / Load EQ presets. Right-click a band &amp;rarr; reset / +12 / -12 dB. Mouse wheel adjusts by 1 dB (Shift = 3 dB).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Compressor&lt;/b&gt; &amp;mdash; evens out dynamics (threshold, ratio, attack, release, knee, makeup gain).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Saturator&lt;/b&gt; &amp;mdash; adds warmth / grit; soft, tube, tape or hard-clip modes.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Spatial&lt;/b&gt; &amp;mdash; see section 9.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Chorus&lt;/b&gt; &amp;mdash; thickens the sound with detuned voices.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Flanger&lt;/b&gt; &amp;mdash; classic sweeping jet effect.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Flangus&lt;/b&gt; &amp;mdash; flanger / chorus hybrid with multi-voice spread.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Phaser&lt;/b&gt; &amp;mdash; sweeping notch filter, up to 12 stages.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Delay&lt;/b&gt; &amp;mdash; echo up to 3 s with damping and optional ping-pong.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Reverb&lt;/b&gt; &amp;mdash; algorithmic room ambience (in addition to Leia&apos;s measured reflections).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Limiter&lt;/b&gt; &amp;mdash; brick-wall limiter, compressor or noise gate.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Bitcrusher&lt;/b&gt; &amp;mdash; reduces bit depth and sample rate for a lo-fi sound.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Generation Loss&lt;/b&gt; &amp;mdash; simulates repeated re-encoding (the &apos;deep-fried&apos; effect).&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Each effect has its own enable toggle, per-module reset button and is fully drag-reorderable in the pipeline. Live state persists across restarts.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;Elencati nell&apos;ordine pipeline di default:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;EQ a 16 bande&lt;/b&gt; &amp;mdash; equalizzatore grafico ISO 2/3 di ottava, &amp;plusmn;12 dB per banda, con misuratori LED di livello per banda in tempo reale e Save / Load preset EQ. Clic destro su una banda &amp;rarr; reset / +12 / -12 dB. La rotella regola di 1 dB (Shift = 3 dB).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Compressore&lt;/b&gt; &amp;mdash; livella le dinamiche (threshold, ratio, attack, release, knee, makeup gain).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Saturatore&lt;/b&gt; &amp;mdash; aggiunge calore / grit; modalità soft, tube, tape o hard-clip.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Spaziale&lt;/b&gt; &amp;mdash; vedi sezione 9.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Chorus&lt;/b&gt; &amp;mdash; ispessisce il suono con voci stonate.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Flanger&lt;/b&gt; &amp;mdash; classico effetto jet che si muove.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Flangus&lt;/b&gt; &amp;mdash; ibrido flanger / chorus con multi-voce.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Phaser&lt;/b&gt; &amp;mdash; filtro notch in movimento, fino a 12 stadi.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Delay&lt;/b&gt; &amp;mdash; echo fino a 3 s con damping e ping-pong opzionale.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Riverbero&lt;/b&gt; &amp;mdash; ambienza di stanza algoritmica (oltre alle riflessioni misurate di Leia).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Limiter&lt;/b&gt; &amp;mdash; brick-wall limiter, compressore o noise gate.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Bitcrusher&lt;/b&gt; &amp;mdash; riduce profondità di bit e sample rate per un suono lo-fi.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Generation Loss&lt;/b&gt; &amp;mdash; simula ricodifiche ripetute (l&apos;effetto &apos;deep-fried&apos;).&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Ogni effetto ha il suo toggle di attivazione, un pulsante di reset per modulo ed è completamente drag-riorganizzabile nella pipeline. Lo stato live persiste tra un avvio e l&apos;altro.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="315"/>
+        <source>12. Extras: ducking, random, normalize</source>
+        <translation>12. Extra: ducking, random, normalizzazione</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="315"/>
+        <source>&lt;p&gt;The sandbox also includes a few global features that are not ordered as pipeline modules:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Auto normalize (LUFS)&lt;/b&gt; &amp;mdash; EBU R128 single-pass loudness normalisation targeting -16 LUFS integrated / -1 dBTP. Levels every clip without you having to ride the volume.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Random pitch jitter&lt;/b&gt; &amp;mdash; on every play (and every loop iteration) the pitch is shifted by a random number of cents within the range you set. Great for spam buttons that should never sound identical twice.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Sidechain ducking&lt;/b&gt; &amp;mdash; while this channel is transmitting, it attenuates every OTHER channel by N dB. Smooth attack / release so the duck doesn&apos;t pump.&lt;/li&gt;&lt;/ul&gt;</source>
+        <translation>&lt;p&gt;La sandbox include anche alcune funzioni globali che non sono ordinate come moduli pipeline:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Auto normalize (LUFS)&lt;/b&gt; &amp;mdash; normalizzazione di loudness EBU R128 single-pass che punta a -16 LUFS integrato / -1 dBTP. Livella ogni clip senza che tu debba regolare il volume a mano.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Random pitch jitter&lt;/b&gt; &amp;mdash; a ogni play (e a ogni iterazione di loop) il pitch viene spostato di un numero random di cents nel range che imposti. Ottimo per pulsanti spam che non devono mai suonare identici due volte.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Sidechain ducking&lt;/b&gt; &amp;mdash; mentre questo canale trasmette, attenua ogni altro canale di N dB. Attack / release smussati così il duck non pompa.&lt;/li&gt;&lt;/ul&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="331"/>
+        <source>13. Presets, copy / paste</source>
+        <translation>13. Preset, copia / incolla</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="331"/>
+        <source>&lt;p&gt;You can save and reload named presets:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;EQ presets&lt;/b&gt; &amp;mdash; just the 16 EQ bands.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Sandbox presets&lt;/b&gt; &amp;mdash; every effect, every parameter and the pipeline order.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Presets are stored in a per-user INI so they survive reinstalls and travel between profiles.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Copy / Paste&lt;/b&gt; buttons in the sandbox dialog move a complete setup between channels through the clipboard as a short text string &amp;mdash; perfect for matching all channels to one chain.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;Puoi salvare e ricaricare preset nominati:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Preset EQ&lt;/b&gt; &amp;mdash; solo le 16 bande EQ.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Preset sandbox&lt;/b&gt; &amp;mdash; ogni effetto, ogni parametro e l&apos;ordine della pipeline.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;I preset sono salvati in un INI per utente, sopravvivono alle reinstallazioni e viaggiano tra i profili.&lt;/p&gt;&lt;p&gt;I pulsanti &lt;b&gt;Copia / Incolla&lt;/b&gt; nel dialogo sandbox spostano un setup completo tra canali via clipboard come stringa di testo &amp;mdash; perfetto per allineare tutti i canali su una catena.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="344"/>
+        <source>14. Macros</source>
+        <translation>14. Macro</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="344"/>
+        <source>&lt;p&gt;A &lt;b&gt;macro button&lt;/b&gt; freezes the state of &lt;i&gt;every&lt;/i&gt; channel (volumes, FX, files, full sandbox state) into one button. Pressing it later restores that whole snapshot in one click.&lt;/p&gt;&lt;p&gt;Create a macro by right-clicking a free cell &amp;rarr; &lt;b&gt;Make macro&lt;/b&gt;. Macro buttons carry a visual marker so they&apos;re easy to spot.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Undo macro&lt;/b&gt; (previously &apos;Restore pre-macro&apos;) reverts to the exact state the channels were in just before the macro fired &amp;mdash; use it when you want to A/B between your live setup and a saved snapshot.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;Un &lt;b&gt;pulsante macro&lt;/b&gt; congela lo stato di &lt;i&gt;ogni&lt;/i&gt; canale (volumi, FX, file, stato completo della sandbox) in un solo pulsante. Premendolo dopo ripristina tutto lo snapshot con un clic.&lt;/p&gt;&lt;p&gt;Crea una macro con clic destro su una cella vuota &amp;rarr; &lt;b&gt;Crea macro&lt;/b&gt;. I pulsanti macro hanno un marcatore visivo per riconoscerli subito.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Annulla macro&lt;/b&gt; (prima &apos;Restore pre-macro&apos;) ripristina lo stato esatto dei canali appena prima che la macro partisse &amp;mdash; usalo quando vuoi fare A/B tra il setup live e uno snapshot salvato.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="356"/>
+        <source>15. Profiles</source>
+        <translation>15. Profili</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="356"/>
+        <source>&lt;p&gt;The soundboard has &lt;b&gt;4 independent profiles&lt;/b&gt; (P1&amp;ndash;P4), each with its own button grid, grid size, macros and per-profile settings. Switch with the P1&amp;ndash;P4 buttons in the top bar or via a TS3 hotkey.&lt;/p&gt;&lt;p&gt;Profiles can be &lt;b&gt;exported as JSON&lt;/b&gt; to back up or share. The exported file is human-readable and contains every button, every label, every colour and every macro. Importing a JSON profile is lossless.&lt;/p&gt;&lt;p&gt;The currently selected profile is automatically persisted &amp;mdash; the next start opens the same profile.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;La soundboard ha &lt;b&gt;4 profili indipendenti&lt;/b&gt; (P1&amp;ndash;P4), ognuno con la sua griglia di pulsanti, dimensione griglia, macro e impostazioni per profilo. Cambia con i pulsanti P1&amp;ndash;P4 nella barra in alto o con una hotkey TS3.&lt;/p&gt;&lt;p&gt;I profili si possono &lt;b&gt;esportare come JSON&lt;/b&gt; per backup o condivisione. Il file esportato è leggibile e contiene ogni pulsante, etichetta, colore e macro. L&apos;importazione di un profilo JSON è lossless.&lt;/p&gt;&lt;p&gt;Il profilo selezionato viene salvato automaticamente &amp;mdash; il prossimo avvio apre lo stesso profilo.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="368"/>
+        <source>16. Hotkeys</source>
+        <translation>16. Scorciatoie</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="368"/>
+        <source>&lt;p&gt;Any button can be bound to a &lt;b&gt;TS3 hotkey&lt;/b&gt;. Open the button editor &amp;rarr; &lt;b&gt;Set hotkey...&lt;/b&gt; and follow the TS3 prompt to assign a key combo.&lt;/p&gt;&lt;p&gt;Enable &lt;b&gt;Show hotkeys on buttons&lt;/b&gt; in Settings to display the binding as a small label on each button &amp;mdash; very handy when you have dozens of bindings.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Disable hotkeys&lt;/b&gt; in Settings temporarily ignores all soundboard hotkeys without losing the bindings &amp;mdash; useful when you need to type something or play a game without firing sounds by accident.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;Qualsiasi pulsante si può legare a una &lt;b&gt;hotkey TS3&lt;/b&gt;. Apri l&apos;editor del pulsante &amp;rarr; &lt;b&gt;Imposta hotkey...&lt;/b&gt; e segui il prompt di TS3 per assegnare una combinazione di tasti.&lt;/p&gt;&lt;p&gt;Attiva &lt;b&gt;Mostra hotkey sui pulsanti&lt;/b&gt; in Impostazioni per visualizzare il binding come piccola etichetta su ogni pulsante &amp;mdash; molto comodo quando hai decine di binding.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Disabilita hotkey&lt;/b&gt; in Impostazioni ignora temporaneamente tutte le hotkey della soundboard senza perdere i binding &amp;mdash; utile quando devi scrivere qualcosa o giocare senza far partire suoni per sbaglio.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="380"/>
+        <source>17. Audio export</source>
+        <translation>17. Esportazione audio</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="380"/>
+        <source>&lt;p&gt;&lt;b&gt;Audio export&lt;/b&gt; renders a sound to a 48 kHz stereo file with the &lt;i&gt;entire&lt;/i&gt; signal chain baked in: pitch, speed, reverb, the full sandbox DSP chain (including Paulstretch).&lt;/p&gt;&lt;p&gt;Supported output formats: &lt;b&gt;WAV&lt;/b&gt; (PCM 16-bit), &lt;b&gt;FLAC&lt;/b&gt; (lossless), &lt;b&gt;OGG Vorbis&lt;/b&gt; and &lt;b&gt;AAC-M4A&lt;/b&gt;. The format is picked automatically from the filename extension you choose in the save dialog.&lt;/p&gt;&lt;p&gt;Export runs in a background thread with a custom-painted progress bar; closing the dialog cancels the job cleanly. The exported file is bit-identical to what you would hear on playback.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;L&apos;&lt;b&gt;export audio&lt;/b&gt; renderizza un suono in un file stereo 48 kHz con &lt;i&gt;tutta&lt;/i&gt; la catena di segnale applicata: pitch, velocità, riverbero, l&apos;intera catena DSP della sandbox (Paulstretch incluso).&lt;/p&gt;&lt;p&gt;Formati di output supportati: &lt;b&gt;WAV&lt;/b&gt; (PCM 16-bit), &lt;b&gt;FLAC&lt;/b&gt; (lossless), &lt;b&gt;OGG Vorbis&lt;/b&gt; e &lt;b&gt;AAC-M4A&lt;/b&gt;. Il formato si sceglie automaticamente dall&apos;estensione del nome file nel dialogo di salvataggio.&lt;/p&gt;&lt;p&gt;L&apos;export gira in un thread di background con barra di progresso disegnata custom; chiudere il dialogo annulla il lavoro in modo pulito. Il file esportato è bit-identico a quello che senti in playback.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="392"/>
+        <source>18. Theme</source>
+        <translation>18. Tema</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="392"/>
+        <source>&lt;p&gt;In Settings &amp;rarr; &lt;b&gt;Theme&lt;/b&gt; you can recolour the soundboard with three colours (accent, waveform, background) plus a contrast slider. Over a dozen surface colours (button hover, dim text, panel border, etc.) are derived automatically from those three and applied live.&lt;/p&gt;&lt;p&gt;The theme is scoped to the soundboard &amp;mdash; it never leaks into the TeamSpeak client window.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;In Impostazioni &amp;rarr; &lt;b&gt;Tema&lt;/b&gt; puoi ricolorare la soundboard con tre colori (accent, forma d&apos;onda, sfondo) più uno slider di contrasto. Più di una dozzina di colori di superficie (hover pulsanti, testo dim, bordo pannello, ecc.) vengono derivati automaticamente da questi tre e applicati subito.&lt;/p&gt;&lt;p&gt;Il tema è limitato alla soundboard &amp;mdash; non sborda mai nella finestra del client TeamSpeak.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="401"/>
+        <source>19. Language</source>
+        <translation>19. Lingua</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="401"/>
+        <source>&lt;p&gt;The interface auto-selects &lt;b&gt;Italian&lt;/b&gt; when the system locale is Italian, English otherwise. You can override the language in Settings &amp;rarr; &lt;b&gt;Language&lt;/b&gt; at any time. The change applies on the next plugin start (a quick TS3 reload is enough).&lt;/p&gt;</source>
+        <translation>&lt;p&gt;L&apos;interfaccia seleziona automaticamente l&apos;&lt;b&gt;italiano&lt;/b&gt; quando il locale di sistema è italiano, inglese altrimenti. Puoi forzare la lingua da Impostazioni &amp;rarr; &lt;b&gt;Lingua&lt;/b&gt; in qualsiasi momento. Il cambio si applica al prossimo avvio del plugin (basta un reload veloce di TS3).&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="407"/>
+        <source>20. Settings overview</source>
+        <translation>20. Panoramica impostazioni</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="407"/>
+        <source>&lt;p&gt;The Settings window collects every global option:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Layout&lt;/b&gt; &amp;mdash; grid rows / columns, hide waveform (compact view), audio meter visibility, hotkey display, crop markers, channel headers.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Channels&lt;/b&gt; &amp;mdash; remember FX per channel, restore last session, link new channels&apos; settings to the first channel.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Audio&lt;/b&gt; &amp;mdash; earrape protection, custom FX, audio sandbox, show export button.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Logs&lt;/b&gt; &amp;mdash; write debug log file (see &lt;b&gt;Plugins menu &amp;rarr; Show plugin log&lt;/b&gt;).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Reset&lt;/b&gt; &amp;mdash; one-shot reset of channels, volumes, FX, files or sandbox settings (with a confirmation prompt).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Theme&lt;/b&gt; &amp;mdash; three colours + contrast.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Language&lt;/b&gt; &amp;mdash; auto / en / it.&lt;/li&gt;&lt;/ul&gt;</source>
+        <translation>&lt;p&gt;La finestra Impostazioni raccoglie ogni opzione globale:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Layout&lt;/b&gt; &amp;mdash; righe / colonne griglia, nascondi forma d&apos;onda (vista compatta), visibilità audio meter, mostra hotkey, marker di crop, intestazioni canali.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Canali&lt;/b&gt; &amp;mdash; ricorda FX per canale, ripristina ultima sessione, lega le impostazioni dei nuovi canali al primo.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Audio&lt;/b&gt; &amp;mdash; protezione earrape, FX personalizzati, audio sandbox, mostra pulsante export.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Log&lt;/b&gt; &amp;mdash; scrivi file di debug (vedi &lt;b&gt;menu Plugin &amp;rarr; Mostra log plugin&lt;/b&gt;).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Reset&lt;/b&gt; &amp;mdash; reset one-shot di canali, volumi, FX, file o impostazioni sandbox (con conferma).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Tema&lt;/b&gt; &amp;mdash; tre colori + contrasto.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Lingua&lt;/b&gt; &amp;mdash; auto / en / it.&lt;/li&gt;&lt;/ul&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="425"/>
+        <source>21. Updates and About</source>
+        <translation>21. Aggiornamenti e Informazioni</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="425"/>
+        <source>&lt;p&gt;The plugin checks for updates on startup. Run a manual check from &lt;b&gt;Plugins&lt;/b&gt; &amp;rarr; &lt;b&gt;Check for update&lt;/b&gt;. When a newer version exists it is downloaded from GitHub Releases for your platform (Windows / Linux / macOS) and a TS3 restart applies it.&lt;/p&gt;&lt;p&gt;From the &lt;b&gt;About&lt;/b&gt; dialog you can also open this guide and the &lt;b&gt;Version history&lt;/b&gt; &amp;mdash; the full change log of every documented release, browsable per-version on a split view.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;Il plugin controlla gli aggiornamenti all&apos;avvio. Lancia un controllo manuale da &lt;b&gt;Plugin&lt;/b&gt; &amp;rarr; &lt;b&gt;Cerca aggiornamenti&lt;/b&gt;. Quando esiste una versione più recente viene scaricata dalle GitHub Releases per la tua piattaforma (Windows / Linux / macOS) e un riavvio di TS3 la applica.&lt;/p&gt;&lt;p&gt;Dalla finestra &lt;b&gt;Informazioni&lt;/b&gt; puoi anche aprire questa guida e la &lt;b&gt;Cronologia versioni&lt;/b&gt; &amp;mdash; il changelog completo di ogni release documentata, sfogliabile per versione in una vista divisa.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <source>&lt;p&gt;The soundboard runs as a plugin inside TeamSpeak 3. Open it from the &lt;b&gt;Plugins&lt;/b&gt; menu &amp;rarr; &lt;b&gt;Open GameBaiters Soundboard&lt;/b&gt;.&lt;/p&gt;&lt;p&gt;You must be &lt;b&gt;connected to a server&lt;/b&gt; for sound to be sent. While disconnected the window is dimmed and shows a notice &amp;mdash; the interface still lets you arrange buttons and tweak effects.&lt;/p&gt;&lt;p&gt;The window has three areas: the &lt;b&gt;sound button grid&lt;/b&gt; on top, the &lt;b&gt;channels&lt;/b&gt; in the middle, and the &lt;b&gt;control bar&lt;/b&gt; at the bottom (add channel, stop/pause all, profiles, settings).&lt;/p&gt;</source>
+        <translation type="vanished">&lt;p&gt;La soundboard è un plugin di TeamSpeak 3. Aprila dal menu &lt;b&gt;Plugin&lt;/b&gt; &amp;rarr; &lt;b&gt;Apri GameBaiters Soundboard&lt;/b&gt;.&lt;/p&gt;&lt;p&gt;Devi essere &lt;b&gt;connesso a un server&lt;/b&gt; per inviare il suono. Da disconnesso la finestra è oscurata con un avviso &amp;mdash; puoi comunque organizzare i pulsanti e regolare gli effetti.&lt;/p&gt;&lt;p&gt;La finestra ha tre aree: la &lt;b&gt;griglia dei pulsanti&lt;/b&gt; in alto, i &lt;b&gt;canali&lt;/b&gt; al centro e la &lt;b&gt;barra dei controlli&lt;/b&gt; in basso (canale, ferma/pausa tutto, profili, impostazioni).&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <location filename="../howto_qt.cpp" line="93"/>
         <source>2. Sound buttons</source>
         <translation>2. Pulsanti audio</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="82"/>
         <source>&lt;p&gt;Each cell in the grid is a button. To assign a sound, &lt;b&gt;drag an audio file&lt;/b&gt; onto a cell, or right-click a cell to open its editor.&lt;/p&gt;&lt;p&gt;Supported formats: MP3, WAV, OGG, FLAC, AAC, WMA, MP4, MKV, AVI, FLV and anything else FFmpeg can decode.&lt;/p&gt;&lt;p&gt;There are three button types:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Audio&lt;/b&gt; &amp;mdash; plays a sound file.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Macro&lt;/b&gt; &amp;mdash; restores a saved snapshot of every channel (see section 12).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Special&lt;/b&gt; &amp;mdash; bound actions such as stop-all.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;In a button&apos;s editor you can set a &lt;b&gt;custom label&lt;/b&gt;, &lt;b&gt;background colour&lt;/b&gt;, &lt;b&gt;background image&lt;/b&gt;, a &lt;b&gt;hotkey&lt;/b&gt;, looping, and a start/stop &lt;b&gt;crop&lt;/b&gt; range. Drag buttons to rearrange them. Use the &lt;b&gt;search bar&lt;/b&gt; above the grid to filter buttons by label. Grid size (rows &amp;times; columns) is set in Settings.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;Ogni cella della griglia è un pulsante. Per assegnare un suono, &lt;b&gt;trascina un file audio&lt;/b&gt; su una cella, o fai clic destro per aprirne l&apos;editor.&lt;/p&gt;&lt;p&gt;Formati supportati: MP3, WAV, OGG, FLAC, AAC, WMA, MP4, MKV, AVI, FLV e tutto ciò che FFmpeg decodifica.&lt;/p&gt;&lt;p&gt;Ci sono tre tipi di pulsante:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Audio&lt;/b&gt; &amp;mdash; riproduce un file.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Macro&lt;/b&gt; &amp;mdash; ripristina un&apos;istantanea di ogni canale (sezione 12).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Speciale&lt;/b&gt; &amp;mdash; azioni come ferma tutto.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Nell&apos;editor puoi impostare &lt;b&gt;etichetta&lt;/b&gt;, &lt;b&gt;colore di sfondo&lt;/b&gt;, &lt;b&gt;immagine di sfondo&lt;/b&gt;, una &lt;b&gt;scorciatoia&lt;/b&gt;, il loop e un intervallo di &lt;b&gt;ritaglio&lt;/b&gt; inizio/fine. Trascina i pulsanti per riordinarli. Usa la &lt;b&gt;barra di ricerca&lt;/b&gt; sopra la griglia per filtrarli. La dimensione (righe &amp;times; colonne) si imposta nelle Impostazioni.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;Ogni cella della griglia è un pulsante. Per assegnare un suono, &lt;b&gt;trascina un file audio&lt;/b&gt; su una cella, o fai clic destro per aprirne l&apos;editor.&lt;/p&gt;&lt;p&gt;Formati supportati: MP3, WAV, OGG, FLAC, AAC, WMA, MP4, MKV, AVI, FLV e tutto ciò che FFmpeg decodifica.&lt;/p&gt;&lt;p&gt;Ci sono tre tipi di pulsante:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Audio&lt;/b&gt; &amp;mdash; riproduce un file.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Macro&lt;/b&gt; &amp;mdash; ripristina un&apos;istantanea di ogni canale (sezione 12).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Speciale&lt;/b&gt; &amp;mdash; azioni come ferma tutto.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Nell&apos;editor puoi impostare &lt;b&gt;etichetta&lt;/b&gt;, &lt;b&gt;colore di sfondo&lt;/b&gt;, &lt;b&gt;immagine di sfondo&lt;/b&gt;, una &lt;b&gt;scorciatoia&lt;/b&gt;, il loop e un intervallo di &lt;b&gt;ritaglio&lt;/b&gt; inizio/fine. Trascina i pulsanti per riordinarli. Usa la &lt;b&gt;barra di ricerca&lt;/b&gt; sopra la griglia per filtrarli. La dimensione (righe &amp;times; colonne) si imposta nelle Impostazioni.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="100"/>
         <source>3. Playing and transport</source>
-        <translation>3. Riproduzione e trasporto</translation>
+        <translation type="vanished">3. Riproduzione e trasporto</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="100"/>
         <source>&lt;p&gt;Click a button to play its sound. The waveform view shows playback progress &amp;mdash; &lt;b&gt;click the waveform&lt;/b&gt; to seek.&lt;/p&gt;&lt;p&gt;Transport controls: &lt;b&gt;Play&lt;/b&gt;, &lt;b&gt;Pause&lt;/b&gt;, &lt;b&gt;Stop&lt;/b&gt;, and skip &amp;plusmn;5 s / &amp;plusmn;10 s. &lt;b&gt;Stop all&lt;/b&gt; and &lt;b&gt;Pause all&lt;/b&gt; in the bottom bar affect every channel at once.&lt;/p&gt;&lt;p&gt;Each button has a &lt;b&gt;Loop&lt;/b&gt; toggle and an independent &lt;b&gt;per-button volume&lt;/b&gt; modifier, separate from the channel volume.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;Clicca un pulsante per riprodurne il suono. La forma d&apos;onda mostra l&apos;avanzamento &amp;mdash; &lt;b&gt;cliccala&lt;/b&gt; per spostarti.&lt;/p&gt;&lt;p&gt;Controlli: &lt;b&gt;Play&lt;/b&gt;, &lt;b&gt;Pausa&lt;/b&gt;, &lt;b&gt;Ferma&lt;/b&gt; e salta &amp;plusmn;5 s / &amp;plusmn;10 s. &lt;b&gt;Ferma tutto&lt;/b&gt; e &lt;b&gt;Pausa tutto&lt;/b&gt; nella barra agiscono su tutti i canali.&lt;/p&gt;&lt;p&gt;Ogni pulsante ha un&apos;opzione &lt;b&gt;Loop&lt;/b&gt; e un &lt;b&gt;volume per pulsante&lt;/b&gt; indipendente, separato dal volume del canale.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;Clicca un pulsante per riprodurne il suono. La forma d&apos;onda mostra l&apos;avanzamento &amp;mdash; &lt;b&gt;cliccala&lt;/b&gt; per spostarti.&lt;/p&gt;&lt;p&gt;Controlli: &lt;b&gt;Play&lt;/b&gt;, &lt;b&gt;Pausa&lt;/b&gt;, &lt;b&gt;Ferma&lt;/b&gt; e salta &amp;plusmn;5 s / &amp;plusmn;10 s. &lt;b&gt;Ferma tutto&lt;/b&gt; e &lt;b&gt;Pausa tutto&lt;/b&gt; nella barra agiscono su tutti i canali.&lt;/p&gt;&lt;p&gt;Ogni pulsante ha un&apos;opzione &lt;b&gt;Loop&lt;/b&gt; e un &lt;b&gt;volume per pulsante&lt;/b&gt; indipendente, separato dal volume del canale.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="109"/>
         <source>4. Channels</source>
-        <translation>4. Canali</translation>
+        <translation type="vanished">4. Canali</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="109"/>
         <source>&lt;p&gt;A &lt;b&gt;channel&lt;/b&gt; is one independent playback lane: it has its own file, volume, FX, waveform, transport and audio sandbox. Add channels with &lt;b&gt;+ Add channel&lt;/b&gt;; the first channel is always present.&lt;/p&gt;&lt;p&gt;Channel titles are editable &amp;mdash; click the title to rename it. The &lt;b&gt;peak meter&lt;/b&gt; shows level (cyan = normal, red = clipping). Each channel&apos;s state is saved and restored across restarts.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;Un &lt;b&gt;canale&lt;/b&gt; è una corsia di riproduzione indipendente: ha file, volume, FX, forma d&apos;onda, trasporto e audio sandbox propri. Aggiungi canali con &lt;b&gt;+ Canale&lt;/b&gt;; il primo è sempre presente.&lt;/p&gt;&lt;p&gt;I titoli sono modificabili &amp;mdash; cliccali per rinominarli. Il &lt;b&gt;misuratore di picco&lt;/b&gt; mostra il livello (ciano = normale, rosso = clipping). Lo stato di ogni canale è salvato tra i riavvii.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;Un &lt;b&gt;canale&lt;/b&gt; è una corsia di riproduzione indipendente: ha file, volume, FX, forma d&apos;onda, trasporto e audio sandbox propri. Aggiungi canali con &lt;b&gt;+ Canale&lt;/b&gt;; il primo è sempre presente.&lt;/p&gt;&lt;p&gt;I titoli sono modificabili &amp;mdash; cliccali per rinominarli. Il &lt;b&gt;misuratore di picco&lt;/b&gt; mostra il livello (ciano = normale, rosso = clipping). Lo stato di ogni canale è salvato tra i riavvii.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="117"/>
         <source>5. Volume control</source>
-        <translation>5. Controllo volume</translation>
+        <translation type="vanished">5. Controllo volume</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="117"/>
         <source>&lt;p&gt;Every channel has &lt;b&gt;two&lt;/b&gt; volume sliders:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Local&lt;/b&gt; &amp;mdash; how loud &lt;i&gt;you&lt;/i&gt; hear the sound.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Remote&lt;/b&gt; &amp;mdash; how loud &lt;i&gt;others&lt;/i&gt; on the server hear it.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;The &lt;b&gt;Link&lt;/b&gt; toggle moves both sliders together. A &lt;b&gt;Global volume&lt;/b&gt; master scales everything. Turn on &lt;b&gt;Earrape protection&lt;/b&gt; in Settings to apply a safety limiter on what you hear.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;Ogni canale ha &lt;b&gt;due&lt;/b&gt; cursori di volume:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Locale&lt;/b&gt; &amp;mdash; quanto forte lo senti &lt;i&gt;tu&lt;/i&gt;.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Remoto&lt;/b&gt; &amp;mdash; quanto forte lo sentono &lt;i&gt;gli altri&lt;/i&gt; sul server.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;L&apos;opzione &lt;b&gt;Collega&lt;/b&gt; muove entrambi insieme. Un volume &lt;b&gt;Globale&lt;/b&gt; regola tutto. Attiva l&apos;&lt;b&gt;Anti-earrape&lt;/b&gt; nelle Impostazioni per un limiter di sicurezza.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;Ogni canale ha &lt;b&gt;due&lt;/b&gt; cursori di volume:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Locale&lt;/b&gt; &amp;mdash; quanto forte lo senti &lt;i&gt;tu&lt;/i&gt;.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Remoto&lt;/b&gt; &amp;mdash; quanto forte lo sentono &lt;i&gt;gli altri&lt;/i&gt; sul server.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;L&apos;opzione &lt;b&gt;Collega&lt;/b&gt; muove entrambi insieme. Un volume &lt;b&gt;Globale&lt;/b&gt; regola tutto. Attiva l&apos;&lt;b&gt;Anti-earrape&lt;/b&gt; nelle Impostazioni per un limiter di sicurezza.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="127"/>
         <source>6. FX panel (pitch / speed / reverb)</source>
-        <translation>6. Pannello FX (pitch / velocità / riverbero)</translation>
+        <translation type="vanished">6. Pannello FX (pitch / velocità / riverbero)</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="127"/>
         <source>&lt;p&gt;The compact &lt;b&gt;FX panel&lt;/b&gt; on each channel offers three quick, real-time effects:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Pitch&lt;/b&gt; &amp;mdash; shift pitch without changing speed (0.33&amp;times;&amp;ndash;3.0&amp;times;).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Speed&lt;/b&gt; &amp;mdash; change playback rate without changing pitch.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Reverb&lt;/b&gt; &amp;mdash; a transient room ambience (0&amp;ndash;100).&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;The &lt;b&gt;Sync&lt;/b&gt; toggle locks pitch and speed together for a chipmunk / slow-motion effect. With &lt;b&gt;Remember pitch/speed/reverb&lt;/b&gt; enabled in Settings, these values persist across restarts.&lt;/p&gt;&lt;p&gt;The FX panel is the &lt;i&gt;quick&lt;/i&gt; effects strip. For the deep 14-effect chain, use the &lt;b&gt;Audio sandbox&lt;/b&gt; below.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;Il compatto &lt;b&gt;pannello FX&lt;/b&gt; di ogni canale offre tre effetti rapidi in tempo reale:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Pitch&lt;/b&gt; &amp;mdash; sposta l&apos;intonazione senza cambiare velocità (0.33&amp;times;&amp;ndash;3.0&amp;times;).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Velocità&lt;/b&gt; &amp;mdash; cambia la velocità senza cambiare l&apos;intonazione.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Riverbero&lt;/b&gt; &amp;mdash; un&apos;ambienza temporanea (0&amp;ndash;100).&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;L&apos;opzione &lt;b&gt;Sync&lt;/b&gt; blocca pitch e velocità per un effetto chipmunk / slow-motion. Con &lt;b&gt;Ricorda pitch/velocità/riverbero&lt;/b&gt; attivo, questi valori persistono tra i riavvii.&lt;/p&gt;&lt;p&gt;Il pannello FX è la striscia di effetti &lt;i&gt;rapidi&lt;/i&gt;. Per la catena a 14 effetti usa l&apos;&lt;b&gt;Audio Sandbox&lt;/b&gt; sotto.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;Il compatto &lt;b&gt;pannello FX&lt;/b&gt; di ogni canale offre tre effetti rapidi in tempo reale:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Pitch&lt;/b&gt; &amp;mdash; sposta l&apos;intonazione senza cambiare velocità (0.33&amp;times;&amp;ndash;3.0&amp;times;).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Velocità&lt;/b&gt; &amp;mdash; cambia la velocità senza cambiare l&apos;intonazione.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Riverbero&lt;/b&gt; &amp;mdash; un&apos;ambienza temporanea (0&amp;ndash;100).&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;L&apos;opzione &lt;b&gt;Sync&lt;/b&gt; blocca pitch e velocità per un effetto chipmunk / slow-motion. Con &lt;b&gt;Ricorda pitch/velocità/riverbero&lt;/b&gt; attivo, questi valori persistono tra i riavvii.&lt;/p&gt;&lt;p&gt;Il pannello FX è la striscia di effetti &lt;i&gt;rapidi&lt;/i&gt;. Per la catena a 14 effetti usa l&apos;&lt;b&gt;Audio Sandbox&lt;/b&gt; sotto.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="142"/>
         <source>7. The audio sandbox</source>
-        <translation>7. L&apos;audio sandbox</translation>
+        <translation type="vanished">7. L&apos;audio sandbox</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="142"/>
         <source>&lt;p&gt;The &lt;b&gt;audio sandbox&lt;/b&gt; is a per-channel rack of 14 DSP effects. Open it from the channel&apos;s sandbox button.&lt;/p&gt;&lt;p&gt;A single &lt;b&gt;master switch&lt;/b&gt; at the top enables or bypasses the whole chain at zero CPU cost &amp;mdash; every value is kept so you can A/B instantly.&lt;/p&gt;&lt;p&gt;The &lt;b&gt;Pipeline order&lt;/b&gt; bar shows the processing chain as colored blocks. &lt;b&gt;Drag&lt;/b&gt; a block to reorder the chain; &lt;b&gt;click&lt;/b&gt; a block (without dragging) to jump straight to that effect&apos;s panel and open it. The panel list below mirrors the pipeline order. &lt;b&gt;Reset order&lt;/b&gt; restores the default chain (effect values are kept).&lt;/p&gt;&lt;p&gt;Use the &lt;b&gt;search box&lt;/b&gt; to filter the module list. Each module has its own enable toggle and a small reset button. The &lt;b&gt;Fold output to mono&lt;/b&gt; checkbox collapses the stereo image and is always applied last &amp;mdash; it is not a reorderable module.&lt;/p&gt;&lt;p&gt;The whole sandbox state is saved per channel and travels inside sandbox presets, including the pipeline order.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;L&apos;&lt;b&gt;audio sandbox&lt;/b&gt; è un rack di 14 effetti DSP per canale. Aprilo dal pulsante sandbox del canale.&lt;/p&gt;&lt;p&gt;Un unico &lt;b&gt;interruttore principale&lt;/b&gt; in alto abilita o bypassa l&apos;intera catena a CPU nulla &amp;mdash; ogni valore è conservato per fare A/B all&apos;istante.&lt;/p&gt;&lt;p&gt;La barra &lt;b&gt;Ordine pipeline&lt;/b&gt; mostra la catena come blocchi colorati. &lt;b&gt;Trascina&lt;/b&gt; un blocco per riordinarla; &lt;b&gt;clicca&lt;/b&gt; un blocco per aprire il pannello di quell&apos;effetto. L&apos;elenco sotto rispecchia l&apos;ordine. &lt;b&gt;Reset ordine&lt;/b&gt; ripristina la catena predefinita (i valori sono conservati).&lt;/p&gt;&lt;p&gt;Usa la &lt;b&gt;casella di ricerca&lt;/b&gt; per filtrare i moduli. Ogni modulo ha la sua opzione e un piccolo reset. La casella &lt;b&gt;Uscita in mono&lt;/b&gt; riduce lo stereo ed è sempre applicata per ultima &amp;mdash; non è un modulo riordinabile.&lt;/p&gt;&lt;p&gt;L&apos;intero stato della sandbox è salvato per canale e viaggia nei preset, incluso l&apos;ordine della pipeline.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;L&apos;&lt;b&gt;audio sandbox&lt;/b&gt; è un rack di 14 effetti DSP per canale. Aprilo dal pulsante sandbox del canale.&lt;/p&gt;&lt;p&gt;Un unico &lt;b&gt;interruttore principale&lt;/b&gt; in alto abilita o bypassa l&apos;intera catena a CPU nulla &amp;mdash; ogni valore è conservato per fare A/B all&apos;istante.&lt;/p&gt;&lt;p&gt;La barra &lt;b&gt;Ordine pipeline&lt;/b&gt; mostra la catena come blocchi colorati. &lt;b&gt;Trascina&lt;/b&gt; un blocco per riordinarla; &lt;b&gt;clicca&lt;/b&gt; un blocco per aprire il pannello di quell&apos;effetto. L&apos;elenco sotto rispecchia l&apos;ordine. &lt;b&gt;Reset ordine&lt;/b&gt; ripristina la catena predefinita (i valori sono conservati).&lt;/p&gt;&lt;p&gt;Usa la &lt;b&gt;casella di ricerca&lt;/b&gt; per filtrare i moduli. Ogni modulo ha la sua opzione e un piccolo reset. La casella &lt;b&gt;Uscita in mono&lt;/b&gt; riduce lo stereo ed è sempre applicata per ultima &amp;mdash; non è un modulo riordinabile.&lt;/p&gt;&lt;p&gt;L&apos;intero stato della sandbox è salvato per canale e viaggia nei preset, incluso l&apos;ordine della pipeline.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="160"/>
         <source>8. Spatial audio / HRTF</source>
-        <translation>8. Audio spaziale / HRTF</translation>
+        <translation type="vanished">8. Audio spaziale / HRTF</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="160"/>
         <source>&lt;p&gt;The &lt;b&gt;Spatial&lt;/b&gt; stage places the sound in 3D space. Modes:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Off&lt;/b&gt; &amp;mdash; no spatial processing.&lt;/li&gt;&lt;li&gt;&lt;b&gt;L/R Pan&lt;/b&gt; &amp;mdash; simple equal-power stereo balance.&lt;/li&gt;&lt;li&gt;&lt;b&gt;3D Manual&lt;/b&gt; &amp;mdash; drag a virtual source on the positional pad; set elevation, distance and stereo width.&lt;/li&gt;&lt;li&gt;&lt;b&gt;3D Rotate&lt;/b&gt; &amp;mdash; the source orbits your head at a chosen RPM and radius.&lt;/li&gt;&lt;li&gt;&lt;b&gt;8D preset&lt;/b&gt; &amp;mdash; the classic &apos;YouTube 8D&apos; recipe: orbit + head sway + tight width.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;b&gt;Spatial mix&lt;/b&gt; crossfades between processed and raw stereo &amp;mdash; pull it back if the result feels too narrow. &lt;b&gt;Ambience&lt;/b&gt; adds room reflections that push the sound out of your head.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;Lo stadio &lt;b&gt;Spaziale&lt;/b&gt; posiziona il suono nello spazio 3D. Modalità:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Off&lt;/b&gt; &amp;mdash; nessuna elaborazione spaziale.&lt;/li&gt;&lt;li&gt;&lt;b&gt;L/R Pan&lt;/b&gt; &amp;mdash; bilanciamento stereo a potenza costante.&lt;/li&gt;&lt;li&gt;&lt;b&gt;3D Manuale&lt;/b&gt; &amp;mdash; trascina una sorgente sul pad; imposta elevazione, distanza e ampiezza stereo.&lt;/li&gt;&lt;li&gt;&lt;b&gt;3D Rotazione&lt;/b&gt; &amp;mdash; la sorgente orbita attorno alla testa a RPM e raggio scelti.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Preset 8D&lt;/b&gt; &amp;mdash; la classica ricetta &apos;8D di YouTube&apos;: orbita + oscillazione testa + ampiezza ridotta.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Il &lt;b&gt;Mix spaziale&lt;/b&gt; dissolve tra stereo elaborato e grezzo &amp;mdash; riducilo se sembra troppo stretto. L&apos;&lt;b&gt;Ambiente&lt;/b&gt; aggiunge riflessioni che spingono il suono fuori dalla testa.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;Lo stadio &lt;b&gt;Spaziale&lt;/b&gt; posiziona il suono nello spazio 3D. Modalità:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Off&lt;/b&gt; &amp;mdash; nessuna elaborazione spaziale.&lt;/li&gt;&lt;li&gt;&lt;b&gt;L/R Pan&lt;/b&gt; &amp;mdash; bilanciamento stereo a potenza costante.&lt;/li&gt;&lt;li&gt;&lt;b&gt;3D Manuale&lt;/b&gt; &amp;mdash; trascina una sorgente sul pad; imposta elevazione, distanza e ampiezza stereo.&lt;/li&gt;&lt;li&gt;&lt;b&gt;3D Rotazione&lt;/b&gt; &amp;mdash; la sorgente orbita attorno alla testa a RPM e raggio scelti.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Preset 8D&lt;/b&gt; &amp;mdash; la classica ricetta &apos;8D di YouTube&apos;: orbita + oscillazione testa + ampiezza ridotta.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Il &lt;b&gt;Mix spaziale&lt;/b&gt; dissolve tra stereo elaborato e grezzo &amp;mdash; riducilo se sembra troppo stretto. L&apos;&lt;b&gt;Ambiente&lt;/b&gt; aggiunge riflessioni che spingono il suono fuori dalla testa.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="176"/>
         <source>9. Paulstretch</source>
-        <translation>9. Paulstretch</translation>
+        <translation type="vanished">9. Paulstretch</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="176"/>
         <source>&lt;p&gt;&lt;b&gt;Paulstretch&lt;/b&gt; is an extreme time-stretch (1&amp;times;&amp;ndash;50&amp;times;) that keeps pitch while slowing the sound into a wide, diffuse drone. It is the first module in the sandbox list.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Factor&lt;/b&gt; sets how much slower it plays; &lt;b&gt;Window&lt;/b&gt; sets the FFT analysis size (bigger = smoother and more &apos;frozen&apos;, smaller = grittier). Its pipeline position is fixed &amp;mdash; it runs on a separate streaming feed before the rest of the chain.&lt;/p&gt;&lt;p&gt;Paulstretch is a &lt;b&gt;local&lt;/b&gt; effect: while it is on, the server receives a clean stream, like preview-only mode.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;&lt;b&gt;Paulstretch&lt;/b&gt; è un time-stretch estremo (1&amp;times;&amp;ndash;50&amp;times;) che mantiene l&apos;intonazione rallentando il suono in un drone ampio e diffuso. È il primo modulo della sandbox.&lt;/p&gt;&lt;p&gt;Il &lt;b&gt;Fattore&lt;/b&gt; imposta quanto più lento è; la &lt;b&gt;Finestra&lt;/b&gt; imposta la dimensione di analisi FFT (più grande = più morbido e &apos;congelato&apos;, più piccola = più ruvido). La posizione nella pipeline è fissa &amp;mdash; gira su un flusso separato prima del resto.&lt;/p&gt;&lt;p&gt;Paulstretch è un effetto &lt;b&gt;locale&lt;/b&gt;: mentre è attivo, il server riceve un flusso pulito, come la sola anteprima.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;&lt;b&gt;Paulstretch&lt;/b&gt; è un time-stretch estremo (1&amp;times;&amp;ndash;50&amp;times;) che mantiene l&apos;intonazione rallentando il suono in un drone ampio e diffuso. È il primo modulo della sandbox.&lt;/p&gt;&lt;p&gt;Il &lt;b&gt;Fattore&lt;/b&gt; imposta quanto più lento è; la &lt;b&gt;Finestra&lt;/b&gt; imposta la dimensione di analisi FFT (più grande = più morbido e &apos;congelato&apos;, più piccola = più ruvido). La posizione nella pipeline è fissa &amp;mdash; gira su un flusso separato prima del resto.&lt;/p&gt;&lt;p&gt;Paulstretch è un effetto &lt;b&gt;locale&lt;/b&gt;: mentre è attivo, il server riceve un flusso pulito, come la sola anteprima.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="187"/>
         <source>10. The DSP effects</source>
-        <translation>10. Gli effetti DSP</translation>
+        <translation type="vanished">10. Gli effetti DSP</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="187"/>
         <source>&lt;ul&gt;&lt;li&gt;&lt;b&gt;16-band EQ&lt;/b&gt; &amp;mdash; ISO 2/3-octave graphic equaliser, &amp;plusmn;12 dB per band.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Compressor&lt;/b&gt; &amp;mdash; evens out dynamics (threshold, ratio, attack, release, knee, makeup).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Saturator&lt;/b&gt; &amp;mdash; adds warmth/grit; soft, tube, tape or hard-clip modes.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Chorus&lt;/b&gt; &amp;mdash; thickens the sound with detuned voices.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Flanger&lt;/b&gt; &amp;mdash; classic sweeping jet effect.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Flangus&lt;/b&gt; &amp;mdash; flanger/chorus hybrid with multi-voice spread.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Phaser&lt;/b&gt; &amp;mdash; sweeping notch filter, up to 12 stages.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Delay&lt;/b&gt; &amp;mdash; echo up to 3 s, with damping and optional ping-pong.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Reverb&lt;/b&gt; &amp;mdash; room ambience (the Ambience slider).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Limiter&lt;/b&gt; &amp;mdash; brick-wall limiter, compressor or noise gate.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Bitcrusher&lt;/b&gt; &amp;mdash; reduces bit depth and sample rate for a lo-fi sound.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Generation Loss&lt;/b&gt; &amp;mdash; simulates repeated re-encoding (the &apos;deep-fried&apos; effect).&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Every effect has an enable toggle and persists across restarts.&lt;/p&gt;</source>
-        <translation>&lt;ul&gt;&lt;li&gt;&lt;b&gt;EQ 16 bande&lt;/b&gt; &amp;mdash; equalizzatore grafico ISO a 2/3 d&apos;ottava, &amp;plusmn;12 dB per banda.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Compressore&lt;/b&gt; &amp;mdash; uniforma la dinamica (soglia, rapporto, attacco, rilascio, ginocchio, compensazione).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Saturatore&lt;/b&gt; &amp;mdash; aggiunge calore/ruvidità; modi soft, valvola, nastro o hard-clip.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Chorus&lt;/b&gt; &amp;mdash; ispessisce il suono con voci stonate.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Flanger&lt;/b&gt; &amp;mdash; classico effetto jet oscillante.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Flangus&lt;/b&gt; &amp;mdash; ibrido flanger/chorus multivoce.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Phaser&lt;/b&gt; &amp;mdash; filtro notch oscillante, fino a 12 stadi.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Delay&lt;/b&gt; &amp;mdash; eco fino a 3 s, con smorzamento e ping-pong opzionale.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Riverbero&lt;/b&gt; &amp;mdash; ambienza di stanza (cursore Ambiente).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Limiter&lt;/b&gt; &amp;mdash; limiter brick-wall, compressore o noise gate.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Bitcrusher&lt;/b&gt; &amp;mdash; riduce bit e frequenza per un suono lo-fi.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Generation Loss&lt;/b&gt; &amp;mdash; simula la ricodifica ripetuta (effetto &apos;deep-fried&apos;).&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Ogni effetto ha un&apos;opzione e persiste tra i riavvii.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;ul&gt;&lt;li&gt;&lt;b&gt;EQ 16 bande&lt;/b&gt; &amp;mdash; equalizzatore grafico ISO a 2/3 d&apos;ottava, &amp;plusmn;12 dB per banda.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Compressore&lt;/b&gt; &amp;mdash; uniforma la dinamica (soglia, rapporto, attacco, rilascio, ginocchio, compensazione).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Saturatore&lt;/b&gt; &amp;mdash; aggiunge calore/ruvidità; modi soft, valvola, nastro o hard-clip.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Chorus&lt;/b&gt; &amp;mdash; ispessisce il suono con voci stonate.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Flanger&lt;/b&gt; &amp;mdash; classico effetto jet oscillante.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Flangus&lt;/b&gt; &amp;mdash; ibrido flanger/chorus multivoce.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Phaser&lt;/b&gt; &amp;mdash; filtro notch oscillante, fino a 12 stadi.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Delay&lt;/b&gt; &amp;mdash; eco fino a 3 s, con smorzamento e ping-pong opzionale.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Riverbero&lt;/b&gt; &amp;mdash; ambienza di stanza (cursore Ambiente).&lt;/li&gt;&lt;li&gt;&lt;b&gt;Limiter&lt;/b&gt; &amp;mdash; limiter brick-wall, compressore o noise gate.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Bitcrusher&lt;/b&gt; &amp;mdash; riduce bit e frequenza per un suono lo-fi.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Generation Loss&lt;/b&gt; &amp;mdash; simula la ricodifica ripetuta (effetto &apos;deep-fried&apos;).&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Ogni effetto ha un&apos;opzione e persiste tra i riavvii.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="212"/>
         <source>11. Presets</source>
-        <translation>11. Preset</translation>
+        <translation type="vanished">11. Preset</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="212"/>
         <source>&lt;p&gt;You can save and reload named presets:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;EQ presets&lt;/b&gt; &amp;mdash; just the 16 EQ bands.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Sandbox presets&lt;/b&gt; &amp;mdash; every effect, parameter and the pipeline order.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;b&gt;Copy / Paste&lt;/b&gt; buttons move a setup between channels through the clipboard as a short text string.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;Puoi salvare e ricaricare preset con nome:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Preset EQ&lt;/b&gt; &amp;mdash; solo le 16 bande.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Preset sandbox&lt;/b&gt; &amp;mdash; ogni effetto, parametro e l&apos;ordine della pipeline.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;I pulsanti &lt;b&gt;Copia / Incolla&lt;/b&gt; spostano una configurazione tra i canali tramite gli appunti come breve stringa.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;Puoi salvare e ricaricare preset con nome:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&lt;b&gt;Preset EQ&lt;/b&gt; &amp;mdash; solo le 16 bande.&lt;/li&gt;&lt;li&gt;&lt;b&gt;Preset sandbox&lt;/b&gt; &amp;mdash; ogni effetto, parametro e l&apos;ordine della pipeline.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;I pulsanti &lt;b&gt;Copia / Incolla&lt;/b&gt; spostano una configurazione tra i canali tramite gli appunti come breve stringa.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="222"/>
         <source>12. Macros</source>
-        <translation>12. Macro</translation>
+        <translation type="vanished">12. Macro</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="222"/>
         <source>&lt;p&gt;A &lt;b&gt;macro button&lt;/b&gt; freezes the state of &lt;i&gt;every&lt;/i&gt; channel (volumes, FX, files, full sandbox state) into one button. Pressing it later restores that whole snapshot at once.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Restore pre-macro&lt;/b&gt; reverts to the state the channels were in just before the macro fired. Macro buttons carry a visual marker.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;Un &lt;b&gt;pulsante macro&lt;/b&gt; congela lo stato di &lt;i&gt;ogni&lt;/i&gt; canale (volumi, FX, file, intera sandbox) in un pulsante. Premendolo ripristina l&apos;intera istantanea in una volta.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Ripristina pre-macro&lt;/b&gt; riporta i canali allo stato prima dell&apos;attivazione della macro. I pulsanti macro hanno un indicatore visivo.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;Un &lt;b&gt;pulsante macro&lt;/b&gt; congela lo stato di &lt;i&gt;ogni&lt;/i&gt; canale (volumi, FX, file, intera sandbox) in un pulsante. Premendolo ripristina l&apos;intera istantanea in una volta.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Ripristina pre-macro&lt;/b&gt; riporta i canali allo stato prima dell&apos;attivazione della macro. I pulsanti macro hanno un indicatore visivo.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="229"/>
         <source>13. Profiles</source>
-        <translation>13. Profili</translation>
+        <translation type="vanished">13. Profili</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="229"/>
         <source>&lt;p&gt;There are &lt;b&gt;4 independent profiles&lt;/b&gt;, each with its own button grid, grid size and macros. Switch profiles with the P1&amp;ndash;P4 buttons or a hotkey. Profiles can be exported and imported as JSON files to back up or share a setup.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;Ci sono &lt;b&gt;4 profili indipendenti&lt;/b&gt;, ciascuno con griglia, dimensione e macro proprie. Cambia profilo con i pulsanti P1&amp;ndash;P4 o una scorciatoia. I profili si esportano e importano come file JSON per backup o condivisione.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;Ci sono &lt;b&gt;4 profili indipendenti&lt;/b&gt;, ciascuno con griglia, dimensione e macro proprie. Cambia profilo con i pulsanti P1&amp;ndash;P4 o una scorciatoia. I profili si esportano e importano come file JSON per backup o condivisione.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="235"/>
         <source>14. Hotkeys</source>
-        <translation>14. Scorciatoie</translation>
+        <translation type="vanished">14. Scorciatoie</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="235"/>
         <source>&lt;p&gt;Any button can be bound to a &lt;b&gt;hotkey&lt;/b&gt; through the TeamSpeak hotkey system (set it in the button editor). Enable &lt;b&gt;Show hotkeys on buttons&lt;/b&gt; in Settings to display the binding on each button.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Disable hotkeys&lt;/b&gt; in Settings temporarily ignores all soundboard hotkeys without losing the bindings.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;Ogni pulsante può avere una &lt;b&gt;scorciatoia&lt;/b&gt; tramite il sistema di TeamSpeak (impostala nell&apos;editor del pulsante). Attiva &lt;b&gt;Mostra tasti sui pulsanti&lt;/b&gt; nelle Impostazioni per vederla su ogni pulsante.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Disabilita tasti&lt;/b&gt; nelle Impostazioni ignora tutte le scorciatoie senza perdere le associazioni.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;Ogni pulsante può avere una &lt;b&gt;scorciatoia&lt;/b&gt; tramite il sistema di TeamSpeak (impostala nell&apos;editor del pulsante). Attiva &lt;b&gt;Mostra tasti sui pulsanti&lt;/b&gt; nelle Impostazioni per vederla su ogni pulsante.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Disabilita tasti&lt;/b&gt; nelle Impostazioni ignora tutte le scorciatoie senza perdere le associazioni.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="242"/>
         <source>15. Audio export</source>
-        <translation>15. Esportazione audio</translation>
+        <translation type="vanished">15. Esportazione audio</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="242"/>
         <source>&lt;p&gt;&lt;b&gt;Audio export&lt;/b&gt; renders a sound to a 48 kHz stereo WAV file with the &lt;i&gt;entire&lt;/i&gt; signal chain baked in: pitch, speed, reverb, all sandbox DSP and Paulstretch. Export runs in the background with a progress dialog and can be cancelled.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;L&apos;&lt;b&gt;esportazione audio&lt;/b&gt; rende un suono in un file WAV stereo a 48 kHz con l&apos;&lt;i&gt;intera&lt;/i&gt; catena: pitch, velocità, riverbero, tutto il DSP della sandbox e Paulstretch. Gira in background con una finestra di avanzamento e si può annullare.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;L&apos;&lt;b&gt;esportazione audio&lt;/b&gt; rende un suono in un file WAV stereo a 48 kHz con l&apos;&lt;i&gt;intera&lt;/i&gt; catena: pitch, velocità, riverbero, tutto il DSP della sandbox e Paulstretch. Gira in background con una finestra di avanzamento e si può annullare.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="248"/>
         <source>16. Theme</source>
-        <translation>16. Tema</translation>
+        <translation type="vanished">16. Tema</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="248"/>
         <source>&lt;p&gt;In Settings you can recolour the soundboard with three colours (accent, waveform, background) plus a contrast slider. Over a dozen surface colours are derived automatically and applied live. The theme is scoped to the soundboard and never leaks into the TeamSpeak client.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;Nelle Impostazioni puoi ricolorare la soundboard con tre colori (accento, forma d&apos;onda, sfondo) più un cursore di contrasto. Oltre una dozzina di colori sono derivati e applicati in tempo reale. Il tema resta nella soundboard e non tocca mai il client TeamSpeak.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;Nelle Impostazioni puoi ricolorare la soundboard con tre colori (accento, forma d&apos;onda, sfondo) più un cursore di contrasto. Oltre una dozzina di colori sono derivati e applicati in tempo reale. Il tema resta nella soundboard e non tocca mai il client TeamSpeak.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="255"/>
         <source>17. Settings</source>
-        <translation>17. Impostazioni</translation>
+        <translation type="vanished">17. Impostazioni</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="255"/>
         <source>&lt;p&gt;The Settings window collects every option: grid size, language, earrape protection, link volumes, remember FX, restore session on startup, hide waveform, audio meter visibility, hotkey display, the theme colours, and the reset buttons. Use the reset buttons there to restore channels (which also resets their DSP pipeline order).&lt;/p&gt;&lt;p&gt;&lt;b&gt;Language&lt;/b&gt;: the interface auto-selects Italian when the system locale is Italian, English otherwise. You can override it here at any time &amp;mdash; the change applies instantly.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;La finestra Impostazioni raccoglie ogni opzione: dimensione griglia, lingua, anti-earrape, collegamento volumi, ricorda FX, ripristino sessione all&apos;avvio, nascondi forma d&apos;onda, misuratore audio, tasti sui pulsanti, colori del tema e i pulsanti di reset. Usa i reset lì per ripristinare i canali (azzera anche l&apos;ordine della pipeline DSP).&lt;/p&gt;&lt;p&gt;&lt;b&gt;Lingua&lt;/b&gt;: l&apos;interfaccia sceglie l&apos;italiano se il sistema è in italiano, altrimenti l&apos;inglese. Puoi cambiarla qui in ogni momento &amp;mdash; la modifica è immediata.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;La finestra Impostazioni raccoglie ogni opzione: dimensione griglia, lingua, anti-earrape, collegamento volumi, ricorda FX, ripristino sessione all&apos;avvio, nascondi forma d&apos;onda, misuratore audio, tasti sui pulsanti, colori del tema e i pulsanti di reset. Usa i reset lì per ripristinare i canali (azzera anche l&apos;ordine della pipeline DSP).&lt;/p&gt;&lt;p&gt;&lt;b&gt;Lingua&lt;/b&gt;: l&apos;interfaccia sceglie l&apos;italiano se il sistema è in italiano, altrimenti l&apos;inglese. Puoi cambiarla qui in ogni momento &amp;mdash; la modifica è immediata.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="265"/>
         <source>18. Updates</source>
-        <translation>18. Aggiornamenti</translation>
+        <translation type="vanished">18. Aggiornamenti</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="265"/>
         <source>&lt;p&gt;The plugin checks for updates on startup. Run a manual check from the &lt;b&gt;Plugins&lt;/b&gt; menu &amp;rarr; &lt;b&gt;Check for update&lt;/b&gt;. When a newer version exists it is downloaded from GitHub Releases for your platform.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;Il plugin cerca aggiornamenti all&apos;avvio. Esegui una verifica manuale dal menu &lt;b&gt;Plugin&lt;/b&gt; &amp;rarr; &lt;b&gt;Verifica aggiornamenti&lt;/b&gt;. Se esiste una versione più recente, viene scaricata da GitHub Releases per la tua piattaforma.&lt;/p&gt;</translation>
+        <translation type="vanished">&lt;p&gt;Il plugin cerca aggiornamenti all&apos;avvio. Esegui una verifica manuale dal menu &lt;b&gt;Plugin&lt;/b&gt; &amp;rarr; &lt;b&gt;Verifica aggiornamenti&lt;/b&gt;. Se esiste una versione più recente, viene scaricata da GitHub Releases per la tua piattaforma.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="308"/>
+        <location filename="../howto_qt.cpp" line="471"/>
         <source>A complete walkthrough of every soundboard feature. Click a heading below to jump to it.</source>
         <translation>Guida completa a ogni funzione. Clicca un titolo per saltare alla sezione.</translation>
     </message>
     <message>
-        <location filename="../howto_qt.cpp" line="310"/>
+        <location filename="../howto_qt.cpp" line="473"/>
         <source>Contents</source>
         <translation>Indice</translation>
     </message>
@@ -2036,7 +2223,7 @@ velocità / riverbero.</translation>
     <message>
         <location filename="../modules/log_viewer_dialog.cpp" line="60"/>
         <source>Clear</source>
-        <translation type="unfinished">Pulisci</translation>
+        <translation>Cancella</translation>
     </message>
     <message>
         <location filename="../modules/log_viewer_dialog.cpp" line="61"/>
@@ -2046,40 +2233,40 @@ velocità / riverbero.</translation>
     <message>
         <location filename="../modules/log_viewer_dialog.cpp" line="62"/>
         <source>Close</source>
-        <translation type="unfinished">Chiudi</translation>
+        <translation>Chiudi</translation>
     </message>
     <message>
-        <location filename="../modules/log_viewer_dialog.cpp" line="67"/>
+        <location filename="../modules/log_viewer_dialog.cpp" line="68"/>
         <source>GameBaiters Soundboard - Plugin log</source>
         <translation>GameBaiters Soundboard - Log del plugin</translation>
     </message>
     <message>
-        <location filename="../modules/log_viewer_dialog.cpp" line="75"/>
+        <location filename="../modules/log_viewer_dialog.cpp" line="76"/>
         <source>All</source>
         <translation>Tutto</translation>
     </message>
     <message>
-        <location filename="../modules/log_viewer_dialog.cpp" line="76"/>
+        <location filename="../modules/log_viewer_dialog.cpp" line="77"/>
         <source>Debug+</source>
         <translation>Debug+</translation>
     </message>
     <message>
-        <location filename="../modules/log_viewer_dialog.cpp" line="77"/>
+        <location filename="../modules/log_viewer_dialog.cpp" line="78"/>
         <source>Info+</source>
         <translation>Info+</translation>
     </message>
     <message>
-        <location filename="../modules/log_viewer_dialog.cpp" line="78"/>
+        <location filename="../modules/log_viewer_dialog.cpp" line="79"/>
         <source>Warning+</source>
         <translation>Avvisi+</translation>
     </message>
     <message>
-        <location filename="../modules/log_viewer_dialog.cpp" line="79"/>
+        <location filename="../modules/log_viewer_dialog.cpp" line="80"/>
         <source>Error+</source>
         <translation>Errori+</translation>
     </message>
     <message>
-        <location filename="../modules/log_viewer_dialog.cpp" line="87"/>
+        <location filename="../modules/log_viewer_dialog.cpp" line="88"/>
         <source>Level:</source>
         <translation>Livello:</translation>
     </message>
@@ -2379,7 +2566,7 @@ Cancella l&apos;elenco locale delle scorciatoie. Il profilo di TeamSpeak conserv
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="908"/>
         <source>No file assigned</source>
-        <translation type="unfinished"></translation>
+        <translation>Nessun file assegnato</translation>
     </message>
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="911"/>
@@ -2399,12 +2586,12 @@ Cancella l&apos;elenco locale delle scorciatoie. Il profilo di TeamSpeak conserv
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="914"/>
         <source>Unsupported format or corrupt file</source>
-        <translation type="unfinished"></translation>
+        <translation>Formato non supportato o file corrotto</translation>
     </message>
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="917"/>
         <source>%1 — %2</source>
-        <translation type="unfinished"></translation>
+        <translation>%1 — %2</translation>
     </message>
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="650"/>
@@ -2463,7 +2650,7 @@ Cancella l&apos;elenco locale delle scorciatoie. Il profilo di TeamSpeak conserv
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="1442"/>
         <source>WAV (PCM 16-bit) (*.wav);;FLAC (lossless) (*.flac);;OGG Vorbis (*.ogg);;AAC / M4A (*.m4a);;All files (*.*)</source>
-        <translation type="unfinished"></translation>
+        <translation>WAV (PCM 16-bit) (*.wav);;FLAC (lossless) (*.flac);;OGG Vorbis (*.ogg);;AAC / M4A (*.m4a);;Tutti i file (*.*)</translation>
     </message>
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="1445"/>
@@ -2531,7 +2718,7 @@ i pulsanti la cui etichetta non contiene il testo. Svuota il campo
         <translation>Mostra i marcatori di inizio/fine ritaglio sulla waveform</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="167"/>
+        <location filename="../modules/settings_window.cpp" line="168"/>
         <source>When ON, a sound that has a per-cell crop start and/or end point
 shows coloured markers on the waveform at those positions.
 Only the points that are actually set are drawn.</source>
@@ -2704,39 +2891,39 @@ Vengono disegnati solo i punti effettivamente impostati.</translation>
         <translation>File caricati</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="105"/>
+        <location filename="../modules/settings_window.cpp" line="106"/>
         <source>Soundboard Settings</source>
         <translation>Impostazioni soundboard</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="115"/>
+        <location filename="../modules/settings_window.cpp" line="116"/>
         <source>Limits local output so a too-loud sample cannot blow your ears.</source>
         <translation>Limita l&apos;uscita locale per non farti male alle orecchie.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="116"/>
+        <location filename="../modules/settings_window.cpp" line="117"/>
         <source>When ON, every new Channel created via &quot;+ Add channel&quot; copies the local/remote volume, pitch, speed and reverb from the first channel. When OFF, new channels start with neutral defaults.</source>
         <translation>Da ON, ogni nuovo canale creato con &quot;+ Canale&quot; copia volume locale/remoto, pitch, velocità e riverbero dal primo canale. Da OFF, parte con valori neutri.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="120"/>
+        <location filename="../modules/settings_window.cpp" line="121"/>
         <source>Persist pitch/speed/reverb per channel between sessions.</source>
         <translation>Mantieni pitch/velocità/riverbero per canale tra le sessioni.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="121"/>
+        <location filename="../modules/settings_window.cpp" line="122"/>
         <source>Remember channel count, what was loaded in each channel and the pitch / speed / reverb / volume on every channel.</source>
         <translation>Ricorda il numero di canali, i file caricati e pitch / velocità / riverbero / volume di ogni canale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="128"/>
+        <location filename="../modules/settings_window.cpp" line="129"/>
         <source>Master switch for the pitch / speed / reverb effects.
 Off = the controls disappear from every channel.</source>
         <translation>Interruttore principale per pitch / velocità / riverbero.
 Off = i controlli scompaiono da ogni canale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="145"/>
+        <location filename="../modules/settings_window.cpp" line="146"/>
         <source>Master switch for the pitch / speed / reverb effects. When OFF
 every channel hides its FX panel and per-button custom FX are
 skipped at playback time.</source>
@@ -2745,32 +2932,32 @@ ogni canale nasconde il pannello FX e gli FX pers. per pulsante
 vengono saltati alla riproduzione.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="149"/>
+        <location filename="../modules/settings_window.cpp" line="150"/>
         <source>Limits local audio output so a too-loud sample cannot deafen you.</source>
         <translation>Limita l&apos;uscita locale per non assordarti con un campione troppo forte.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="155"/>
+        <location filename="../modules/settings_window.cpp" line="156"/>
         <source>When ON, each new Channel copies settings from the first channel.</source>
         <translation>Da ON, ogni nuovo canale copia le impostazioni dal primo.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="157"/>
+        <location filename="../modules/settings_window.cpp" line="158"/>
         <source>When ON, each channel remembers its pitch / speed / reverb between sessions.</source>
         <translation>Da ON, ogni canale ricorda pitch / velocità / riverbero tra le sessioni.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="159"/>
+        <location filename="../modules/settings_window.cpp" line="160"/>
         <source>Compact channel view: removes the waveform display from every channel.</source>
         <translation>Vista compatta: rimuove la forma d&apos;onda da ogni canale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="161"/>
+        <location filename="../modules/settings_window.cpp" line="162"/>
         <source>Remember channel count, loaded files and all settings on the next open.</source>
         <translation>Ricorda numero di canali, file caricati e impostazioni alla prossima apertura.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="163"/>
+        <location filename="../modules/settings_window.cpp" line="164"/>
         <source>When ON, the waveform display adapts to show the visual effect of
 active audio sandbox effects (especially Paulstretch stretching).
 When OFF, the raw audio waveform is always shown.</source>
@@ -2779,228 +2966,228 @@ degli effetti attivi della sandbox (specie Paulstretch).
 Da OFF, viene sempre mostrata la forma d&apos;onda grezza.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="174"/>
+        <location filename="../modules/settings_window.cpp" line="175"/>
         <source>Rows</source>
         <translation>Righe</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="175"/>
+        <location filename="../modules/settings_window.cpp" line="176"/>
         <source>Columns</source>
         <translation>Colonne</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="179"/>
+        <location filename="../modules/settings_window.cpp" line="180"/>
         <source>Render the bound hotkey on top of each button.</source>
         <translation>Mostra la scorciatoia su ogni pulsante.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="181"/>
+        <location filename="../modules/settings_window.cpp" line="182"/>
         <source>Globally suppress hotkey handling.</source>
         <translation>Sopprime globalmente le scorciatoie.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="195"/>
-        <location filename="../modules/settings_window.cpp" line="211"/>
+        <location filename="../modules/settings_window.cpp" line="196"/>
+        <location filename="../modules/settings_window.cpp" line="212"/>
         <source>(using bundled default)</source>
         <translation>(usando dataset predefinito)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="196"/>
+        <location filename="../modules/settings_window.cpp" line="197"/>
         <source>Pick custom SOFA...</source>
         <translation>Scegli SOFA personalizzato...</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="197"/>
+        <location filename="../modules/settings_window.cpp" line="198"/>
         <source>Use default</source>
         <translation>Usa predefinito</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="212"/>
+        <location filename="../modules/settings_window.cpp" line="213"/>
         <source>Custom: %1</source>
         <translation>Personalizzato: %1</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="217"/>
+        <location filename="../modules/settings_window.cpp" line="218"/>
         <source>Pick a SOFA HRTF dataset</source>
         <translation>Scegli un dataset HRTF SOFA</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="218"/>
+        <location filename="../modules/settings_window.cpp" line="219"/>
         <source>SOFA datasets (*.sofa);;All files (*.*)</source>
         <translation>Dataset SOFA (*.sofa);;Tutti i file (*.*)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="224"/>
+        <location filename="../modules/settings_window.cpp" line="225"/>
         <source>Custom HRTF</source>
         <translation>HRTF personalizzato</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="225"/>
+        <location filename="../modules/settings_window.cpp" line="226"/>
         <source>Reopen the soundboard to apply the new dataset.</source>
         <translation>Riapri la soundboard per applicare il nuovo dataset.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="236"/>
+        <location filename="../modules/settings_window.cpp" line="237"/>
         <source>Writes a debug log file (rpsb_debug.log) inside your TeamSpeak config folder.</source>
         <translation>Scrive un log debug (rpsb_debug.log) nella cartella config di TeamSpeak.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="242"/>
+        <location filename="../modules/settings_window.cpp" line="243"/>
         <source>Show real-time log...</source>
         <translation>Mostra log in tempo reale...</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="250"/>
+        <location filename="../modules/settings_window.cpp" line="251"/>
         <source>Copy sandbox debug snapshot</source>
         <translation>Copia snapshot debug sandbox</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="267"/>
+        <location filename="../modules/settings_window.cpp" line="268"/>
         <source>Master switch for the per-channel Audio Sandbox button.</source>
         <translation>Interruttore principale del pulsante Audio Sandbox per canale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="269"/>
+        <location filename="../modules/settings_window.cpp" line="270"/>
         <source>Render the dual L/R peak meter on each channel.</source>
         <translation>Mostra il misuratore di picco L/R su ogni canale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="271"/>
+        <location filename="../modules/settings_window.cpp" line="272"/>
         <source>Show an Export button on each channel.</source>
         <translation>Mostra un pulsante Esporta su ogni canale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="284"/>
+        <location filename="../modules/settings_window.cpp" line="285"/>
         <source>Profile %1</source>
         <translation>Profilo %1</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="286"/>
+        <location filename="../modules/settings_window.cpp" line="287"/>
         <source>Active:</source>
         <translation>Attivo:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="293"/>
+        <location filename="../modules/settings_window.cpp" line="294"/>
         <source>Enable custom theme</source>
         <translation>Abilita tema pers.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="299"/>
+        <location filename="../modules/settings_window.cpp" line="300"/>
         <source>Background:</source>
         <translation>Sfondo:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="303"/>
+        <location filename="../modules/settings_window.cpp" line="304"/>
         <source>Accent:</source>
         <translation>Accento:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="307"/>
+        <location filename="../modules/settings_window.cpp" line="308"/>
         <source>Waveform:</source>
         <translation>Forma d&apos;onda:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="311"/>
+        <location filename="../modules/settings_window.cpp" line="312"/>
         <source>Text:</source>
         <translation>Testo:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="318"/>
+        <location filename="../modules/settings_window.cpp" line="319"/>
         <source>Buttons:</source>
         <translation>Pulsanti:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="330"/>
+        <location filename="../modules/settings_window.cpp" line="331"/>
         <source>Contrast:</source>
         <translation>Contrasto:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="359"/>
+        <location filename="../modules/settings_window.cpp" line="360"/>
         <source>Pick a color</source>
         <translation>Scegli un colore</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="400"/>
+        <location filename="../modules/settings_window.cpp" line="401"/>
         <source>Per-channel reset button resets:</source>
         <translation>Il reset per canale azzera:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="406"/>
+        <location filename="../modules/settings_window.cpp" line="407"/>
         <source>&quot;Reset channels&quot; button resets:</source>
         <translation>Il pulsante &quot;Reset canali&quot; azzera:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="430"/>
+        <location filename="../modules/settings_window.cpp" line="431"/>
         <source>Interface language:</source>
         <translation>Lingua interfaccia:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="432"/>
+        <location filename="../modules/settings_window.cpp" line="433"/>
         <source>Automatic (system language)</source>
         <translation>Automatica (lingua di sistema)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="441"/>
+        <location filename="../modules/settings_window.cpp" line="442"/>
         <source>Italian is selected automatically when the system language is Italian. A change here is applied the next time the plugin loads (reload the plugin or restart TeamSpeak).</source>
         <translation>L&apos;italiano è scelto in automatico se il sistema è in italiano. Una modifica qui si applica al prossimo caricamento del plugin (ricarica il plugin o riavvia TeamSpeak).</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="459"/>
+        <location filename="../modules/settings_window.cpp" line="460"/>
         <source>Language</source>
         <translation>Lingua</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="460"/>
+        <location filename="../modules/settings_window.cpp" line="461"/>
         <source>Audio</source>
         <translation>Audio</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="461"/>
+        <location filename="../modules/settings_window.cpp" line="462"/>
         <source>Channels</source>
         <translation>Canali</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="462"/>
+        <location filename="../modules/settings_window.cpp" line="463"/>
         <source>Button grid</source>
         <translation>Griglia pulsanti</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="463"/>
+        <location filename="../modules/settings_window.cpp" line="464"/>
         <source>Hotkeys</source>
         <translation>Scorciatoie</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="464"/>
+        <location filename="../modules/settings_window.cpp" line="465"/>
         <source>Logging</source>
         <translation>Log</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="465"/>
+        <location filename="../modules/settings_window.cpp" line="466"/>
         <source>Audio sandbox</source>
         <translation>Audio sandbox</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="466"/>
+        <location filename="../modules/settings_window.cpp" line="467"/>
         <source>HRTF dataset (Leia)</source>
         <translation>Dataset HRTF (Leia)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="467"/>
+        <location filename="../modules/settings_window.cpp" line="468"/>
         <source>Profiles</source>
         <translation>Profili</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="468"/>
+        <location filename="../modules/settings_window.cpp" line="469"/>
         <source>Custom theme</source>
         <translation>Tema pers.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="469"/>
+        <location filename="../modules/settings_window.cpp" line="470"/>
         <source>Reset behaviour</source>
         <translation>Comportamento reset</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="470"/>
+        <location filename="../modules/settings_window.cpp" line="471"/>
         <source>Import / Export</source>
         <translation>Importa / Esporta</translation>
     </message>
@@ -3083,12 +3270,12 @@ Da OFF, viene sempre mostrata la forma d&apos;onda grezza.</translation>
         <translation>Cambia</translation>
     </message>
     <message>
-        <location filename="../soundsettings_qt.cpp" line="239"/>
+        <location filename="../soundsettings_qt.cpp" line="240"/>
         <source>Choose File</source>
         <translation>Scegli file</translation>
     </message>
     <message>
-        <location filename="../soundsettings_qt.cpp" line="239"/>
+        <location filename="../soundsettings_qt.cpp" line="240"/>
         <source>Files (*.*)</source>
         <translation>File (*.*)</translation>
     </message>
@@ -3154,6 +3341,39 @@ Da OFF, viene sempre mostrata la forma d&apos;onda grezza.</translation>
         <location filename="../updater.ui" line="39"/>
         <source>Initializing Download</source>
         <translation>Avvio del download</translation>
+    </message>
+</context>
+<context>
+    <name>VersionHistoryDialog</name>
+    <message>
+        <location filename="../modules/version_history_dialog.cpp" line="18"/>
+        <source>Close</source>
+        <translation>Chiudi</translation>
+    </message>
+    <message>
+        <location filename="../modules/version_history_dialog.cpp" line="21"/>
+        <source>Version history</source>
+        <translation>Cronologia versioni</translation>
+    </message>
+    <message>
+        <location filename="../modules/version_history_dialog.cpp" line="32"/>
+        <source>Browse the full change log of every documented release.</source>
+        <translation>Sfoglia il changelog completo di ogni release documentata.</translation>
+    </message>
+    <message>
+        <location filename="../modules/version_history_dialog.cpp" line="66"/>
+        <source>Release notes file is missing from the build.</source>
+        <translation>Il file delle note di rilascio non è incluso nella build.</translation>
+    </message>
+    <message>
+        <location filename="../modules/version_history_dialog.cpp" line="105"/>
+        <source>(no version sections parsed)</source>
+        <translation>(nessuna sezione di versione trovata)</translation>
+    </message>
+    <message>
+        <location filename="../modules/version_history_dialog.cpp" line="137"/>
+        <source>GameBaiters Soundboard v%1</source>
+        <translation>GameBaiters Soundboard v%1</translation>
     </message>
 </context>
 <context>
@@ -3265,22 +3485,22 @@ L&apos;etichetta a destra mostra: trascorso / totale.</translation>
 <context>
     <name>WhatsNewDialog</name>
     <message>
-        <location filename="../modules/whats_new_dialog.cpp" line="62"/>
+        <location filename="../modules/whats_new_dialog.cpp" line="65"/>
         <source>Close</source>
-        <translation type="unfinished">Chiudi</translation>
+        <translation>Chiudi</translation>
     </message>
     <message>
-        <location filename="../modules/whats_new_dialog.cpp" line="65"/>
+        <location filename="../modules/whats_new_dialog.cpp" line="69"/>
         <source>What&apos;s new in GameBaiters Soundboard %1</source>
         <translation>Novità in GameBaiters Soundboard %1</translation>
     </message>
     <message>
-        <location filename="../modules/whats_new_dialog.cpp" line="70"/>
+        <location filename="../modules/whats_new_dialog.cpp" line="74"/>
         <source>Welcome to &lt;b&gt;GameBaiters Soundboard %1&lt;/b&gt;!</source>
         <translation>Benvenuto in &lt;b&gt;GameBaiters Soundboard %1&lt;/b&gt;!</translation>
     </message>
     <message>
-        <location filename="../modules/whats_new_dialog.cpp" line="79"/>
+        <location filename="../modules/whats_new_dialog.cpp" line="83"/>
         <source>(no release notes were bundled for this version)</source>
         <translation>(nessuna release note inclusa per questa versione)</translation>
     </message>

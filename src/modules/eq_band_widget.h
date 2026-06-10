@@ -24,8 +24,11 @@ public:
     // reactive rising-column overlay so the user sees the band react
     // to audio. Smoothed inside the widget to avoid flicker.
     void setLevel(float level01);
-    // Number of segmented LED cells (default 16 - matches the EQ band
-    // count and gives a clean visual rhythm).
+    // Number of segmented LED cells (default 48 - tripled from the
+    // original 16 so every frequency band, including high-end ones
+    // like 16 kHz that rarely peak, has fine-grained visual
+    // resolution and the listener can see the spectrum response of
+    // bands that would otherwise barely register on a coarse meter).
     void setCellCount(int n);
 
 protected:
@@ -43,5 +46,5 @@ private:
 private:
     float m_level     = 0.0f;
     float m_levelShow = 0.0f;     // smoothed for display
-    int   m_cellCount = 16;
+    int   m_cellCount = 48;
 };

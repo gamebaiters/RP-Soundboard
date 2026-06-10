@@ -75,6 +75,12 @@ public:
 	// file. nullptr (default) = no cancellation. Lifetime of the
 	// pointed-to atomic must outlive open().
 	virtual void setCancelToken(std::atomic<bool> *token) { (void)token; }
+	// Streaming-reverse interrogation: returns true once the chunk
+	// worker has buffered at least one decoded chunk so the caller
+	// can swap the new InputFile in without leaving the audio thread
+	// reading from an empty queue. Returns true immediately for input
+	// files that are not in streaming-reverse mode.
+	virtual bool isReverseFirstChunkReady() const { return true; }
 	// Set BEFORE open(): when true the FFmpeg filter graph adds a
 	// `loudnorm` filter targeting -16 LUFS integrated / -1 dBTP peak
 	// so loud cells don't drown quiet ones. EBU R128 single-pass mode

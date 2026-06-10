@@ -5,12 +5,13 @@
  */
 
 #ifdef _WIN32
-#pragma comment(lib, "Delayimp.lib")
-#pragma comment(linker, "/DELAYLOAD:avutil-58.dll")
-#pragma comment(linker, "/DELAYLOAD:swresample-4.dll")
-#pragma comment(linker, "/DELAYLOAD:avcodec-60.dll")
-#pragma comment(linker, "/DELAYLOAD:avformat-60.dll")
-#pragma comment(linker, "/DELAYLOAD:avfilter-9.dll")
+// Static FFmpeg link: no DELAYLOAD pragmas. The shared-build pragmas
+// emitted LNK4229 "directive ignored" warnings on every link because
+// FFmpeg's symbols are baked into the plugin DLL directly. Kept the
+// LoadLibraryEx fallback below in case someone bootstraps a shared-
+// FFmpeg build flavour in the future — the calls are no-ops on the
+// static build (the modules don't exist on disk, LoadLibrary fails
+// silently, FFmpeg's already mapped from the .lib).
 #pragma warning (disable : 4100)  /* Disable Unreferenced parameter warning */
 #include <windows.h>
 #include <string>
@@ -25,11 +26,11 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hinstDLL, _In_ DWORD fdwReason, _In_ LPVOID l
 			if (lastSlash) {
 				*lastSlash = L'\0';
 				std::wstring dir = std::wstring(path) + L"\\rp_soundboard\\";
-				LoadLibraryExW((dir + L"avutil-58.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-				LoadLibraryExW((dir + L"swresample-4.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-				LoadLibraryExW((dir + L"avcodec-60.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-				LoadLibraryExW((dir + L"avformat-60.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-				LoadLibraryExW((dir + L"avfilter-9.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+				LoadLibraryExW((dir + L"avutil-60.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+				LoadLibraryExW((dir + L"swresample-6.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+				LoadLibraryExW((dir + L"avcodec-62.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+				LoadLibraryExW((dir + L"avformat-62.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+				LoadLibraryExW((dir + L"avfilter-11.dll").c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
 			}
 		}
 	}
@@ -361,6 +362,14 @@ void ts3plugin_uninstall()
 		L"\\Airporn.mp3",
 		L"\\Peter Griffin Laugh.mp3",
 		L"\\Spooky.mp3",
+		L"\\avutil-60.dll",
+		L"\\swresample-6.dll",
+		L"\\avcodec-62.dll",
+		L"\\avformat-62.dll",
+		L"\\avfilter-11.dll",
+		// Legacy names from prior FFmpeg 6.1 builds — kept in the
+		// uninstall list so users upgrading from old soundboard
+		// installs still get a clean plugin folder.
 		L"\\avutil-58.dll",
 		L"\\swresample-4.dll",
 		L"\\avcodec-60.dll",

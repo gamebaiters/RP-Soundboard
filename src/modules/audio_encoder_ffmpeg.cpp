@@ -38,16 +38,47 @@ AVCodecID codecFor(AudioEncoderFFmpeg::Format f) {
 }
 
 // Pick a sample format supported by the encoder. The codec's
-// sample_fmts list is canonical; we just take the first entry. For
+// sample-format list is canonical; we just take the first entry. For
 // PCM/FLAC that's S16; for Vorbis/AAC it's FLTP.
+// In FFmpeg 7.1+ AVCodec.sample_fmts is deprecated in favour of
+// avcodec_get_supported_config(AV_CODEC_CONFIG_SAMPLE_FORMAT); the
+// new API is forward-compatible with future codec internals.
 AVSampleFormat pickSampleFmt(const AVCodec *codec) {
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 13, 100)
+    const enum AVSampleFormat *fmts = nullptr;
+    int n = 0;
+    if (avcodec_get_supported_config(nullptr, codec,
+            AV_CODEC_CONFIG_SAMPLE_FORMAT, 0,
+            (const void **)&fmts, &n) >= 0 && fmts && n > 0) {
+        return fmts[0];
+    }
+#else
     if (codec->sample_fmts) return codec->sample_fmts[0];
+#endif
     return AV_SAMPLE_FMT_S16;
 }
 
-// Pick a sample rate supported by the encoder. If supported_samplerates
-// is null all rates are allowed; otherwise pick the closest to wanted.
+// Pick a sample rate supported by the encoder. If the codec lists no
+// constraint, all rates are allowed; otherwise pick the closest to
+// wanted. Same FFmpeg 7.1+ avcodec_get_supported_config migration as
+// pickSampleFmt above.
 int pickSampleRate(const AVCodec *codec, int wanted) {
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 13, 100)
+    const int *rates = nullptr;
+    int n = 0;
+    if (avcodec_get_supported_config(nullptr, codec,
+            AV_CODEC_CONFIG_SAMPLE_RATE, 0,
+            (const void **)&rates, &n) < 0 || !rates || n <= 0) {
+        return wanted;
+    }
+    int best = rates[0];
+    int bestDiff = std::abs(best - wanted);
+    for (int i = 1; i < n; ++i) {
+        int diff = std::abs(rates[i] - wanted);
+        if (diff < bestDiff) { best = rates[i]; bestDiff = diff; }
+    }
+    return best;
+#else
     if (!codec->supported_samplerates) return wanted;
     int best = codec->supported_samplerates[0];
     int bestDiff = std::abs(best - wanted);
@@ -56,6 +87,7 @@ int pickSampleRate(const AVCodec *codec, int wanted) {
         if (diff < bestDiff) { best = *p; bestDiff = diff; }
     }
     return best;
+#endif
 }
 
 } // namespace

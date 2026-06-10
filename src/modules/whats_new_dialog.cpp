@@ -14,42 +14,45 @@ namespace {
 constexpr const char *kLastSeenKey = "lastSeenVersion";
 
 // Pull the section of release-notes.txt for the requested version.
-// Sections are bounded by lines of 60+ '=' characters (CLAUDE.md's
-// release-notes format rule). Returns empty if not found.
+// Sections in release-notes.txt are headed by lines of the form
+//   "GameBaiters Soundboard vX.Y.Z"
+// followed by a '====' underline. We anchor the section start at the
+// header for the requested version and the section end at the NEXT
+// such header (or end of file). The previous implementation relied on
+// '={60,}' separator lines between sections — that broke as soon as
+// a release was cut without an explicit separator, dumping every
+// older version's notes into the dialog along with the current one.
 QString extractSectionFor(const QString &notes, const QString &versionString) {
-    // Strip the leading 'v' from "v2.2.7" if present so we match what
-    // release-notes.txt actually writes ("Soundboard v2.2.7").
-    QString needle = QStringLiteral("Soundboard ") + versionString;
-    int header = notes.indexOf(needle);
-    if (header < 0) {
-        QString withoutV = versionString;
-        if (withoutV.startsWith('v') || withoutV.startsWith('V'))
-            withoutV = withoutV.mid(1);
-        needle = QStringLiteral("Soundboard v") + withoutV;
-        header = notes.indexOf(needle);
-        if (header < 0) return QString();
+    QString withoutV = versionString;
+    if (withoutV.startsWith('v') || withoutV.startsWith('V'))
+        withoutV = withoutV.mid(1);
+    QString headerNeedle = QStringLiteral("GameBaiters Soundboard v") + withoutV;
+    int header = notes.indexOf(headerNeedle);
+    if (header < 0) return QString();
+
+    // sectionStart = first char after the title line.
+    int titleEnd = notes.indexOf(QChar('\n'), header);
+    if (titleEnd < 0) return QString();
+    int sectionStart = titleEnd + 1;
+
+    // Skip the '===' underline right under the title so it does not
+    // show up at the top of the body. An underline is a line that is
+    // non-empty and consists ONLY of '=' characters.
+    int underlineEnd = notes.indexOf(QChar('\n'), sectionStart);
+    if (underlineEnd > sectionStart) {
+        QString line = notes.mid(sectionStart, underlineEnd - sectionStart).trimmed();
+        if (!line.isEmpty() && line.count(QChar('=')) == line.size())
+            sectionStart = underlineEnd + 1;
     }
 
-    int sectionStart = notes.lastIndexOf('\n', header);
-    if (sectionStart < 0) sectionStart = 0; else sectionStart += 1;
-
-    QRegularExpression sep(QStringLiteral("={60,}"));
-    QRegularExpressionMatchIterator it = sep.globalMatch(notes, header);
-    int sectionEnd = notes.length();
-    // The first '=' run after the header line is the underline UNDER
-    // the version title. The SECOND run is the boundary to the next
-    // version section. Find the second match.
-    bool first = true;
-    while (it.hasNext()) {
-        auto m = it.next();
-        if (first) { first = false; continue; }
-        sectionEnd = m.capturedStart();
-        // Pull back to the start of that line so we don't include the
-        // separator itself.
-        int lineStart = notes.lastIndexOf('\n', sectionEnd);
-        if (lineStart >= 0) sectionEnd = lineStart;
-        break;
-    }
+    // sectionEnd = start of the NEXT version header (any X.Y.Z), or
+    // end of file. Robust against missing '={60,}' separators between
+    // sections.
+    QRegularExpression nextHdr(
+        QStringLiteral("^GameBaiters Soundboard v\\d+\\.\\d+\\.\\d+"),
+        QRegularExpression::MultilineOption);
+    QRegularExpressionMatch m = nextHdr.match(notes, sectionStart);
+    int sectionEnd = m.hasMatch() ? m.capturedStart() : notes.length();
     return notes.mid(sectionStart, sectionEnd - sectionStart).trimmed();
 }
 } // namespace
@@ -61,6 +64,7 @@ WhatsNewDialog::WhatsNewDialog(const QString &versionString,
     , m_body(new QTextBrowser(this))
     , m_close(new QPushButton(tr("Close"), this))
 {
+    setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     setProperty("isGBSoundboard", true);
     setWindowTitle(tr("What's new in GameBaiters Soundboard %1").arg(versionString));
     resize(680, 520);

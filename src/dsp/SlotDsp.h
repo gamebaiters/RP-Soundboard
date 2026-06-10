@@ -44,6 +44,11 @@ public:
 
     void setSampleRate(double sr);
     void reset();
+    // Same as reset() but preserves the rotation phase on both paths.
+    // Used by the reverse-toggle swap path so a 3D Rotate / 8D source
+    // doesn't snap back to the front-azimuth start the moment the
+    // user flips direction mid-playback.
+    void resetPreservingRotation();
     void applyState(const SandboxState &s);
 
     // GUI-thread-only Leia bring-up. Calls SpatialLeia::ensureInit on

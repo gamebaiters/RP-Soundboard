@@ -1,5 +1,138 @@
+GameBaiters Soundboard v2.2.10
+==============================
+
+Spatial-engine reshuffle, EQ meter overhaul, reverse-seek dead-worker
+fix, and a zero-warning clean Windows build on top of v2.2.9.
+
+Spatial engine
+--------------
+
+- Leia (measured-HRTF convolution) is now the default 3D engine for
+  every new channel. The legacy Classic parametric engine is kept
+  available as a Settings → Channels preference for users who prefer
+  its lightweight character — the per-channel selector was removed
+  from the sandbox dialog and consolidated under one project-wide
+  default. Existing channels with a per-cell saved engine restore
+  their saved value as before.
+- 8D preset now actually starts from the FRONT azimuth instead of one
+  block-step ahead of it. advanceRotationIfNeeded() (Classic) and
+  updateLeiaDirection() (Leia) both pre-emit at the current rotation
+  phase BEFORE advancing — previously the first block emitted at
+  +dPhase so the orbit perceptibly spawned already off-axis.
+- Toggling Reverse mid-orbit no longer snaps the 8D / 3D Rotate
+  source back to the front-azimuth start. New
+  SlotDsp::resetPreservingRotation() snapshots rotPhase +
+  rotBlockCounter on both audio paths, runs the standard reset
+  (filter delays / ring buffers), and restores rotation so the source
+  continues from where it was when the user flipped direction.
+
+EQ meter
+--------
+
+- Per-band LED segment count tripled from 16 → 48 so high-frequency
+  bands (4 k / 8 k / 16 k) that rarely peak now have fine-grained
+  visual resolution and you can actually see them respond.
+- Band-level computation rewritten from MEAN to PEAK magnitude
+  across the 2/3-octave window. Mean across 150+ FFT bins for a high
+  band (16 k) gave ~1 % meter response on a full-scale sine because
+  the signal energy in 1-3 bins was averaged across the whole window.
+  Peak keeps band-shape sharp regardless of bin count and lets even
+  loud broadband material light the strip to the top.
+- Headroom recalibrated: full-scale sine through the Hann window now
+  hits ~1.0 (saturation), realistic loud material (-6 dBFS RMS, peak
+  near 0 dBFS) reaches the top of the strip cleanly. Was previously
+  capped around ~30 % even on extreme earrape.
+
+Reverse playback
+----------------
+
+- Repeatedly clicking around on the waveform during reverse playback
+  no longer eventually kills the audio. The chunk worker branches at
+  cursor<=minF AND at consecutive-empty-cap now PARK on the condvar
+  with restart-pending instead of breaking out — seek can revive the
+  worker. The previous design left the worker dead the moment any
+  one seek landed near minF, queue then stayed empty,
+  producer-thread saw done flag → readSamples flipped m_done = true
+  → slot terminated even though the user wanted to keep playing.
+- seek() in streaming-reverse mode now clears m_chunkWorkerDone in
+  addition to wiping the queue, so a previously-parked worker is
+  woken up on the next click + the audio pipeline doesn't latch
+  m_done = true between the seek and the queue refill.
+
+Warning-free build
+------------------
+
+- AVCodec::sample_fmts + AVCodec::supported_samplerates migrated to
+  avcodec_get_supported_config(AV_CODEC_CONFIG_SAMPLE_FORMAT /
+  SAMPLE_RATE). New API gated on
+  LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 13, 100) so FFmpeg
+  7.1+ (Windows static, macOS Homebrew) uses it; FFmpeg 6.1 (Linux
+  ubuntu-24.04 system) falls through to the deprecated fields path.
+- MSVC: _CRT_SECURE_NO_WARNINGS + _CRT_NONSTDC_NO_WARNINGS to mute
+  the dozen-or-so POSIX-CRT-name C4996 noises (fopen / sprintf /
+  strdup / strtok / strcpy / localtime). All affected sites operate
+  on internal-only data, so the Windows-secure variants would add
+  noise without security benefit.
+- MSVC: /wd4267 (size_t -> int truncation in SampleBuffer.h —
+  bounded by ring size, always < INT_MAX), /wd4005 (NOMINMAX dup
+  redefinition).
+- /DELAYLOAD pragmas in plugin.cpp removed — they pointed at FFmpeg
+  DLLs that don't exist in the static build, emitting LNK4229 on
+  every link. LoadLibraryEx fallback kept for the case where the
+  build flavour ever switches back to shared FFmpeg.
+- /NODEFAULTLIB:libcmt added so the FFmpeg static archives' /MT CRT
+  reference doesn't fight the plugin's /MD CRT (LNK4098).
+- Net result: zero plugin warnings on a clean Windows build.
+
+
 GameBaiters Soundboard v2.2.9
 =============================
+
+Reverse-playback overhaul + bundled FFmpeg bump (n6.1.1 → n8.1.1) on top
+of v2.2.8.
+
+Reverse-playback overhaul
+-------------------------
+
+- Streaming-reverse decoder. The old whole-file pre-decode pass
+  (m_reverseBuf) is replaced by a chunk worker that decodes the file
+  backward in 3-second chunks anchored at the cursor. Memory cap per
+  slot is ~1.7 MB regardless of source length (was: whole file, ~57 MB
+  for a 5-minute stereo MP3).
+- Cursor starts at file end on reverse-from-open. Was seeded to
+  cropStart and the rate-limiter pinned the displayed cursor at the
+  start position while audio played backward — fixed by seeding from
+  the decoder (which open() sets to cropEnd / file length on the
+  reverse path).
+- New audioReverse slot flag mirrors `sound.reverse ||
+  channelReverse`. Cursor branch and rate-limit guard read this
+  instead of channelReverse-only, so per-CELL reverse cells now also
+  hit the reverse cursor path (previously fell into the forward
+  branch + monotonic-up clamp → cursor pinned at start).
+- Larger chunks for cleaner seams. CHUNK_SEC bumped 0.5 s → 3.0 s.
+  atempo filter state is reset on every chunk seek, so previously
+  there was a seam every 500 ms — now one per 3 s. Worker decode
+  budget (~80-200 ms per chunk) is 15-30× safer relative to chunk
+  runtime, so the queue never drains under playback.
+- Queue cap MAX_QUEUE_CHUNKS 8 → 3. Same total buffer (~9 s) with
+  fewer transient allocations.
+
+FFmpeg n6.1.1 → n8.1.1
+----------------------
+
+- Static FFmpeg upgraded to 8.1.1 'Hoare' (5 May 2026) on Windows.
+  ABI bump: avutil 58→60, avcodec 60→62, avformat 60→62, avfilter
+  9→11, swresample 4→6. DLL names + uninstall list updated.
+- All ch_layout / AVChannelLayout / swr_alloc_set_opts2 API paths
+  already gated on LIBAVCODEC_VERSION_INT >= 59.37.100 from the v2.2.7
+  encoder rewrite — the legacy `channels` / `channel_layout` fields
+  branch is now dead code in every shipping configuration.
+- Cache key bumped to ffmpeg-static-msvc-x64-n8.1.1-v6-ffmpeg8 so the
+  GitHub Actions cache + local .recipe-version both force a clean
+  rebuild on first run.
+- Linux CI still uses ubuntu-24.04's system FFmpeg 6.1 (avcodec 60
+  also satisfies the gate). macOS uses Homebrew (auto-tracks latest
+  8.x). No source changes needed for either.
 
 Instant reverse-toggle release on top of v2.2.8. The Reverse button on
 the waveform player no longer freezes TeamSpeak while the file is

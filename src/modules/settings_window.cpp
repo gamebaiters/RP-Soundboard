@@ -3,6 +3,8 @@
 #include "../style_helper.h"
 #include "../ExpandableSection.h"
 #include "theme.h"
+#include "channel_sandbox_dialog.h"   // SandboxEnginePref
+#include "../dsp/SandboxState.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -102,6 +104,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     , m_resetAllFiles(new QCheckBox(tr("Loaded files"), this))
     , m_resetAllSandbox(new QCheckBox(tr("Audio sandbox settings"), this))
 {
+    setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     setWindowTitle(tr("Soundboard Settings"));
     setModal(false);
     setProperty("isGBSoundboard", true);
@@ -168,6 +171,40 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         "When ON, a sound that has a per-cell crop start and/or end point\n"
         "shows coloured markers on the waveform at those positions.\n"
         "Only the points that are actually set are drawn."), this));
+
+    // ---- 3D HRTF engine (default for new channels) ----
+    // The Classic parametric engine is deprecated but kept available
+    // for users who prefer its lightweight character. Default is
+    // Leia for every new channel; selection here writes the
+    // SandboxEnginePref QSettings key which Channel ctor reads on
+    // creation. Existing channels with a per-cell saved engine
+    // restore their saved value regardless of this default.
+    {
+        auto *engRow = new QHBoxLayout;
+        engRow->setContentsMargins(0, 0, 0, 0);
+        engRow->setSpacing(6);
+        engRow->addWidget(new QLabel(tr("Default 3D HRTF engine for new channels:"), this));
+        auto *engBox = new QComboBox(this);
+        engBox->addItem(tr("Leia (measured HRTF) - recommended"));
+        engBox->addItem(tr("Classic (parametric, deprecated)"));
+        const int saved = SandboxEnginePref::load();
+        engBox->setCurrentIndex(saved == SandboxState::Engine_Classic ? 1 : 0);
+        connect(engBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [](int idx) {
+            SandboxEnginePref::save(idx == 1
+                ? SandboxState::Engine_Classic
+                : SandboxState::Engine_Leia);
+        });
+        engRow->addWidget(engBox, 1);
+        engRow->addWidget(new HelpBubble(tr(
+            "Leia uses measured-HRTF convolution with image-source room\n"
+            "reflections - correct front/back localisation and a far more\n"
+            "convincing sense of space. Classic is the older parametric\n"
+            "Brown-Duda engine; kept for users who prefer its lighter\n"
+            "character. The choice applies to new channels; existing\n"
+            "channels keep their per-cell saved engine."), this));
+        channelsLay->addLayout(engRow);
+    }
 
     // ============== Button grid section ==============
     auto *gridLay = new QFormLayout;

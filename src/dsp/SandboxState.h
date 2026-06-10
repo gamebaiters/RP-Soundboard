@@ -91,7 +91,12 @@ struct SandboxState
     // spatialEngine applies to every 3D HRTF mode (Manual / Rotate /
     // 8D preset). L/R Pan and Off ignore it. The leia* fields are read
     // only when spatialEngine == Engine_Leia.
-    int   spatialEngine  = Engine_Classic;
+    // Default: Leia (measured-HRTF convolution). Classic remains
+    // available via Settings → Channels for users who prefer the
+    // legacy parametric Brown-Duda engine, but Leia is the user-facing
+    // default because it produces dramatically more convincing 3D
+    // imaging on every HRTF mode (Manual / Rotate / 8D).
+    int   spatialEngine  = Engine_Leia;
     bool  leiaReflEnable = true;        // image-source room reflections
     float leiaReflLevel  = -6.0f;       // dB, -25..20
     float leiaRoomSize   = 12.0f;       // m, 7..50

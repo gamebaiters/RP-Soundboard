@@ -34,6 +34,7 @@ UpdaterWindow::UpdaterWindow( QWidget *parent /*= 0*/ ) :
 	m_canceled(false),
 	m_success(false)
 {
+	setWindowFlag(Qt::WindowContextHelpButtonHint, false);
 	ui->setupUi(this);
 	this->setStyleSheet(StyleHelper::loadDarkStyle());
 	connect(ui->buttonBox, SIGNAL(clicked(QAbstractButton*)), this, SLOT(onClickedCancel(QAbstractButton*)));

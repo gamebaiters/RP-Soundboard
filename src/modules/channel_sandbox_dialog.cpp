@@ -44,7 +44,7 @@ constexpr const char *kPreferredEngineKey = "sandbox/preferred_engine";
 namespace SandboxEnginePref {
 int load() {
     QSettings s("GameBaiters", "Soundboard");
-    return s.value(kPreferredEngineKey, SandboxState::Engine_Classic).toInt();
+    return s.value(kPreferredEngineKey, SandboxState::Engine_Leia).toInt();
 }
 void save(int engine) {
     QSettings s("GameBaiters", "Soundboard");
@@ -114,6 +114,7 @@ ChannelSandboxDialog::ChannelSandboxDialog(int channelId, QWidget *parent)
     : QDialog(parent)
     , m_channelId(channelId)
 {
+    setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     setProperty("isGBSoundboard", true);
     setModal(false);
     refreshTitle();
@@ -281,29 +282,19 @@ void ChannelSandboxDialog::buildUi()
         auto *l = new QVBoxLayout(m_hrtfGroup);
 
         // HRTF engine selector - applies to every 3D mode.
-        {
-            auto *engRow = new QWidget(m_hrtfGroup);
-            auto *eh = new QHBoxLayout(engRow);
-            eh->setContentsMargins(0, 0, 0, 0);
-            auto *engLbl = new QLabel(tr("HRTF engine"), engRow);
-            engLbl->setStyleSheet("font-weight: bold;");
-            eh->addWidget(engLbl);
-            m_engineBox = new QComboBox(engRow);
-            m_engineBox->addItem(tr("Classic (parametric)"));
-            m_engineBox->addItem(tr("Leia (measured HRTF)"));
-            m_engineBox->setSizeAdjustPolicy(
-                QComboBox::AdjustToMinimumContentsLengthWithIcon);
-            m_engineBox->setMinimumContentsLength(6);
-            eh->addWidget(m_engineBox, 1);
-            eh->addWidget(new HelpBubble(tr(
-                "Classic: the original lightweight parametric HRTF.\n"
-                "Leia: convolution with a measured HRTF dataset plus\n"
-                "image-source room reflections - correct front/back\n"
-                "localisation and a far more convincing sense of space.\n"
-                "If the Leia data cannot load, playback falls back to\n"
-                "Classic automatically."), engRow));
-            l->addWidget(engRow);
-        }
+        // HRTF engine selector lives in Settings → Channels now
+        // (Leia is the new default for every cell). A hidden combo
+        // box stays in the layout but is parented out + invisible so
+        // every existing connect()/signal path keeps compiling
+        // without #ifdef noise. The Settings window writes
+        // SandboxEnginePref::save() which Channel ctor pulls in on
+        // every new sound, and pushStateToWidgets() still mirrors
+        // m_state.spatialEngine onto m_engineBox so existing widget
+        // wiring (load8DPreset, pad updates) keeps functioning.
+        m_engineBox = new QComboBox(this);
+        m_engineBox->addItem(tr("Classic (parametric)"));
+        m_engineBox->addItem(tr("Leia (measured HRTF)"));
+        m_engineBox->hide();
 
         m_padContainer = new QWidget(m_hrtfGroup);
         auto *padLay = new QVBoxLayout(m_padContainer);
@@ -1872,9 +1863,16 @@ void ChannelSandboxDialog::pushStateToWidgets()
     m_spatialMixLabel->setText(QString::number(m_spatialMix->value()) + "%");
     m_ambience->setValue(static_cast<int>(m_state.reverbWet * 100.0f));
     m_ambienceLabel->setText(QString::number(m_ambience->value()) + "%");
-    if (m_engineBox)
+    if (m_engineBox) {
+        // The combo is hidden — the user can only change the engine
+        // default from Settings → Channels. Block signals so the index
+        // sync below does not call back into onEngineChanged() and
+        // accidentally overwrite the QSettings preferred-engine seed
+        // with the per-cell engine of the channel being opened.
+        QSignalBlocker blocker(m_engineBox);
         m_engineBox->setCurrentIndex(
             m_state.spatialEngine == SandboxState::Engine_Leia ? 1 : 0);
+    }
     if (m_leiaRefl) m_leiaRefl->setChecked(m_state.leiaReflEnable);
     if (m_leiaReflLevel) {
         m_leiaReflLevel->setValue(static_cast<int>(m_state.leiaReflLevel));

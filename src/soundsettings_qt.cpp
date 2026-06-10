@@ -36,6 +36,7 @@ SoundSettingsQt::SoundSettingsQt(const SoundInfo &soundInfo, size_t buttonId, QW
 	m_iconPlay(":/icon/img/playarrow_32.png"),
 	m_iconStop(":/icon/img/stoparrow_32.png")
 {
+	setWindowFlag(Qt::WindowContextHelpButtonHint, false);
 	m_soundview = new SoundView(this);
 	m_soundview->setObjectName(QStringLiteral("soundview"));
 	m_soundview->setSizePolicy(QSizePolicy(QSizePolicy::Preferred, QSizePolicy::MinimumExpanding));

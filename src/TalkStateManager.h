@@ -58,6 +58,11 @@ private slots:
 	// which can flip CLIENT_INPUT_DEACTIVATED back to INPUT_DEACTIVATED
 	// when the user releases the PTT key mid-playback.
 	void onContTransWatchdog();
+	// Post-restore verifier: fires at 80 / 220 / 500 ms after
+	// setTalkTransMode to catch any TS3 async flip of CLIENT_INPUT_DEACTIVATED
+	// or vad that lands AFTER our final flush. Closes the "PTT decays
+	// to VAD after sound stop" race on PTT-only servers.
+	void onRestoreVerify();
 
 private:
 	bool anySlotStillPlaying() const;
@@ -67,7 +72,7 @@ private:
 	// TS3's VAD module can get stuck after a vad=false/vad=true ping-pong
 	// (the side effect of forcing CONT_TRANS then restoring), so cycle it
 	// explicitly when we restore a VAD-enabled mode.
-	void forceVadReinit(uint64 scHandlerID);
+	void forceVadReinit(uint64 scHandlerID, talk_state_e target);
 	// After restoring talk state, verify CLIENT_INPUT_DEACTIVATED matches
 	// the target and re-assert if TS3 hasn't actually propagated our
 	// last flush. Without this, a stale read on the next setPlayTransMode
@@ -85,5 +90,12 @@ private:
 	uint64 playingServerId;
 	Sampler *m_sampler;
 	QTimer m_contTransWatchdog;
+	// Post-restore verify state. Armed by setTalkTransMode, ticks 3
+	// times (80 / 220 / 500 ms) and re-applies the target if TS3 has
+	// drifted. Cleared on new playback / disconnect.
+	QTimer       m_restoreTimer;
+	talk_state_e m_restoreTarget   = TS_INVALID;
+	uint64       m_restoreServer   = 0;
+	int          m_restoreAttempts = 0;
 
 };

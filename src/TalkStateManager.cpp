@@ -44,6 +44,13 @@ TalkStateManager::TalkStateManager() :
 	m_contTransWatchdog.setSingleShot(false);
 	QObject::connect(&m_contTransWatchdog, &QTimer::timeout,
 		this, &TalkStateManager::onContTransWatchdog);
+	// Post-restore verify timer: setTalkTransMode arms this single-shot
+	// timer so any async TS3 flip 50-500 ms after our restore flush is
+	// caught and the user's actual target state (PTT / VAD / PTT_WITH_VA)
+	// is re-applied. Three fire windows cover every observed delay.
+	m_restoreTimer.setSingleShot(true);
+	QObject::connect(&m_restoreTimer, &QTimer::timeout,
+		this, &TalkStateManager::onRestoreVerify);
 }
 
 
@@ -69,6 +76,13 @@ void TalkStateManager::onStartPlaying(int slot, bool preview, QString filename)
 	// global preview-only switch as if every sound was a preview.
 	if (!preview && !g_rpsbPreviewOnly)
 	{
+		// A new sound starting cancels any in-flight post-restore
+		// verify from a previous sound — playback ownership of the
+		// talk state passes to setPlayTransMode now.
+		m_restoreTimer.stop();
+		m_restoreTarget   = TS_INVALID;
+		m_restoreServer   = 0;
+		m_restoreAttempts = 0;
 		playingServerId = activeServerId;
 		setPlayTransMode();
 	}
@@ -155,15 +169,29 @@ void TalkStateManager::setTalkTransMode()
 	// VAD module in a stuck state where voice no longer triggers
 	// transmission until the user mute+unmutes manually.
 	if (ts == TS_VOICE_ACTIVATION || ts == TS_PTT_WITH_VA)
-		forceVadReinit(srv);
+		forceVadReinit(srv, ts);
 	// Final safety net: re-read CLIENT_INPUT_DEACTIVATED and re-assert
 	// if TS3 didn't actually apply our last write. Catches the case
 	// where the watchdog re-asserted INPUT_ACTIVE one tick before the
 	// restore landed.
 	verifyInputDeactivated(srv, ts);
+	// Arm a short restore-verify pass: TS3 occasionally flips
+	// CLIENT_INPUT_DEACTIVATED back to INPUT_ACTIVE 50-200 ms AFTER our
+	// final flush (the PTT-up handler races our restore on PTT
+	// channels, side-effect of forceVadReinit on PTT_WITH_VA). The
+	// previously observed failure mode was a PTT-required room where
+	// the talk mode "decayed" to VAD after sound stop. Re-running the
+	// full setTalkState write at 80 / 220 / 500 ms catches every
+	// observed TS3 flip window without any noticeable user impact —
+	// once the state is sticky the redundant writes are no-ops on
+	// the TS3 side.
+	m_restoreTarget    = ts;
+	m_restoreServer    = srv;
+	m_restoreAttempts  = 0;
+	m_restoreTimer.start(80);
 }
 
-void TalkStateManager::forceVadReinit(uint64 scHandlerID)
+void TalkStateManager::forceVadReinit(uint64 scHandlerID, talk_state_e target)
 {
 	if (scHandlerID == 0)
 		return;
@@ -174,6 +202,19 @@ void TalkStateManager::forceVadReinit(uint64 scHandlerID)
 	ts3Functions.setPreProcessorConfigValue(scHandlerID, "vad", "false");
 	ts3Functions.flushClientSelfUpdates(scHandlerID, NULL);
 	ts3Functions.setPreProcessorConfigValue(scHandlerID, "vad", "true");
+	ts3Functions.flushClientSelfUpdates(scHandlerID, NULL);
+	// Re-write CLIENT_INPUT_DEACTIVATED to match the TARGET state.
+	// The vad-cycle above can cause TS3 to silently flip INPUT to
+	// ACTIVE as a side effect of re-creating the VAD module (vad=true
+	// is "VAD on" which TS3 conventionally pairs with INPUT_ACTIVE).
+	// Without this re-assertion a user who was in TS_PTT_WITH_VA ends
+	// up in TS_VOICE_ACTIVATION (vad=true + INPUT_ACTIVE) after the
+	// soundboard finishes — the recurring "PTT decays to VAD" bug
+	// reported on PTT-only servers.
+	int inVal = (target == TS_CONT_TRANS || target == TS_VOICE_ACTIVATION)
+		? INPUT_ACTIVE : INPUT_DEACTIVATED;
+	ts3Functions.setClientSelfVariableAsInt(scHandlerID,
+		CLIENT_INPUT_DEACTIVATED, inVal);
 	ts3Functions.flushClientSelfUpdates(scHandlerID, NULL);
 }
 
@@ -385,6 +426,41 @@ void TalkStateManager::onClientStopsTalking()
 		setPlayTransMode();
 }
 
+//---------------------------------------------------------------
+// Purpose: Post-restore verify tick. setTalkTransMode arms this at
+// 80 ms. We re-read TS3 and if the observed state has drifted from
+// the user's target we re-apply it. Re-arms at 220 ms and 500 ms so
+// every TS3 async-flip window (PTT-up handler races, deferred VAD
+// reactions) gets caught without busy polling.
+//---------------------------------------------------------------
+void TalkStateManager::onRestoreVerify()
+{
+	if (m_restoreTarget == TS_INVALID || m_restoreServer == 0)
+		return;
+	if (currentTalkState == TS_CONT_TRANS)
+		return; // playback re-started, abandon the verify
+	talk_state_e observed = getTalkState(m_restoreServer);
+	if (observed != m_restoreTarget && observed != TS_INVALID) {
+		logDebug("TSMGR: restore-verify drift attempt=%d observed=%s target=%s, re-applying",
+			m_restoreAttempts, toString(observed), toString(m_restoreTarget));
+		setTalkState(m_restoreServer, m_restoreTarget);
+		if (m_restoreTarget == TS_VOICE_ACTIVATION
+		 || m_restoreTarget == TS_PTT_WITH_VA)
+			forceVadReinit(m_restoreServer, m_restoreTarget);
+	}
+	++m_restoreAttempts;
+	if (m_restoreAttempts == 1)
+		m_restoreTimer.start(140); // 80 + 140 = 220 ms after restore
+	else if (m_restoreAttempts == 2)
+		m_restoreTimer.start(280); // 220 + 280 = 500 ms after restore
+	else {
+		m_restoreTarget   = TS_INVALID;
+		m_restoreServer   = 0;
+		m_restoreAttempts = 0;
+	}
+}
+
+
 void TalkStateManager::onConnectionLost()
 {
 	// Drop active state without calling ts3Functions - on disconnect /
@@ -392,6 +468,10 @@ void TalkStateManager::onConnectionLost()
 	// any setClientSelfVariable / flushClientSelfUpdates call from us
 	// will reach freed pointers in directsound_win64.dll / WASAPI.
 	m_contTransWatchdog.stop();
+	m_restoreTimer.stop();
+	m_restoreTarget   = TS_INVALID;
+	m_restoreServer   = 0;
+	m_restoreAttempts = 0;
 	previousTalkState = TS_INVALID;
 	currentTalkState = TS_INVALID;
 	playingServerId = 0;

@@ -219,6 +219,25 @@ target_include_directories(rp_soundboard_fx PRIVATE "${mysofa_SOURCE_DIR}/src/hr
 # Required by the new audio-sandbox DSP modules so M_PI is defined when
 # they include <cmath> on MSVC.
 target_compile_definitions(rp_soundboard_fx PRIVATE _USE_MATH_DEFINES NOMINMAX)
+# Mute MSVC's C4996 noise from POSIX-style CRT names (fopen / sprintf /
+# strdup / strtok / strcpy / localtime). The plugin is not exposed to
+# untrusted input via these paths — fopen for the local debug log,
+# strdup/strtok for parsing a known-format internal config string,
+# sprintf for fixed-format numeric formatting. C4267 (size_t -> int
+# truncation in SampleBuffer.h) is muted globally because the size()
+# values are bounded by SampleBuffer's own ring size (always < INT_MAX).
+if (MSVC)
+    target_compile_definitions(rp_soundboard_fx PRIVATE
+        _CRT_SECURE_NO_WARNINGS
+        _CRT_NONSTDC_NO_WARNINGS)
+    target_compile_options(rp_soundboard_fx PRIVATE /wd4267 /wd4005)
+    # FFmpeg static archives drag in /MT (libcmt) symbols while the
+    # plugin builds /MD (msvcrt). The LNK4098 warning is benign for our
+    # workload (the FFmpeg-static archives never alloc/free across the
+    # CRT boundary that matters), so explicitly tell the linker the MT
+    # CRT loses to the MD one. Cleaner than living with the warning.
+    target_link_options(rp_soundboard_fx PRIVATE /NODEFAULTLIB:libcmt)
+endif()
 set_target_properties(rp_soundboard_fx PROPERTIES
 	PREFIX ""
 	SUFFIX ${libSuffix}

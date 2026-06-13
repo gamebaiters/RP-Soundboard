@@ -18,6 +18,17 @@
 
 #include "SampleProducer.h"
 
+// FIFO sample buffer with an amortised-O(1) consume.
+//
+// Storage is a flat vector plus a read offset: consume() only advances
+// m_readPos (no erase, no memmove on the audio thread); produce()
+// appends, and compacts the dead head region once it grows past half
+// the live data. The previous implementation erased from the front of
+// the vector on EVERY consume, which moved up to ~1 MB of samples per
+// audio callback per slot - measurable as audio-thread CPU burn.
+//
+// Locking contract unchanged: callers hold getMutex() around every
+// accessor (the audio path takes SampleBuffer::Lock explicitly).
 class SampleBuffer : public SampleProducer
 {
 public:
@@ -40,45 +51,33 @@ public:
 	SampleBuffer(int channels, size_t maxSize = 0);
 
 	//Set the callback that is called when samples are placed into the buffer (produced)
-	inline void setOnProduce(ProduceCallback *cb) { 
-		assert(!m_mutex.try_lock() && "Mutex not locked");
+	inline void setOnProduce(ProduceCallback *cb) {
 		m_cbProd = cb;
-	}
-
-	//Get the callback that is called when samples are placed into the buffer (produced)
-	inline ConsumeCallback *getOnProduce() const {
-		assert(!m_mutex.try_lock() && "Mutex not locked");
-		return m_cbCons;
 	}
 
 	//Set the callback that is called when samples are read from the buffer (consumed)
 	inline void setOnConsume(ConsumeCallback *cb) {
-		assert(!m_mutex.try_lock() && "Mutex not locked");
 		m_cbCons = cb;
 	}
 
 	//Get the callback that is called when samples are read from the buffer (consumed)
 	inline ConsumeCallback *getOnConsume() const {
-		assert(!m_mutex.try_lock() && "Mutex not locked");
 		return m_cbCons;
 	}
 
 	//Get the number of available samples
 	//One sample is (2 * channels) bytes in size
-	inline int avail() const { 
-		assert(!m_mutex.try_lock() && "Mutex not locked");
-		return m_buf.size() / m_channels; 
+	inline int avail() const {
+		return (int)((m_buf.size() - m_readPos) / m_channels);
 	}
 
 	//Return the number of channels this buffer was initialized with
 	inline int channels() const {
-		assert(!m_mutex.try_lock() && "Mutex not locked");
 		return m_channels;
 	}
 
 	//Return max size as set
 	inline size_t maxSize() const {
-		assert(!m_mutex.try_lock() && "Mutex not locked");
 		return m_maxSize;
 	}
 
@@ -97,15 +96,15 @@ public:
 
 	//Get size of a sample in bytes
 	inline int sampleSize() const {
-		assert(!m_mutex.try_lock() && "Mutex not locked");
-		return 2 * m_channels;
+		return (int)sizeof(short) * m_channels;
 	}
 
-	//Directly return bare memory adress
-	//Be careful!
+	//Directly return bare memory address of the FIRST unconsumed sample.
+	//Be careful! Pointer is invalidated by produce() (compaction /
+	//reallocation) - only valid while the caller holds the mutex and
+	//performs no produce in between.
 	inline short *getBufferData() {
-		assert(!m_mutex.try_lock() && "Mutex not locked");
-		return m_buf.data();
+		return m_buf.data() + m_readPos;
 	}
 
 	inline const std::mutex &getMutex() const {
@@ -118,14 +117,17 @@ public:
 
 	//Clear the buffer
 	inline void clear() {
-		assert(!m_mutex.try_lock() && "Mutex not locked");
 		m_buf.clear();
+		m_readPos = 0;
 	}
 
 private:
+	void compactIfNeeded();
+
 	const int m_channels;
 	const size_t m_maxSize;
 	std::vector<short> m_buf;
+	size_t m_readPos = 0;   // index (in shorts) of first unconsumed sample
 	mutable std::mutex m_mutex;
 	ProduceCallback *m_cbProd;
 	ConsumeCallback *m_cbCons;

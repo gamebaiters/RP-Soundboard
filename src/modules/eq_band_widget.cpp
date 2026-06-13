@@ -70,8 +70,11 @@ void EqBandWidget::setLevel(float v)
 
 void EqBandWidget::setCellCount(int n)
 {
-    if (n < 4) n = 4;
-    if (n > 32) n = 32;
+    // Upper clamp must stay >= the 48-cell default (header) - the old
+    // 32 cap would have silently made the default unreachable for any
+    // future caller.
+    if (n < 4)  n = 4;
+    if (n > 64) n = 64;
     m_cellCount = n;
     update();
 }
@@ -131,9 +134,24 @@ void EqBandWidget::paintEvent(QPaintEvent *)
             c.setRgb(r, g, b);
             c.setAlpha(180 + (int)(65 * lit));
         } else {
-            // Above thumb (cut): very dim regardless of audio.
-            c.setRgb(base.red()/4, base.green()/4, base.blue()/4);
-            c.setAlpha(95);
+            // Above thumb (cut): same audio-driven level response but at
+            // strongly reduced saturation. Idle = dim outline (slightly
+            // brighter than the previous flat dim so the cells stay
+            // visible at rest). Active = halfway between idle and full
+            // base colour, never reaching the brightness of the below-
+            // thumb zone. This communicates "audio is here but the band
+            // is cut" - the cells are still readable as a spectrum.
+            QColor idle(base.red()/4,
+                        base.green()/4,
+                        base.blue()/4);
+            QColor activeDim((base.red()   + idle.red())   / 2,
+                             (base.green() + idle.green()) / 2,
+                             (base.blue()  + idle.blue())  / 2);
+            int r = (int)(idle.red()   + (activeDim.red()   - idle.red())   * lit);
+            int g = (int)(idle.green() + (activeDim.green() - idle.green()) * lit);
+            int b = (int)(idle.blue()  + (activeDim.blue()  - idle.blue())  * lit);
+            c.setRgb(r, g, b);
+            c.setAlpha(110 + (int)(60 * lit));
         }
         p.setBrush(c);
         p.setPen(Qt::NoPen);
@@ -145,7 +163,9 @@ void EqBandWidget::paintEvent(QPaintEvent *)
     }
 
     // Rising column: brighter overlay capped by smoothed level. Only
-    // fires when audio is actually playing (lit > 0.01).
+    // fires when audio is actually playing (lit > 0.01). Above-thumb
+    // cells in the meter range get a DIM ghost overlay so the user can
+    // still read the spectrum even on a heavily cut band.
     if (lit > 0.01f) {
         int levelH = (int)(lit * trackH);
         for (int i = 0; i < n; ++i) {
@@ -155,13 +175,19 @@ void EqBandWidget::paintEvent(QPaintEvent *)
             int yMid = yTop + (int)(cellH * 0.5f);
             int meterTop = trackY + trackH - levelH;
             if (yBot < meterTop) continue;
-            // Only paint the column INSIDE the lit (below-thumb) zone -
-            // a column rising above the cut threshold would contradict
-            // the visual statement of the slider.
-            if (yMid < thumbY) continue;
+            const bool above = (yMid < thumbY);
             QColor base = stopColor(tCell);
-            QColor hiC = base.lighter(170);
-            hiC.setAlpha(220);
+            QColor hiC;
+            if (above) {
+                // Above-thumb ghost: darker base, low alpha. Still gives
+                // the impression "the cursor is below this cell but the
+                // spectrum is visible".
+                hiC = base.darker(170);
+                hiC.setAlpha(120);
+            } else {
+                hiC = base.lighter(170);
+                hiC.setAlpha(220);
+            }
             p.setBrush(hiC);
             p.setPen(Qt::NoPen);
             p.drawRoundedRect(QRectF(trackX + 1, yTop, trackW - 2, cellH),

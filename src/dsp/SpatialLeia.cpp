@@ -30,21 +30,19 @@ QString resolveSofaPath()
     // Custom-SOFA override: user can point the Leia engine at any
     // personalised HRTF dataset via QSettings("GameBaiters","Soundboard")
     // key "leia/custom_sofa_path". When set and the file exists, it
-    // wins over the bundled default. The lookup is cached the FIRST
-    // time we resolve so the audio-thread path through ensureInit
-    // (which can fire on a slot's first Leia block as a fallback)
-    // never hits QSettings disk I/O.
-    static bool customChecked = false;
-    static QString customCached;
-    if (!customChecked) {
+    // wins over the bundled default. Re-read on every resolve (the
+    // call only happens inside ensureInit, i.e. on the GUI thread at
+    // engine bring-up, so the QSettings I/O is off the audio path) -
+    // the previous once-per-process cache meant changing the key
+    // silently required a full TS3 restart.
+    {
         QSettings sset(QStringLiteral("GameBaiters"),
                        QStringLiteral("Soundboard"));
-        customCached = sset.value(QStringLiteral("leia/custom_sofa_path"))
-                          .toString();
-        customChecked = true;
+        QString custom = sset.value(QStringLiteral("leia/custom_sofa_path"))
+                             .toString();
+        if (!custom.isEmpty() && QFile::exists(custom))
+            return custom;
     }
-    if (!customCached.isEmpty() && QFile::exists(customCached))
-        return customCached;
 
     if (!cached.isEmpty())
         return cached;

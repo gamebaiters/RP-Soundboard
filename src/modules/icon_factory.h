@@ -18,5 +18,6 @@ QIcon stop(const QColor &c    = QColor(0xD9, 0x53, 0x4F));   // red
 QIcon reload(const QColor &c  = QColor(0x52, 0x9F, 0xD9));   // blue
 QIcon sandbox(const QColor &c = QColor(0xB1, 0x7F, 0xD4));   // violet
 QIcon reverse(const QColor &c = QColor(0xE6, 0x9A, 0x3C));   // orange, left-pointing triangle + bar
+QIcon clear(const QColor &c   = QColor(0xD9, 0x53, 0x4F));   // red filled circle + white X
 
 }

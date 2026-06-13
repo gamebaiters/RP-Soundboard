@@ -119,8 +119,26 @@ Derived derive(const Colors &cIn) {
 
 Colors colors() { return active(); }
 
+// Memoised derive() of the ACTIVE palette. derive() runs a couple dozen
+// HSL conversions; widgets that need derived colours in paintEvent
+// (SoundView at 30 Hz per channel) read this cache instead of paying
+// the recompute on every repaint. Invalidated by setColors().
+namespace {
+Derived &derivedCache() { static Derived d; return d; }
+bool    &derivedCacheValid() { static bool v = false; return v; }
+}
+
+const Derived &derivedCached() {
+    if (!derivedCacheValid()) {
+        derivedCache() = derive(active());
+        derivedCacheValid() = true;
+    }
+    return derivedCache();
+}
+
 void setColors(const Colors &c) {
     active() = c;
+    derivedCacheValid() = false;
     refreshAllThemedWidgets();
 }
 

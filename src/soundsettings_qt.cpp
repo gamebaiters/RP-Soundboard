@@ -9,6 +9,7 @@
 
 
 #include "ui_soundsettings_qt.h"
+#include "AudioUtils.h"
 #include "soundsettings_qt.h"
 #include "ConfigModel.h"
 #include "main.h"
@@ -197,7 +198,7 @@ void SoundSettingsQt::fillFromGui(SoundInfo &sound)
 	sound.fxSyncPitchSpeed = m_fxSyncButton->isChecked();
 	sound.fxRemember = m_fxGroup->isChecked();
 	// Legacy compat: compute combined factor from pitch
-	sound.fxPitchSpeed = (float)pow(3.0, sound.fxPitch / 100.0);
+	sound.fxPitchSpeed = AudioUtils::sliderToPitchFactor(sound.fxPitch);
 }
 
 //---------------------------------------------------------------
@@ -319,8 +320,8 @@ void SoundSettingsQt::applyFxToPreview()
 	int slot = getPreviewSlot();
 	if (slot < 0) return;
 
-	float pitchFactor = (float)pow(3.0, m_fxPitchSlider->value() / 100.0);
-	float speedFactor = (float)pow(3.0, m_fxSpeedSlider->value() / 100.0);
+	float pitchFactor = AudioUtils::sliderToPitchFactor(m_fxPitchSlider->value());
+	float speedFactor = AudioUtils::sliderToPitchFactor(m_fxSpeedSlider->value());
 	float reverbMix = m_fxReverbSlider->value() / 100.0f;
 	sampler->setSlotPitchFactor(slot, pitchFactor);
 	sampler->setSlotSpeedFactor(slot, speedFactor);
@@ -375,7 +376,7 @@ void SoundSettingsQt::updateSoundView()
 
 void SoundSettingsQt::updateFxLabels()
 {
-	auto toFactor = [](int v) -> float { return (float)pow(3.0, v / 100.0); };
+	auto toFactor = [](int v) -> float { return AudioUtils::sliderToPitchFactor(v); };
 	m_fxPitchLabel->setText(QString("%1x").arg(toFactor(m_fxPitchSlider->value()), 0, 'f', 2));
 	m_fxSpeedLabel->setText(QString("%1x").arg(toFactor(m_fxSpeedSlider->value()), 0, 'f', 2));
 	m_fxCombinedLabel->setText(QString("%1x").arg(toFactor(m_fxCombinedSlider->value()), 0, 'f', 2));

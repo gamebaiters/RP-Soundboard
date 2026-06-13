@@ -20,9 +20,18 @@ public:
     QString filename()      const;
     bool    isPlaying()     const;
     bool    isPaused()      const;
+    bool    isReplayReady() const { return m_replayReady; }
 
     bool    isLooping()     const;
     bool    isReversed()    const;
+
+    // Current cursor fraction (0..1) on the waveform. Used by the
+    // replay path to honour the user-parked position; clamped to the
+    // crop range by the wiring layer.
+    double  cursorFraction() const;
+    double  cropStartFraction() const;   // 0..1 (cropStart / totalLen)
+    double  cropEndFraction()   const;   // 0..1 (1.0 if cropEnd<0)
+    double  totalLength()       const { return m_totalLen; }
 
 public slots:
     void setSound(const SoundInfo &info);
@@ -32,6 +41,11 @@ public slots:
     void clearPlayback();
     void setPlaying(bool on);
     void setPaused(bool on);
+    // Mark the channel as "stopped but a sound is loaded and ready to
+    // replay from the cursor". Switches the play/pause button to the
+    // reload glyph; click emits replayClicked(). Auto-cleared when
+    // setPlaying(true) fires or the channel is wiped (clearRequested).
+    void setReplayReady(bool ready);
     void setLooping(bool on);
     void setReversed(bool on);
     // Toggle ONLY the waveform visualisation (the SoundView). Filename,
@@ -58,6 +72,15 @@ signals:
     void playClicked();
     void pauseClicked();
     void stopClicked();
+    // Emitted when the play/pause button fires in the replay-ready
+    // state (audio finished naturally or was stopped, sound still
+    // loaded). Wiring resolves the originating sound + restarts it on
+    // this channel, seeking to the user-parked cursor afterwards.
+    void replayClicked();
+    // The user clicked the red "X" next to the filename label - wipe
+    // every trace of the loaded sound on this channel: filename,
+    // waveform, replay state, slot bookkeeping.
+    void clearRequested();
     void skip(int seconds);              // signed: -10, -5, +5, +10
     void seekRequested(double fraction); // 0..1 from waveform click
     void loopToggled(bool on);
@@ -89,8 +112,15 @@ private:
     QPushButton *m_loop;
     QPushButton *m_reverse;
     QPushButton *m_fwd10;
+    // Red "X" next to the filename label. Visible only when there is
+    // something to clear (a filename loaded or a replay context). Hidden
+    // when the channel is truly empty.
+    QPushButton *m_clearBtn = nullptr;
     bool         m_playing;
     bool         m_paused;
+    // True when the channel is stopped but a sound is still loaded and
+    // can be replayed by clicking the (now reload-glyph) play button.
+    bool         m_replayReady = false;
     bool         m_looping;
     bool         m_reversed;
     QString      m_fullPath;   // unstripped path, returned by filename()
@@ -100,9 +130,23 @@ private:
     // expresses now that everything ends at cropEnd consistently.
     double       m_cropStart = 0.0;
     double       m_cropEnd   = -1.0;
+    // Total decoded length last reported via setPosition(). Used to
+    // map cropStart/End seconds <-> waveform fraction without going
+    // back through the audio thread.
+    double       m_totalLen  = 0.0;
     // True while the filename label is displaying an error banner.
     // setFilename / setSound clear it; setError sets it. Keeps the
     // styling reset path explicit so the red bold doesn't leak into
     // subsequent successful playbacks.
     bool         m_errorActive = false;
+
+    // Centralised icon + tooltip refresh for the play/pause button.
+    // Looks at m_playing / m_paused / m_replayReady and picks the right
+    // glyph (pause when playing, play when paused/idle, reload when
+    // replay-ready). Called from every state setter so the button never
+    // shows a stale glyph.
+    void refreshPlayPauseAffordance();
+    // Show / hide the clear "X" button to match the channel's loaded
+    // state: visible iff filename is set OR replay-ready.
+    void refreshClearButton();
 };

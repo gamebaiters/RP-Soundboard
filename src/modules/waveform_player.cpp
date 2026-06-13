@@ -65,6 +65,32 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
 {
     m_filenameLabel->setText(tr("(no file)"));
     m_filenameLabel->setMinimumWidth(80);
+    // Clear button - red disc with white X. Sits to the LEFT of the
+    // filename label and is only visible when there is actually a
+    // loaded sound to wipe. setObjectName scopes the QSS so it doesn't
+    // leak into TS3's qApp.
+    m_clearBtn = new QPushButton(this);
+    m_clearBtn->setObjectName("GBClearFileBtn");
+    m_clearBtn->setIcon(IconFactory::clear());
+    m_clearBtn->setIconSize(QSize(16, 16));
+    m_clearBtn->setFlat(true);
+    m_clearBtn->setCursor(Qt::PointingHandCursor);
+    m_clearBtn->setFixedSize(20, 20);
+    // NoFocus: clicking the X must not steal keyboard focus from the
+    // surrounding row. Without this the button took focus on press;
+    // when it then hid itself a frame later (no filename + no replay
+    // = nothing to clear), Qt's focus chain handed focus to the next
+    // focusable widget - the channel title QLineEdit - which selectAll-
+    // s its contents on tab-focus and visually highlighted the channel
+    // name as if the user had just clicked it.
+    m_clearBtn->setFocusPolicy(Qt::NoFocus);
+    m_clearBtn->setToolTip(tr("Clear this channel's sound (back to empty)"));
+    m_clearBtn->setStyleSheet(
+        "QPushButton#GBClearFileBtn { background: transparent; border: none;"
+        " padding: 0px; margin: 0px; }"
+        "QPushButton#GBClearFileBtn:hover { background: rgba(255,80,80,40);"
+        " border-radius: 10px; }");
+    m_clearBtn->hide();
     m_timeLabel->setText("0:00 / 0:00");
     m_timeLabel->setMinimumWidth(80);
 
@@ -120,6 +146,7 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     transport->addWidget(m_loop);
     transport->addWidget(m_reverse);
     transport->addSpacing(8);
+    transport->addWidget(m_clearBtn);
     transport->addWidget(m_filenameLabel, 1);
     transport->addWidget(m_timeLabel);
     transport->addWidget(new HelpBubble(tr(
@@ -142,10 +169,13 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
         m_looping = on; emit loopToggled(on);
     });
     connect(m_reverse,   &QPushButton::toggled, this, [this](bool on){
-        m_reversed = on; emit reverseToggled(on);
+        m_reversed = on;
+        m_wave->setReverse(on);   // played-tint flips side in reverse
+        emit reverseToggled(on);
     });
     connect(m_stop,      &QPushButton::clicked, this, &WaveformPlayer::onStop);
     connect(m_playPause, &QPushButton::clicked, this, &WaveformPlayer::onPlayPause);
+    connect(m_clearBtn,  &QPushButton::clicked, this, [this]{ emit clearRequested(); });
     connect(m_wave,      &SoundView::seekRequested, this, &WaveformPlayer::onWaveSeek);
     connect(m_wave, &SoundView::cropStartRequestedAt,
             this,   &WaveformPlayer::cropStartRequestedAt);
@@ -175,6 +205,7 @@ void WaveformPlayer::setLooping(bool on) {
 void WaveformPlayer::setReversed(bool on) {
     if (m_reversed == on) return;
     m_reversed = on;
+    m_wave->setReverse(on);
     QSignalBlocker b(m_reverse);
     m_reverse->setChecked(on);
 }
@@ -200,6 +231,7 @@ void WaveformPlayer::setFilename(const QString &name) {
     if (slash >= 0) display = name.mid(slash + 1);
     m_filenameLabel->setText(display.isEmpty() ? tr("(no file)") : display);
     m_filenameLabel->setToolTip(name);
+    refreshClearButton();
 }
 
 void WaveformPlayer::setError(const QString &message) {
@@ -246,9 +278,24 @@ void WaveformPlayer::setPosition(double seconds, double total) {
         if (labelPos > labelTot) labelPos = labelTot;
     }
     m_timeLabel->setText(fmtTime(labelPos) + " / " + fmtTime(labelTot));
+    m_totalLen = total;
     // Feed the real decoded duration to the waveform so crop-marker
     // fractions are computed against an accurate, per-channel length.
     m_wave->setTotalLength(total);
+}
+
+double WaveformPlayer::cropStartFraction() const {
+    if (m_totalLen <= 0.0) return 0.0;
+    if (m_cropStart <= 0.0) return 0.0;
+    double f = m_cropStart / m_totalLen;
+    return (f < 0.0) ? 0.0 : ((f > 1.0) ? 1.0 : f);
+}
+
+double WaveformPlayer::cropEndFraction() const {
+    if (m_totalLen <= 0.0)       return 1.0;
+    if (m_cropEnd  <= 0.0)       return 1.0;
+    double f = m_cropEnd / m_totalLen;
+    return (f < 0.0) ? 0.0 : ((f > 1.0) ? 1.0 : f);
 }
 
 void WaveformPlayer::setPlaybackFraction(double f) {
@@ -258,28 +305,75 @@ void WaveformPlayer::setPlaybackFraction(double f) {
 void WaveformPlayer::clearPlayback() {
     m_wave->clearPlayback();
     m_timeLabel->setText("0:00 / 0:00");
+    m_totalLen = 0.0;
+    m_cropStart = 0.0;
+    m_cropEnd   = -1.0;
 }
 
 void WaveformPlayer::setPlaying(bool on) {
     m_playing = on;
-    if (on) m_paused = false;
-    bool isPlayingNow = on && !m_paused;
-    m_playPause->setIcon(isPlayingNow ? IconFactory::pause()
-                                      : IconFactory::play());
-    m_playPause->setToolTip(isPlayingNow ? tr("Pause") : tr("Play"));
+    if (on) {
+        m_paused = false;
+        // Active playback never sits on top of "replay-ready" - it's the
+        // opposite state.
+        m_replayReady = false;
+    }
+    refreshPlayPauseAffordance();
+    refreshClearButton();
 }
 
 void WaveformPlayer::setPaused(bool on) {
     m_paused = on;
-    bool isPlayingNow = m_playing && !on;
-    m_playPause->setIcon(isPlayingNow ? IconFactory::pause()
-                                      : IconFactory::play());
-    m_playPause->setToolTip(isPlayingNow ? tr("Pause") : tr("Play"));
+    refreshPlayPauseAffordance();
+}
+
+void WaveformPlayer::setReplayReady(bool ready) {
+    if (m_replayReady == ready) return;
+    m_replayReady = ready;
+    refreshPlayPauseAffordance();
+    refreshClearButton();
+}
+
+void WaveformPlayer::refreshPlayPauseAffordance() {
+    // State machine:
+    //   playing && !paused  -> pause glyph, click pauses
+    //   playing &&  paused  -> play glyph, click resumes
+    //  !playing &&  replay  -> reload glyph, click restarts from cursor
+    //  !playing && !replay  -> play glyph (idle / no sound loaded)
+    if (m_playing && !m_paused) {
+        m_playPause->setIcon(IconFactory::pause());
+        m_playPause->setToolTip(tr("Pause"));
+    } else if (!m_playing && m_replayReady) {
+        m_playPause->setIcon(IconFactory::reload());
+        m_playPause->setToolTip(tr("Replay from cursor"));
+    } else {
+        m_playPause->setIcon(IconFactory::play());
+        m_playPause->setToolTip(tr("Play"));
+    }
+}
+
+void WaveformPlayer::refreshClearButton() {
+    if (!m_clearBtn) return;
+    const bool hasContent = !m_fullPath.isEmpty() || m_replayReady;
+    m_clearBtn->setVisible(hasContent);
+}
+
+double WaveformPlayer::cursorFraction() const {
+    return m_wave ? m_wave->currentPosition() : -1.0;
 }
 
 void WaveformPlayer::onPlayPause() {
-    if (m_playing && !m_paused) emit pauseClicked();
-    else                        emit playClicked();
+    if (m_playing && !m_paused) {
+        emit pauseClicked();
+    } else if (m_playing && m_paused) {
+        emit playClicked();
+    } else if (m_replayReady) {
+        emit replayClicked();
+    } else {
+        // Idle with no loaded sound: nothing to play. Falling through to
+        // playClicked() would emit unpausePlayback() on an empty slot -
+        // harmless but pointless. Drop the click.
+    }
 }
 
 void WaveformPlayer::onStop() {

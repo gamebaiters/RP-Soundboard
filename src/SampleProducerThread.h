@@ -15,6 +15,8 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include <mutex>
+#include <condition_variable>
 
 #include "SampleProducer.h"
 
@@ -39,7 +41,10 @@ public:
 	void stop(bool wait = true);
 	bool isRunning();
 	void setSource(SampleSource *source);
-	
+	// Wake the fill loop immediately (e.g. after a seek cleared the
+	// buffers) instead of waiting for the next 100 ms refill tick.
+	void wake();
+
 private:
 	void run();
 	void threadFunc();
@@ -53,6 +58,11 @@ private:
 	std::vector<buffer_t> m_buffers;
 	std::atomic<bool> m_running;
 	std::atomic<bool> m_stop;
+	// Wake flag + condvar replace the old fixed 100 ms sleep: a fresh
+	// setSource (= user clicked play) wakes the fill loop instantly, so
+	// playback no longer starts up to 100 ms late.
+	std::atomic<bool> m_wake{false};
+	std::condition_variable_any m_cv;
 	std::recursive_mutex m_mutex;
 };
 

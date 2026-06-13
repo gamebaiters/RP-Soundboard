@@ -14,6 +14,7 @@
 #include "SoundInfo.h"
 #include "ts3log.h"
 #include "HighResClock.h"
+#include "AudioUtils.h"
 #include "dsp/SlotDsp.h"
 #include "dsp/SandboxState.h"
 
@@ -194,15 +195,24 @@ void Sampler::setSlotReverse(int slot, bool on)
 		epoch = ++s.reverseEpoch;
 	}
 
-	// Phase 2 — wait for the previous worker (if any) to acknowledge
-	// the cancel flag and exit. We set it true in Phase 1 above; the
-	// decode loop polls every 64 packets, so this typically returns
-	// within ~10-100 ms even on multi-minute files. join() (not
-	// detach) keeps the Sampler dtor safe — every worker is owned by
-	// exactly one std::thread that we can wait on at shutdown.
+	// Phase 2 — retire the previous worker (if any) WITHOUT joining it
+	// on this (GUI) thread. The old join() blocked the click handler
+	// for the cancel-acknowledge latency (~10-100 ms) on every rapid
+	// toggle. The retired thread self-terminates shortly after seeing
+	// its cancel flag; it is joined opportunistically when the retire
+	// list overflows, and unconditionally at shutdown / destruction.
 	PlaybackSlot &s = m_slots[slot];
-	if (s.reverseWorker.joinable())
-		s.reverseWorker.join();
+	if (s.reverseWorker.joinable()) {
+		std::lock_guard<std::mutex> rl(m_retiredMutex);
+		m_retiredWorkers.push_back(std::move(s.reverseWorker));
+		if (m_retiredWorkers.size() > 8) {
+			// All of these have long since seen their cancel token (we
+			// only get here after 8 further toggles) - joins are instant.
+			for (auto &t : m_retiredWorkers)
+				if (t.joinable()) t.join();
+			m_retiredWorkers.clear();
+		}
+	}
 
 	// Phase 3 — spawn the new worker. All heavy work (CreateInputFile,
 	// open + preDecodeAndReverse for the reverse case, or just open()
@@ -543,6 +553,12 @@ Sampler::~Sampler()
 		if (m_slots[i].reverseWorker.joinable())
 			m_slots[i].reverseWorker.join();
 	}
+	{
+		std::lock_guard<std::mutex> rl(m_retiredMutex);
+		for (auto &t : m_retiredWorkers)
+			if (t.joinable()) t.join();
+		m_retiredWorkers.clear();
+	}
 }
 
 
@@ -557,9 +573,11 @@ void Sampler::init()
 		PlaybackSlot &slot = m_slots[i];
 		slot.producerThread.addBuffer(&slot.sbCapture);
 		slot.producerThread.addBuffer(&slot.sbPlayback, m_localPlayback);
-		slot.producerThread.start();
+		// Producer threads start LAZILY on the slot's first playback
+		// (playSoundInSlot). Starting all MAX_SLOTS threads here kept
+		// 32 idle threads waking 10x/s for users with 1-2 channels.
 	}
-	sdbgLog("Sampler::init() done, %d producer threads started", MAX_SLOTS);
+	sdbgLog("Sampler::init() done, producer threads start lazily");
 }
 
 
@@ -587,6 +605,12 @@ void Sampler::shutdown()
 		if (slot.reverseWorker.joinable())
 			slot.reverseWorker.join();
 	}
+	{
+		std::lock_guard<std::mutex> rl(m_retiredMutex);
+		for (auto &t : m_retiredWorkers)
+			if (t.joinable()) t.join();
+		m_retiredWorkers.clear();
+	}
 
 	std::lock_guard<std::mutex> Lock(m_mutex);
 
@@ -606,7 +630,7 @@ void Sampler::shutdown()
 //---------------------------------------------------------------
 // Purpose: Fetch and mix samples from a single buffer
 //---------------------------------------------------------------
-int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int count, int channels, bool eraseConsumed, int ciLeft, int ciRight, bool overLeft, bool overRight, float ampThresh, PlaybackSlot *slot)
+int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int count, int channels, bool eraseConsumed, int ciLeft, int ciRight, bool overLeft, bool overRight, float ampThresh, PlaybackSlot *slot, bool forceLimit)
 {
 	float thresh = (ampThresh > 0.0f) ? ampThresh : (float)AMP_THRESH;
 
@@ -643,6 +667,12 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 	static thread_local std::vector<short> dspTemp;
 	int  stretchConsumed = -1;     // -1 = not on stretch path
 	bool isCapturePath = slot && (&sb == &slot->sbCapture);
+	// Push the output-domain gain to the DSP block so its EQ analyser
+	// scales POST-chain samples by what the listener actually hears
+	// (post-chain spectrum * volume * intensity). Without this the LEDs
+	// would not respond to the slot's volume slider on the bypass path.
+	if (slot && slot->dsp)
+		slot->dsp->setOutputGain(volGain * intensity);
 	if (isStretch)
 	{
 		int needIn = slot->dsp->inputFramesNeededFor(write);
@@ -674,7 +704,11 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 			if (a > slotMaxL) slotMaxL = a;
 			if (a > slotMaxR) slotMaxR = a;
 			float mixed = (float)out[i] + sbSample;
-			if (intensity <= 1.01f)
+			// Intensity > 1 historically skipped the limiter (the boost
+			// is MEANT to clip), but forceLimit (earrape protection
+			// checkbox) overrides that: protection must hold exactly
+			// when the user cranks intensity.
+			if (intensity <= 1.01f || forceLimit)
 			{
 				pm.process(mixed);
 				mixed = (float)pm.limit(mixed, thresh);
@@ -703,7 +737,9 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 			float mixL = tsL + sbL;
 			float mixR = tsR + sbR;
 			float resL, resR;
-			if (intensity <= 1.01f)
+			// See mono branch: forceLimit = earrape protection stays
+			// active even when intensity > 1 disables normal limiting.
+			if (intensity <= 1.01f || forceLimit)
 			{
 				pm.process(fabs(mixL) > fabs(mixR) ? mixL : mixR);
 				resL = (float)pm.limit(mixL, thresh);
@@ -812,7 +848,7 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 		bool isDuckee = (duckSourceSlotIdx >= 0) && (s != duckSourceSlotIdx)
 		             && !slot.duckSource;
 		float targetGain = isDuckee
-			? static_cast<float>(std::pow(10.0, duckTargetDb / 20.0))
+			? static_cast<float>(AudioUtils::dbToLinear(duckTargetDb))
 			: 1.0f;
 		float curGain = slot.duckGain.load(std::memory_order_relaxed);
 		// Attack faster than release so a SFX riding music gets the
@@ -824,7 +860,7 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 		if (curGain > 1.0f)    curGain = 1.0f;
 		slot.duckGain.store(curGain, std::memory_order_relaxed);
 		double duckActiveDb = (curGain >= 0.9999f) ? 0.0
-		                    : 20.0 * std::log10(curGain);
+		                    : AudioUtils::linearToDb((double)curGain);
 
 		// Set volume for this slot: per-slot in multi-mode, global otherwise
 		double remoteDb = m_multiMode ? slot.slotDbRemote : m_globalDbSettingRemote;
@@ -1084,7 +1120,7 @@ int Sampler::fetchOutputSamples(short *samples, int count, int channels, const u
 		// the two paths phase-locked.
 		float curDuck = slot.duckGain.load(std::memory_order_relaxed);
 		double duckActiveDb = (curDuck >= 0.9999f) ? 0.0
-		                    : 20.0 * std::log10(std::max(curDuck, 1e-4f));
+		                    : AudioUtils::linearToDb((double)std::max(curDuck, 1e-4f));
 		double localDb = m_multiMode ? slot.slotDbLocal : m_globalDbSettingLocal;
 		setVolumeDb(localDb + slot.soundDbSetting + duckActiveDb);
 
@@ -1093,7 +1129,8 @@ int Sampler::fetchOutputSamples(short *samples, int count, int channels, const u
 			ciLeft, ciRight,
 			isFirstSlot && ((*channelFillMask & bitMaskLeft) == 0),
 			isFirstSlot && ((*channelFillMask & bitMaskRight) == 0),
-			localThresh, &slot);
+			localThresh, &slot,
+			/*forceLimit=*/m_earrapeProtection.load(std::memory_order_relaxed));
 
 		if (written > totalWritten)
 			totalWritten = written;
@@ -1142,20 +1179,45 @@ bool Sampler::playPreview(const SoundInfo &sound)
 //---------------------------------------------------------------
 void Sampler::stopPlayback(int slot)
 {
-	std::lock_guard<std::mutex> Lock(m_mutex);
-	if (slot == -1)
+	// Collect deferred work under the lock; perform it after release:
+	// FFmpeg teardown is slow (audio thread must not wait on it) and
+	// signal emission under m_mutex is a latent deadlock.
+	struct Stopped { InputFile *file; int slot; bool emitStop; };
+	std::vector<Stopped> stopped;
 	{
-		for (int s = 0; s < MAX_SLOTS; s++)
-			stopSlotInternal(s);
+		std::lock_guard<std::mutex> Lock(m_mutex);
+		if (slot == -1)
+		{
+			for (int s = 0; s < MAX_SLOTS; s++)
+			{
+				bool e = false;
+				InputFile *f = stopSlotInternal(s, e);
+				if (f || e) stopped.push_back({f, s, e});
+			}
+		}
+		else if (slot >= 0 && slot < MAX_SLOTS)
+		{
+			bool e = false;
+			InputFile *f = stopSlotInternal(slot, e);
+			if (f || e) stopped.push_back({f, slot, e});
+		}
 	}
-	else if (slot >= 0 && slot < MAX_SLOTS)
+	for (auto &st : stopped)
 	{
-		stopSlotInternal(slot);
+		if (st.file) { st.file->close(); delete st.file; }
+		if (st.emitStop) emit onStopPlaying(st.slot);
 	}
 }
 
+// Slider->dB mapping. DB_MIN doubled from -28 to -56 when setVolumeDb
+// switched from the (wrong) power convention 10^(dB/10) to the correct
+// amplitude convention 10^(dB/20): with /10 every "dB" was applied at
+// twice its value, so -28 dB of slider range actually attenuated by
+// -56 dB of amplitude. Doubling DB_MIN keeps every existing slider
+// position sounding exactly like before while the rest of the engine
+// (ducking, per-sound dB) now applies true decibels.
 #define VOLUMESCALER_EXPONENT 1.0
-#define VOLUMESCALER_DB_MIN -28.0
+#define VOLUMESCALER_DB_MIN -56.0
 //---------------------------------------------------------------
 // Purpose:
 //---------------------------------------------------------------
@@ -1350,7 +1412,12 @@ void Sampler::setReverbMix(float mix)
 //---------------------------------------------------------------
 void Sampler::setVolumeDb( double decibel )
 {
-	double factor = pow(10.0, decibel/10.0);
+	// Amplitude convention (10^(dB/20)). The previous 10^(dB/10) was the
+	// POWER convention and made every dB count double - notably the
+	// sidechain duck depth (a requested -12 dB duck attenuated by -24)
+	// and the per-sound volume. Slider ranges were recalibrated via
+	// VOLUMESCALER_DB_MIN so perceived slider loudness is unchanged.
+	double factor = AudioUtils::dbToLinear(decibel);
 	m_volumeFactor = (float)factor;
 	m_volumeDivider = (int)(factor * (1 << volumeScaleExp) + 0.5);
 }
@@ -1359,24 +1426,30 @@ void Sampler::setVolumeDb( double decibel )
 //---------------------------------------------------------------
 // Purpose: Stop a single slot
 //---------------------------------------------------------------
-void Sampler::stopSlotInternal(int slot)
+InputFile *Sampler::stopSlotInternal(int slot, bool &emitStop)
 {
+	emitStop = false;
 	PlaybackSlot &s = m_slots[slot];
 	// Bump the reverse-worker epoch unconditionally so any in-flight
 	// async setSlotReverse worker discards its half-built InputFile
 	// instead of swapping it into the slot AFTER the stop. Also flip
-	// the worker's cancel token so a still-running preDecode pass
+	// the worker's cancel token so a still-running decode pass
 	// (multi-minute file) bails out within ~10-50 ms instead of
 	// chewing CPU after the user has already moved on.
 	++s.reverseEpoch;
 	if (s.reverseWorkerCancel)
 		s.reverseWorkerCancel->store(true, std::memory_order_relaxed);
+	InputFile *detached = nullptr;
 	if (s.inputFile)
 	{
 		s.state = eSILENT;
 		s.producerThread.setSource(NULL);
-		s.inputFile->close();
-		delete s.inputFile;
+		// DETACH the file instead of closing it here: FFmpeg context
+		// teardown (codec close + format close + filter graph free) is
+		// slow and the caller holds m_mutex - the audio thread would
+		// stall behind it. The caller closes the returned pointer after
+		// releasing the lock.
+		detached = s.inputFile;
 		s.inputFile = NULL;
 
 		// Reset DSP so the next play starts paulstretch from a clean
@@ -1421,8 +1494,13 @@ void Sampler::stopSlotInternal(int slot)
 		// smoother walked back to 1.
 		s.duckGain.store(1.0f, std::memory_order_relaxed);
 
-		emit onStopPlaying(slot);
+		// The onStopPlaying emit is DEFERRED to the caller (after it
+		// releases m_mutex). Emitting here, under the lock, was a
+		// latent deadlock: a direct-connection slot calling back into
+		// any locking Sampler method would self-deadlock the client.
+		emitStop = true;
 	}
+	return detached;
 }
 
 
@@ -1446,94 +1524,127 @@ int Sampler::findFreeSlot() const
 //---------------------------------------------------------------
 bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview)
 {
-	std::lock_guard<std::mutex> Lock(m_mutex);
-	// Reset per-slot DSP state on new playback so EQ biquads + HRTF
-	// smoothers + paulstretch ring don't carry residual state from
-	// the previous sound (which produced a brief robotic transient
-	// on start when the sandbox was already enabled).
-	if (slot >= 0 && slot < MAX_SLOTS && m_slots[slot].dsp)
-		m_slots[slot].dsp->reset();
-
 	SoundInfo sound = soundOrig;
 
-	sdbgLog("playSoundInSlot: slot=%d file='%s' preview=%d startTime=%.2f playTime=%.2f vol=%.1f",
-		slot, sound.filename.toUtf8().constData(), preview, sound.getStartTime(), sound.getPlayTime(), (double)sound.volume);
-
-	if (slot == -1)
+	// ===== Phase 1: slot resolution + teardown of the previous sound,
+	// under m_mutex. NO FFmpeg work happens in this phase - open() of
+	// the new file (potentially hundreds of ms of disk + probe work)
+	// used to run with the audio lock held, which stalled fetchSamples
+	// and produced audible dropouts on every OTHER playing slot in
+	// multi-mode. The old file is detached here and closed in Phase 2.
+	InputFile *oldFile     = nullptr;
+	bool       oldEmitStop = false;
+	int        oldEmitSlot = -1;
+	uint64_t   epoch       = 0;
+	bool       chanReverse = false;
+	float      prePitch    = 1.0f;
+	double     randPitchMul = 1.0;
+	bool       jitterActive = false;
+	float      speedFactor  = 1.0f;
+	float      reverbMix    = 0.0f;
 	{
-		// In single mode, stop current sound first
-		if (!m_multiMode)
+		std::lock_guard<std::mutex> Lock(m_mutex);
+
+		// Reset per-slot DSP state on new playback so EQ biquads + HRTF
+		// smoothers + paulstretch ring don't carry residual state from
+		// the previous sound (which produced a brief robotic transient
+		// on start when the sandbox was already enabled).
+		if (slot >= 0 && slot < MAX_SLOTS && m_slots[slot].dsp)
+			m_slots[slot].dsp->reset();
+
+		sdbgLog("playSoundInSlot: slot=%d file='%s' preview=%d startTime=%.2f playTime=%.2f vol=%.1f",
+			slot, sound.filename.toUtf8().constData(), preview, sound.getStartTime(), sound.getPlayTime(), (double)sound.volume);
+
+		if (slot == -1)
 		{
-			stopSlotInternal(0);
-			slot = 0;
-		}
-		else
-		{
-			slot = findFreeSlot();
-			if (slot == -1)
+			// In single mode, stop current sound first
+			if (!m_multiMode)
 			{
-				sdbgLog("  No free slot available (max %d)", m_multiMode ? MAX_SLOTS : 1);
-				return false;
+				slot = 0;
+			}
+			else
+			{
+				slot = findFreeSlot();
+				if (slot == -1)
+				{
+					sdbgLog("  No free slot available (max %d)", m_multiMode ? MAX_SLOTS : 1);
+					return false;
+				}
 			}
 		}
-	}
 
-	if (slot < 0 || slot >= MAX_SLOTS)
-		return false;
+		if (slot < 0 || slot >= MAX_SLOTS)
+			return false;
 
-	// Stop this slot if it's already playing
-	stopSlotInternal(slot);
+		// Stop this slot if it's already playing (detach - close happens
+		// outside the lock in Phase 2).
+		oldFile = stopSlotInternal(slot, oldEmitStop);
+		oldEmitSlot = slot;
 
-	PlaybackSlot &s = m_slots[slot];
+		PlaybackSlot &s = m_slots[slot];
 
-	// Per-playback random PITCH-only jitter. Volume + start-offset
-	// axes were dropped because they produced glitchy playback
-	// (mid-loop volume jumps + cropStart re-seek artefacts). Pitch
-	// jitter is applied here for the first fire; loop restarts in
-	// fetchInputSamples re-read the LIVE SandboxState so disabling
-	// random mid-playback stops the jitter immediately.
-	double randPitchMul = 1.0;
-	bool   jitterActive = false;
-	if (s.dsp) {
-		const SandboxState &st = s.dsp->state();
-		if (st.enabled && st.randomEnabled && st.randomPitchCents > 0) {
-			jitterActive = true;
-			auto urand = []{ return (double)rand() / (double)RAND_MAX; };
-			double j = (urand() * 2.0 - 1.0) * st.randomPitchCents;
-			randPitchMul = std::pow(2.0, j / 1200.0);
+		// Claim the slot for THIS playback. Any stop / replay / reverse
+		// toggle that lands while we are opening the file bumps the
+		// epoch again, and Phase 3's re-check discards our half-built
+		// InputFile instead of stomping the newer state.
+		epoch = ++s.reverseEpoch;
+
+		// Per-playback random PITCH-only jitter. Volume + start-offset
+		// axes were dropped because they produced glitchy playback
+		// (mid-loop volume jumps + cropStart re-seek artefacts). Pitch
+		// jitter is applied here for the first fire; loop restarts in
+		// fetchInputSamples re-read the LIVE SandboxState so disabling
+		// random mid-playback stops the jitter immediately.
+		if (s.dsp) {
+			const SandboxState &st = s.dsp->state();
+			if (st.enabled && st.randomEnabled && st.randomPitchCents > 0) {
+				jitterActive = true;
+				auto urand = []{ return (double)rand() / (double)RAND_MAX; };
+				double j = (urand() * 2.0 - 1.0) * st.randomPitchCents;
+				randPitchMul = std::pow(2.0, j / 1200.0);
+			}
 		}
+
+		chanReverse = s.channelReverse;
+		prePitch = (s.lastSlotPitchFactor > 0.01f
+		          && std::fabs(s.lastSlotPitchFactor - 1.0f) > 1e-4f)
+		          ? s.lastSlotPitchFactor : m_pitchFactor;
+		speedFactor = m_speedFactor;
+		reverbMix   = m_reverbMix;
 	}
 
-	s.inputFile = CreateInputFileFFmpeg();
-	sdbgLog("  CreateInputFileFFmpeg returned %p for slot %d", s.inputFile, slot);
+	// ===== Phase 2: heavy work OUTSIDE the audio lock. Close the old
+	// FFmpeg context, deliver the deferred stop signal, then build +
+	// open the new file. The audio thread keeps mixing the other slots
+	// undisturbed for the whole duration.
+	if (oldFile) { oldFile->close(); delete oldFile; }
+	if (oldEmitStop) emit onStopPlaying(oldEmitSlot);
+
+	InputFile *newFile = CreateInputFileFFmpeg();
+	sdbgLog("  CreateInputFileFFmpeg returned %p for slot %d", newFile, slot);
 
 	// Reverse playback + loudness normalisation flags MUST be set
 	// before open() so the filter graph picks them up on construction.
 	// Per-channel reverse override (WaveformPlayer reverse button)
 	// wins over the per-cell flag when ON.
-	if (sound.reverse || s.channelReverse) s.inputFile->setReverse(true);
-	if (sound.autoNormalize)               s.inputFile->setAutoNormalize(true);
+	const bool isReverse = (sound.reverse || chanReverse);
+	if (isReverse)           newFile->setReverse(true);
+	if (sound.autoNormalize) newFile->setAutoNormalize(true);
 	// Pre-set pitch / speed / reverb factors BEFORE open() so the
-	// initial filter-graph build (and, in reverse mode, the
-	// pre-decode pass) already applies them. Without this the reverse
-	// buffer was built at identity and the first ~250 ms of playback
-	// rendered without atempo/asetrate.
+	// initial filter-graph build already applies them.
 	{
-		float prePitch = (s.lastSlotPitchFactor > 0.01f
-		                && std::fabs(s.lastSlotPitchFactor - 1.0f) > 1e-4f)
-		                ? s.lastSlotPitchFactor : m_pitchFactor;
 		float preFactor = prePitch * static_cast<float>(randPitchMul);
-		if (preFactor != 1.0f) s.inputFile->setPitchFactor(preFactor);
-		if (m_speedFactor != 1.0f) s.inputFile->setSpeedFactor(m_speedFactor);
-		if (m_reverbMix > 0.0f) s.inputFile->setReverbMix(m_reverbMix);
+		if (preFactor != 1.0f)   newFile->setPitchFactor(preFactor);
+		if (speedFactor != 1.0f) newFile->setSpeedFactor(speedFactor);
+		if (reverbMix > 0.0f)    newFile->setReverbMix(reverbMix);
 	}
 
 	int openRet = -1;
 	try {
-		openRet = s.inputFile->open(sound.filename.toUtf8(), sound.getStartTime(), sound.getPlayTime());
+		openRet = newFile->open(sound.filename.toUtf8(), sound.getStartTime(), sound.getPlayTime());
 	} catch (...) {
 		// A malformed / corrupt file can throw deep inside the decoder.
-		// Catch it here so the TS3 client never crashes — the slot just
+		// Catch it here so the TS3 client never crashes - the slot just
 		// reports a clean failure instead.
 		openRet = -1;
 	}
@@ -1541,100 +1652,109 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 	if (openRet != 0)
 	{
 		sdbgLog("  FAILED to open file, deleting inputFile");
-		delete s.inputFile;
-		s.inputFile = NULL;
+		newFile->close();
+		delete newFile;
 		// Tell the UI so it can show a clear error instead of silently
 		// doing nothing.
 		emit onPlaybackError(slot, sound.filename);
 		return false;
 	}
 
-	s.soundDbSetting = (double)sound.volume;
-	s.stretchBaseTime = 0.0;
-	// Remember the trim start so a looping slot restarts inside the crop
-	// range. getStartTime() is 0.0 when the cell has no crop configured.
-	s.cropStart = sound.getStartTime();
+	// ===== Phase 3: install under a brief lock. If the slot's epoch
+	// moved while we were opening (user stopped / replayed / toggled
+	// reverse), discard our file instead of clobbering the newer state.
+	bool discarded = false;
 	{
-		// getPlayTime() is the crop DURATION (-1 when no end point).
-		double pt = sound.getPlayTime();
-		s.cropEnd = (pt > 0.0) ? (s.cropStart + pt) : -1.0;
-	}
-	// Prime the lock-free position cache with sensible initial values
-	// so the GUI's first poll (before the audio thread has run a fetch)
-	// reads the file length we just opened instead of a stale 0 from
-	// a previous slot owner.
-	// Reverse playback starts at the upper bound (cropEnd or file
-	// length) and walks downward. Seeding to cropStart was the
-	// "cursor stuck at start in reverse" bug — the first audio
-	// cycle reads the seeded value (see fetchInputSamples reverse
-	// branch's first-cycle path) and from there consumed-samples
-	// descent locks the cursor at the bottom of the file. Pull the
-	// initial position straight from the decoder, which open() set
-	// to cursorForward (cropEnd / file length) on the reverse path
-	// and to cropStart on the forward path.
-	const bool isReverse = (sound.reverse || s.channelReverse);
-	s.audioReverse = isReverse;
-	double initialPos = s.cropStart;
-	if (isReverse) {
-		initialPos = s.inputFile->getPosition();
-		if (initialPos <= s.cropStart) {
-			initialPos = (s.cropEnd > 0.0)
-				? s.cropEnd : s.inputFile->getLength();
+		std::lock_guard<std::mutex> Lock(m_mutex);
+		PlaybackSlot &s = m_slots[slot];
+		if (s.reverseEpoch.load(std::memory_order_relaxed) != epoch ||
+		    m_shuttingDown.load(std::memory_order_relaxed))
+		{
+			discarded = true;
+		}
+		else
+		{
+			s.inputFile = newFile;
+			s.soundDbSetting = (double)sound.volume;
+			s.stretchBaseTime = 0.0;
+			// Remember the trim start so a looping slot restarts inside the
+			// crop range. getStartTime() is 0.0 when the cell has no crop.
+			s.cropStart = sound.getStartTime();
+			{
+				// getPlayTime() is the crop DURATION (-1 when no end point).
+				double pt = sound.getPlayTime();
+				s.cropEnd = (pt > 0.0) ? (s.cropStart + pt) : -1.0;
+			}
+			// Prime the lock-free position cache. Reverse playback starts
+			// at the upper bound (cropEnd or file length) and walks down;
+			// forward playback starts at cropStart.
+			s.audioReverse = isReverse;
+			double initialPos = s.cropStart;
+			if (isReverse) {
+				initialPos = s.inputFile->getPosition();
+				if (initialPos <= s.cropStart) {
+					initialPos = (s.cropEnd > 0.0)
+						? s.cropEnd : s.inputFile->getLength();
+				}
+			}
+			s.cachedPositionSec.store(initialPos, std::memory_order_relaxed);
+			s.cachedLengthSec.store(s.inputFile->getLength(), std::memory_order_relaxed);
+			// Fresh playback: invalidate the rate-limiter anchor so the
+			// first audio-thread cache refresh snaps to the decoder
+			// position instead of being clamped against a stale value.
+			s.posCacheValid = false;
+			s.slotDbLocal = m_globalDbSettingLocal;
+			s.slotDbRemote = m_globalDbSettingRemote;
+			double localDb = m_multiMode ? s.slotDbLocal : m_globalDbSettingLocal;
+			setVolumeDb(localDb + s.soundDbSetting);
+			sdbgLog("  volume set: soundDb=%.1f globalLocal=%.1f globalRemote=%.1f", s.soundDbSetting, m_globalDbSettingLocal, m_globalDbSettingRemote);
+			sdbgLog("  pitch=%.2f (jitter %.3f) speed=%.2f reverb=%.2f applied to slot %d inputFile",
+				prePitch, randPitchMul, speedFactor, reverbMix, slot);
+
+			// Fast-path flag so the loop-restart hot loop can skip the
+			// SandboxState re-read when random has never been enabled on
+			// this slot.
+			s.randomActive = jitterActive;
+			// Remember the SoundInfo so setSlotReverse can re-trigger this
+			// playback when the channel's reverse button is toggled mid-play.
+			s.lastSound       = sound;
+			s.lastSoundValid  = true;
+
+			{
+				SampleBuffer::Lock sblc(s.sbCapture.getMutex());
+				SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
+				s.sbCapture.clear();
+				s.sbPlayback.clear();
+			}
+
+			if (preview)
+			{
+				s.state = ePLAYING_PREVIEW;
+				s.producerThread.setBufferEnabled(&s.sbCapture, false);
+				s.producerThread.setBufferEnabled(&s.sbPlayback, true);
+			}
+			else
+			{
+				s.state = ePLAYING;
+				s.producerThread.setBufferEnabled(&s.sbCapture, true);
+				s.producerThread.setBufferEnabled(&s.sbPlayback, m_localPlayback.load(std::memory_order_relaxed));
+			}
+
+			// Lazy producer-thread start (idempotent after the first
+			// play on this slot) - threads are no longer pre-spawned
+			// for all 32 slots at init.
+			s.producerThread.start();
+			s.producerThread.setSource(s.inputFile);
 		}
 	}
-	s.cachedPositionSec.store(initialPos, std::memory_order_relaxed);
-	s.cachedLengthSec.store(s.inputFile->getLength(), std::memory_order_relaxed);
-	// Fresh playback: invalidate the rate-limiter anchor so the first
-	// audio-thread cache refresh snaps to the actual decoder position
-	// instead of being clamped against a stale previous-playback value.
-	s.posCacheValid = false;
-	s.slotDbLocal = m_globalDbSettingLocal;
-	s.slotDbRemote = m_globalDbSettingRemote;
-	double localDb = m_multiMode ? s.slotDbLocal : m_globalDbSettingLocal;
-	setVolumeDb(localDb + s.soundDbSetting);
-	sdbgLog("  volume set: soundDb=%.1f globalLocal=%.1f globalRemote=%.1f", s.soundDbSetting, m_globalDbSettingLocal, m_globalDbSettingRemote);
 
-	// Pitch / speed / reverb were already applied above (BEFORE open
-	// so the filter graph / reverse buffer build with them baked in).
-	// Reverb mix only needs a refresh because the per-sample freeverb
-	// reads the live m_reverbMix every block.
-	if (m_reverbMix > 0.0f && std::fabs(m_reverbMix - 0.0f) > 1e-4f)
-		s.inputFile->setReverbMix(m_reverbMix);
-	sdbgLog("  pitch=%.2f (jitter %.3f) speed=%.2f reverb=%.2f applied to slot %d inputFile",
-		m_pitchFactor, randPitchMul, m_speedFactor, m_reverbMix, slot);
-
-	// Fast-path flag so the loop-restart hot loop can skip the
-	// SandboxState re-read when random has never been enabled on this
-	// slot. The live state is still checked at every loop boundary
-	// (see fetchInputSamples) so a user enabling random mid-playback
-	// still gets jitter on the next loop iteration.
-	s.randomActive = jitterActive;
-	// Remember the SoundInfo so setSlotReverse can re-trigger this
-	// playback when the channel's reverse button is toggled mid-play.
-	s.lastSound       = sound;
-	s.lastSoundValid  = true;
-
-	SampleBuffer::Lock sblc(s.sbCapture.getMutex());
-	SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
-
-	// Clear buffers
-	s.sbCapture.consume(NULL, s.sbCapture.avail());
-	s.sbPlayback.consume(NULL, s.sbPlayback.avail());
-
-	if (preview)
+	if (discarded)
 	{
-		s.state = ePLAYING_PREVIEW;
-		s.producerThread.setBufferEnabled(&s.sbCapture, false);
-		s.producerThread.setBufferEnabled(&s.sbPlayback, true);
+		sdbgLog("  slot epoch moved during open - discarding playback");
+		newFile->close();
+		delete newFile;
+		return false;
 	}
-	else
-	{
-		s.state = ePLAYING;
-		s.producerThread.setBufferEnabled(&s.sbCapture, true);
-		s.producerThread.setBufferEnabled(&s.sbPlayback, m_localPlayback.load(std::memory_order_relaxed));
-	}
-
-	s.producerThread.setSource(s.inputFile);
 
 	emit onStartPlaying(slot, preview, sound.filename);
 
@@ -1647,26 +1767,32 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 //---------------------------------------------------------------
 void Sampler::pausePlayback(int slot)
 {
-	std::lock_guard<std::mutex> Lock(m_mutex);
-	if (slot == -1)
+	// Emit after releasing m_mutex (see stopSlotInternal rationale).
+	std::vector<int> paused;
 	{
-		for (int s = 0; s < MAX_SLOTS; s++)
+		std::lock_guard<std::mutex> Lock(m_mutex);
+		if (slot == -1)
 		{
-			if (m_slots[s].state == ePLAYING)
+			for (int s = 0; s < MAX_SLOTS; s++)
 			{
-				m_slots[s].state = ePAUSED;
-				emit onPausePlaying(s);
+				if (m_slots[s].state == ePLAYING)
+				{
+					m_slots[s].state = ePAUSED;
+					paused.push_back(s);
+				}
+			}
+		}
+		else if (slot >= 0 && slot < MAX_SLOTS)
+		{
+			if (m_slots[slot].state == ePLAYING)
+			{
+				m_slots[slot].state = ePAUSED;
+				paused.push_back(slot);
 			}
 		}
 	}
-	else if (slot >= 0 && slot < MAX_SLOTS)
-	{
-		if (m_slots[slot].state == ePLAYING)
-		{
-			m_slots[slot].state = ePAUSED;
-			emit onPausePlaying(slot);
-		}
-	}
+	for (int s : paused)
+		emit onPausePlaying(s);
 }
 
 
@@ -1675,26 +1801,32 @@ void Sampler::pausePlayback(int slot)
 //---------------------------------------------------------------
 void Sampler::unpausePlayback(int slot)
 {
-	std::lock_guard<std::mutex> Lock(m_mutex);
-	if (slot == -1)
+	// Emit after releasing m_mutex (see stopSlotInternal rationale).
+	std::vector<int> resumed;
 	{
-		for (int s = 0; s < MAX_SLOTS; s++)
+		std::lock_guard<std::mutex> Lock(m_mutex);
+		if (slot == -1)
 		{
-			if (m_slots[s].state == ePAUSED)
+			for (int s = 0; s < MAX_SLOTS; s++)
 			{
-				m_slots[s].state = ePLAYING;
-				emit onUnpausePlaying(s);
+				if (m_slots[s].state == ePAUSED)
+				{
+					m_slots[s].state = ePLAYING;
+					resumed.push_back(s);
+				}
+			}
+		}
+		else if (slot >= 0 && slot < MAX_SLOTS)
+		{
+			if (m_slots[slot].state == ePAUSED)
+			{
+				m_slots[slot].state = ePLAYING;
+				resumed.push_back(slot);
 			}
 		}
 	}
-	else if (slot >= 0 && slot < MAX_SLOTS)
-	{
-		if (m_slots[slot].state == ePAUSED)
-		{
-			m_slots[slot].state = ePLAYING;
-			emit onUnpausePlaying(slot);
-		}
-	}
+	for (int s : resumed)
+		emit onUnpausePlaying(s);
 }
 
 
@@ -1796,6 +1928,9 @@ void Sampler::seek(double seconds, int slot)
 			// backward jump.
 			s.cachedPositionSec.store(seconds, std::memory_order_relaxed);
 			s.posCacheValid = false;
+			// Buffers were just cleared - kick the producer so the
+			// refill starts now instead of on its next 100 ms tick.
+			s.producerThread.wake();
 		}
 	}
 }
@@ -1817,14 +1952,27 @@ Sampler::state_e Sampler::getState(int slot) const
 //---------------------------------------------------------------
 void Sampler::setMultiMode(bool enabled)
 {
-	std::lock_guard<std::mutex> Lock(m_mutex);
-	m_multiMode = enabled;
-
-	// If disabling multi mode, stop all slots except slot 0
-	if (!enabled)
+	struct Stopped { InputFile *file; int slot; bool emitStop; };
+	std::vector<Stopped> stopped;
 	{
-		for (int s = 1; s < MAX_SLOTS; s++)
-			stopSlotInternal(s);
+		std::lock_guard<std::mutex> Lock(m_mutex);
+		m_multiMode = enabled;
+
+		// If disabling multi mode, stop all slots except slot 0
+		if (!enabled)
+		{
+			for (int s = 1; s < MAX_SLOTS; s++)
+			{
+				bool e = false;
+				InputFile *f = stopSlotInternal(s, e);
+				if (f || e) stopped.push_back({f, s, e});
+			}
+		}
+	}
+	for (auto &st : stopped)
+	{
+		if (st.file) { st.file->close(); delete st.file; }
+		if (st.emitStop) emit onStopPlaying(st.slot);
 	}
 }
 

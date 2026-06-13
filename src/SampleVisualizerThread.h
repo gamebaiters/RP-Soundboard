@@ -47,7 +47,10 @@ public:
 	// Get file length in seconds, might be an estimation when processing isn't finished yet
 	double fileLength() const;
 
-	static SampleVisualizerThread &GetInstance();
+	// NOTE: no singleton anymore. Each SoundView owns its own instance
+	// so concurrent channels can analyse different files without
+	// overwriting each other's bins. The worker thread self-terminates
+	// once its file is fully processed, so idle views cost no thread.
 
 private:
 	void run();

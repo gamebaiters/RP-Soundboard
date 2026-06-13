@@ -1,4 +1,5 @@
 #include "fx_panel.h"
+#include "../AudioUtils.h"
 #include "help_bubble.h"
 #include "fine_slider.h"
 #include "theme.h"
@@ -12,7 +13,7 @@
 
 // Pitch/Speed sliders feed factor = 3^(v/100). Display the factor.
 static QString fmtFactor(int v) {
-    double factor = std::pow(3.0, v / 100.0);
+    double factor = AudioUtils::sliderToPitchFactor(v);
     return QString::number(factor, 'f', 2) + "x";
 }
 static QString fmtPlain(int v)  { return QString::number(v); }

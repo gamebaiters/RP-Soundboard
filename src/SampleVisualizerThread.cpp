@@ -48,16 +48,6 @@ double SampleVisualizerThread::fileLength() const
 //---------------------------------------------------------------
 // Purpose: 
 //---------------------------------------------------------------
-SampleVisualizerThread & SampleVisualizerThread::GetInstance()
-{
-	static SampleVisualizerThread t;
-	return t;
-}
-
-
-//---------------------------------------------------------------
-// Purpose: 
-//---------------------------------------------------------------
 SampleVisualizerThread::SampleVisualizerThread() :
 	m_buffer(1),
 	m_numBins(0),
@@ -97,10 +87,19 @@ void SampleVisualizerThread::startAnalysis( const char *filename, size_t numBins
 	m_numSamplesTotalEst = 0;
 	m_numSamplesProcessedThisBin = 0;
 	m_bins.clear();
+	// Pre-reserve so push_back never reallocates: the GUI reads the
+	// getBins() pointer without holding m_mutex, so a realloc during
+	// growth would hand it a dangling pointer.
+	m_bins.reserve(numBins * 2 + 16);
 	m_newFile = true;
 
 	if(!m_running)
 	{
+		// The worker self-terminates when its file is done (run() exits
+		// with m_running=false under m_mutex, so this check is not racy).
+		// Join the finished thread object before reusing the member.
+		if (m_thread.joinable())
+			m_thread.join();
 		m_running = true;
 		m_stop = false;
 		std::thread t(&SampleVisualizerThread::threadFunc, this);
@@ -165,16 +164,27 @@ void SampleVisualizerThread::run()
 				processSamples(samples);
 			}
 		}
-		
-		int sleepTime = m_file ? 1 : 100;
+
+		// Self-terminate when the file is fully processed and no new
+		// analysis was queued - an idle view must not keep a thread
+		// polling forever. m_running is flipped UNDER m_mutex so
+		// startAnalysis (which also holds m_mutex) either sees
+		// running==true and just sets m_newFile, or sees running==false
+		// and spawns a fresh thread - never neither.
+		if (!m_file && !m_newFile)
+		{
+			m_running = false;
+			m_mutex.unlock();
+			return;
+		}
 		m_mutex.unlock();
-		std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 void SampleVisualizerThread::threadFunc()
 {

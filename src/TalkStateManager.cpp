@@ -280,7 +280,8 @@ void TalkStateManager::setPlayTransMode()
 //---------------------------------------------------------------
 void TalkStateManager::setActiveServerId(uint64 id)
 {
-	logDebug("TSMGR: Setting active server id: %i -> %i", (int)activeServerId, (int)id);
+	logDebug("TSMGR: Setting active server id: %llu -> %llu",
+		(unsigned long long)activeServerId, (unsigned long long)id);
 	if (id == activeServerId)
 		return;
 	talk_state_e oldCurrentTS = currentTalkState;
@@ -329,7 +330,7 @@ TalkStateManager::talk_state_e TalkStateManager::getTalkState(uint64 scHandlerID
 //---------------------------------------------------------------s
 bool TalkStateManager::setTalkState(uint64 scHandlerID, talk_state_e state)
 {
-	logDebug("TSMGR: Setting talk state of %ull to %s, previous was %s",
+	logDebug("TSMGR: Setting talk state of %llu to %s, previous was %s",
 		(unsigned long long)scHandlerID, toString(state), toString(previousTalkState));
 	
 	if (scHandlerID == 0 || state == TS_INVALID)

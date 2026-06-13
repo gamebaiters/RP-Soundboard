@@ -1,4 +1,5 @@
 #include "button_advanced_panel.h"
+#include "../AudioUtils.h"
 #include "fx_panel.h"
 #include "fine_slider.h"
 #include "../style_helper.h"
@@ -458,8 +459,8 @@ void ButtonAdvancedPanel::pushLiveFxToPreview() {
     // as-is - so push neutral factors regardless of what the (disabled)
     // sliders happen to show.
     if (m_fxGroup->isChecked()) {
-        sampler->setSlotPitchFactor(m_previewSlot, static_cast<float>(std::pow(3.0, m_fx->pitch()  / 100.0)));
-        sampler->setSlotSpeedFactor(m_previewSlot, static_cast<float>(std::pow(3.0, m_fx->speed()  / 100.0)));
+        sampler->setSlotPitchFactor(m_previewSlot, AudioUtils::sliderToPitchFactor(m_fx->pitch() ));
+        sampler->setSlotSpeedFactor(m_previewSlot, AudioUtils::sliderToPitchFactor(m_fx->speed() ));
         sampler->setSlotReverbMix  (m_previewSlot, m_fx->reverb() / 100.0f);
     } else {
         sampler->setSlotPitchFactor(m_previewSlot, 1.0f);

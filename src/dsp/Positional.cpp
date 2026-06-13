@@ -1,4 +1,5 @@
 #include "Positional.h"
+#include "../AudioUtils.h"
 #include <cmath>
 #include <algorithm>
 #include <cstring>
@@ -112,6 +113,7 @@ void Positional::reset() {
     // position takes effect immediately rather than at the next
     // control-rate boundary.
     m_ctrlCounter = 0;
+    m_lastCX = m_lastCY = m_lastCZ = 1e9f;   // invalidate skip cache
     recomputeCoeffs();
 }
 
@@ -160,7 +162,7 @@ void Positional::recomputeCoeffs() {
     // mixed back with the dry signal so the shelf knee sits at 10 kHz.
     {
         float dbAt10k = -0.6f * r;
-        float gHF = std::pow(10.0f, dbAt10k / 20.0f);
+        float gHF = AudioUtils::dbToLinear(dbAt10k);
         if (gHF > 1.0f) gHF = 1.0f;
         if (gHF < 0.05f) gHF = 0.05f;
         m_airMix = gHF;                 // dry gain
@@ -349,7 +351,18 @@ void Positional::process(float mono, float &outL, float &outR) {
     // The position smoother already gives us a smooth trajectory between
     // recomputes, so 32-sample granularity (~0.67 ms) is inaudible.
     if (m_ctrlCounter <= 0) {
-        recomputeCoeffs();
+        // Skip the recompute when nothing changed since the last one:
+        // position smoother settled AND head sway disabled (sway
+        // advances its LFO phase inside recomputeCoeffs, so it forces
+        // a recompute every control tick while active).
+        bool swayOn = m_swayAmountDeg > 1e-3f;
+        bool moved  = std::fabs(m_x - m_lastCX) > 1e-5f ||
+                      std::fabs(m_y - m_lastCY) > 1e-5f ||
+                      std::fabs(m_z - m_lastCZ) > 1e-5f;
+        if (swayOn || moved) {
+            recomputeCoeffs();
+            m_lastCX = m_x; m_lastCY = m_y; m_lastCZ = m_z;
+        }
         m_ctrlCounter = kCtrlBlock;
     }
     --m_ctrlCounter;

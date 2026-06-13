@@ -1,4 +1,5 @@
 #include "channel_meter.h"
+#include "../AudioUtils.h"
 #include <QPainter>
 #include <algorithm>
 #include <cmath>
@@ -11,7 +12,7 @@ constexpr float kPeakDecay = 0.93f;
 
 // Level (0..1.5 linear) -> 0..1 normalised position on a -60..0 dB scale.
 float toNorm(float v) {
-    float db = (v > 1e-6f) ? 20.0f * std::log10(v) : kFloorDb;
+    float db = (v > 1e-6f) ? AudioUtils::linearToDb(v) : kFloorDb;
     if (db < kFloorDb) db = kFloorDb;
     if (db > 0.0f)     db = 0.0f;
     return (db - kFloorDb) / (0.0f - kFloorDb);

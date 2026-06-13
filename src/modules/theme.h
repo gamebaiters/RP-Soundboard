@@ -61,6 +61,10 @@ struct Derived {
 
 Derived derive(const Colors &c);
 
+// Memoised derive(colors()) - safe to call from paintEvent at any rate.
+// Invalidated automatically by setColors().
+const Derived &derivedCached();
+
 // Default values match the original dark_style.qss palette.
 Colors defaultColors();
 

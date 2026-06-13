@@ -115,7 +115,7 @@ void SoundButton::mouseMoveEvent(QMouseEvent *evt)
 
 		QMimeData *mimeData = new QMimeData;
 		mimeData->setData(getButtonMime(), QByteArray());
-		mimeData->setProperty("sourceButton", qVariantFromValue(this));
+		mimeData->setProperty("sourceButton", QVariant::fromValue(this));
 
 		QDrag *drag = new QDrag(this);
 		drag->setMimeData(mimeData);

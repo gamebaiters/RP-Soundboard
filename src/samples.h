@@ -30,27 +30,6 @@ class SlotDsp;
 struct SandboxState;
 
 
-struct OlaState
-{
-	static const int WIN = 1024;       // ~21ms window at 48kHz
-	static const int HOP = 128;        // analysis hop = WIN/8
-	static const int ACC_SIZE = 8192;  // persistent output accumulator
-
-	float window[WIN];                 // Hann window (precomputed)
-	float accL[ACC_SIZE];              // output accumulator (left)
-	float accR[ACC_SIZE];              // output accumulator (right)
-	int accValid;                      // synthesis write head (fully-accumulated count)
-	int accRead;                       // output read head
-	double bufPos;                     // fractional read position in sample buffer
-	bool inited;
-
-	OlaState() : accValid(0), accRead(0), bufPos(0.0), inited(false) {}
-	void init();
-	void reset();
-	void shift();  // shift accumulator to reclaim space
-};
-
-
 class Sampler : public QObject
 {
 	Q_OBJECT
@@ -274,7 +253,13 @@ private:
 		~PlaybackSlot();
 	};
 
-	void stopSlotInternal(int slot);
+	// Tear down a slot's playback state under m_mutex, but DEFER the two
+	// operations that must not run inside the audio lock: the FFmpeg
+	// context teardown (returned InputFile* - caller closes + deletes it
+	// after releasing m_mutex) and the onStopPlaying emit (emitStop -
+	// emitting Qt signals while holding m_mutex is a latent deadlock for
+	// any direct-connection slot that calls back into the Sampler).
+	InputFile *stopSlotInternal(int slot, bool &emitStop);
 	// Async reverse-toggle worker body. Runs on a detachable std::thread
 	// spawned by setSlotReverse. Builds a fresh InputFile (heavy
 	// pre-decode for reverse, plain open for forward), then takes
@@ -287,7 +272,7 @@ private:
 	                       std::shared_ptr<std::atomic<bool>> cancel);
 	int findFreeSlot() const;
 	void setVolumeDb(double decibel);
-	int fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int count, int channels, bool eraseConsumed, int ciLeft, int ciRight, bool overLeft, bool overRight, float ampThresh = 0.0f, PlaybackSlot *slot = nullptr);
+	int fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int count, int channels, bool eraseConsumed, int ciLeft, int ciRight, bool overLeft, bool overRight, float ampThresh = 0.0f, PlaybackSlot *slot = nullptr, bool forceLimit = false);
 	int findChannelId(unsigned int channel, const unsigned int *channelSpeakerArray, int count);
 
 private:
@@ -312,6 +297,13 @@ private:
 	// can see "Sampler is dying" and quietly discard its work instead
 	// of touching the slot's m_mutex / inputFile after teardown.
 	std::atomic<bool> m_shuttingDown{false};
+	// Retired reverse workers. setSlotReverse used to join() the previous
+	// worker on the GUI thread (10-100 ms freeze on rapid toggles); now
+	// the old thread is parked here and joined opportunistically (list
+	// overflow) or at shutdown - each worker self-terminates within
+	// ~100 ms of its cancel token flipping, so joins here are short.
+	std::mutex m_retiredMutex;
+	std::vector<std::thread> m_retiredWorkers;
 };
 
 

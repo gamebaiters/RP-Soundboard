@@ -23,8 +23,12 @@
 #include "../SoundInfo.h"
 #include "../config_qt.h"
 #include "../main.h"
+#include "../AudioUtils.h"
 #include "hotkey_block.h"
 #include "theme.h"
+#include "icon_factory.h"
+
+#include <memory>
 
 #include <QMessageBox>
 #include <QFileDialog>
@@ -43,6 +47,7 @@
 #include <QTimer>
 #include <QCheckBox>
 #include <QHash>
+#include <QSet>
 #include <QVector>
 #include <QDateTime>
 #include <cmath>
@@ -73,6 +78,28 @@ static bool s_macroActive = false;
 // editor knows which SoundInfo cell to write back to. Missing entry
 // (macro restore, drag-from-file) = live-only edit, no persistence.
 static QHash<int, int> s_slotToBtnIdx;
+
+// Map slot -> last-played grid button index. UNLIKE s_slotToBtnIdx
+// this survives the slot's stop event so the replay-from-cursor path
+// can rebuild the playback context. Cleared by:
+//   - clearRequested() from the waveform (the red X next to filename),
+//   - removeChannelRequested shift handler,
+//   - replay click that mismatches the cell's current filename
+//     (cell was emptied or rebound to another file).
+struct LastPlayedCtx {
+    int     btnIdx   = -1;
+    QString filename;          // expected source file (mismatch invalidates)
+};
+static QHash<int, LastPlayedCtx> s_lastPlayedCtx;
+
+// Slots flagged for a HARD clear on the next onStopPlaying tick. Set
+// by clearRequested handlers (the red X button next to the filename,
+// also future drag-out paths) BEFORE they call sampler->stopPlayback,
+// so the queued onStopPlaying handler knows it must wipe the channel
+// instead of transitioning into the soft replay-ready state. Without
+// this flag the cleanup we did synchronously in clearRequested was
+// silently undone a few ms later when the Sampler signal arrived.
+static QSet<int> s_pendingHardClear;
 
 void pushSoundsToGrid(MainPage *page, ConfigModel *model);
 void pushSettingsToWindow(MainPage *page, ConfigModel *model);
@@ -508,8 +535,8 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
             auto *ch = page->channels().at(s);
             sampler->setSlotVolumeLocal (s, ch->volume()->local());
             sampler->setSlotVolumeRemote(s, ch->volume()->remote());
-            sampler->setSlotPitchFactor (s, static_cast<float>(std::pow(3.0, ch->fx()->pitch()  / 100.0)));
-            sampler->setSlotSpeedFactor (s, static_cast<float>(std::pow(3.0, ch->fx()->speed()  / 100.0)));
+            sampler->setSlotPitchFactor (s, AudioUtils::sliderToPitchFactor(ch->fx()->pitch() ));
+            sampler->setSlotSpeedFactor (s, AudioUtils::sliderToPitchFactor(ch->fx()->speed() ));
             sampler->setSlotReverbMix   (s, ch->fx()->reverb() / 100.0f);
         };
 
@@ -552,8 +579,8 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
                         // inputFile once playSoundInSlot returns.
                         sampler->setSlotVolumeLocal (i, st.volumeLocal);
                         sampler->setSlotVolumeRemote(i, st.volumeRemote);
-                        sampler->setSlotPitchFactor (i, static_cast<float>(std::pow(3.0, st.pitch / 100.0)));
-                        sampler->setSlotSpeedFactor (i, static_cast<float>(std::pow(3.0, st.speed / 100.0)));
+                        sampler->setSlotPitchFactor (i, AudioUtils::sliderToPitchFactor(st.pitch));
+                        sampler->setSlotSpeedFactor (i, AudioUtils::sliderToPitchFactor(st.speed));
                         sampler->setSlotReverbMix   (i, st.reverb / 100.0f);
                         if (st.playbackPos > 0.0)
                             sampler->seek(st.playbackPos, i);
@@ -576,8 +603,8 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
         const bool globalFx = model->getGlobalFxEnabled();
         if (globalFx && info->fxRemember) {
             // Per-button FX overrides the channel's current FX.
-            sampler->setSlotPitchFactor (slot, static_cast<float>(std::pow(3.0, info->fxPitch  / 100.0)));
-            sampler->setSlotSpeedFactor (slot, static_cast<float>(std::pow(3.0, info->fxSpeed  / 100.0)));
+            sampler->setSlotPitchFactor (slot, AudioUtils::sliderToPitchFactor(info->fxPitch ));
+            sampler->setSlotSpeedFactor (slot, AudioUtils::sliderToPitchFactor(info->fxSpeed ));
             sampler->setSlotReverbMix   (slot, info->fxReverb / 100.0f);
             ch->fx()->setPitch(info->fxPitch);
             ch->fx()->setSpeed(info->fxSpeed);
@@ -743,16 +770,16 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             sampler->setSlotVolumeRemote(slot, target->volume()->remote());
             const bool globalFx = model->getGlobalFxEnabled();
             if (globalFx && info->fxRemember) {
-                sampler->setSlotPitchFactor(slot, static_cast<float>(std::pow(3.0, info->fxPitch  / 100.0)));
-                sampler->setSlotSpeedFactor(slot, static_cast<float>(std::pow(3.0, info->fxSpeed  / 100.0)));
+                sampler->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(info->fxPitch ));
+                sampler->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(info->fxSpeed ));
                 sampler->setSlotReverbMix  (slot, info->fxReverb / 100.0f);
                 target->fx()->setPitch(info->fxPitch);
                 target->fx()->setSpeed(info->fxSpeed);
                 target->fx()->setReverb(info->fxReverb);
                 target->fx()->setSync (info->fxSyncPitchSpeed);
             } else if (globalFx) {
-                sampler->setSlotPitchFactor(slot, static_cast<float>(std::pow(3.0, target->fx()->pitch()  / 100.0)));
-                sampler->setSlotSpeedFactor(slot, static_cast<float>(std::pow(3.0, target->fx()->speed()  / 100.0)));
+                sampler->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(target->fx()->pitch() ));
+                sampler->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(target->fx()->speed() ));
                 sampler->setSlotReverbMix  (slot, target->fx()->reverb() / 100.0f);
             } else {
                 sampler->setSlotPitchFactor(slot, 1.0f);
@@ -768,15 +795,63 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         if (!savedName.isEmpty()) ch->setTitle(savedName);
         ch->setFxVisible(model && model->getGlobalFxEnabled());
         ch->setWaveformVisible(!(model && model->getHideWaveform()));
-        QObject::connect(ch, &Channel::removeChannelRequested, page, [page, sampler](int id){
-            // Stop slot playback BEFORE removing the widget so audio +
-            // UI tear down together.
+        QObject::connect(ch, &Channel::removeChannelRequested, page, [page, sampler, model](int id){
+            int idx = -1;
             for (int i = 0; i < page->channels().size(); ++i) {
-                if (page->channels().at(i)->channelId() == id) {
-                    if (sampler) sampler->stopPlayback(i);
-                    page->removeChannel(i);
-                    break;
+                if (page->channels().at(i)->channelId() == id) { idx = i; break; }
+            }
+            if (idx < 0) return;
+            const int oldCount = page->channels().size();
+            // Sampler slots are POSITIONAL: removing a middle channel
+            // shifts every following channel widget down by one, but
+            // audio playing on slot j > idx would stay on slot j and
+            // end up controlled by the wrong widget. Stop the removed
+            // slot AND every slot above it, then re-push each shifted
+            // channel's per-slot state to its new index below. (This
+            // closes the long-standing "middle channel removal desyncs
+            // audio routing" bug.)
+            if (sampler) {
+                for (int s = idx; s < oldCount; ++s)
+                    sampler->stopPlayback(s);
+            }
+            // Crop-edit slot->button mappings for the stopped slots are
+            // stale now (onStopPlaying also clears them, but only via a
+            // queued connection - drop them synchronously before the
+            // shift re-uses those indices). Same applies to the replay
+            // context map: the slot indices about to be shifted must
+            // not carry stale last-played records to a different widget.
+            for (int s = idx; s < oldCount; ++s) {
+                s_slotToBtnIdx.remove(s);
+                s_lastPlayedCtx.remove(s);
+            }
+
+            page->removeChannel(idx);
+
+            if (sampler) {
+                const bool sandboxOn = model && model->getAudioSandboxEnabled();
+                for (int s = idx; s < page->channels().size(); ++s) {
+                    auto *c = page->channels().at(s);
+                    if (sandboxOn && c->sandboxState().enabled)
+                        sampler->setSlotSandboxState(s, c->sandboxState());
+                    else
+                        sampler->clearSlotSandbox(s);
+                    sampler->setSlotLoop(s, c->waveform()->isLooping());
+                    sampler->setSlotReverse(s, c->waveform()->isReversed());
+                    sampler->setSlotPitchFactor(s,
+                        AudioUtils::sliderToPitchFactor(c->fx()->pitch()));
+                    sampler->setSlotSpeedFactor(s,
+                        AudioUtils::sliderToPitchFactor(c->fx()->speed()));
+                    sampler->setSlotReverbMix(s, c->fx()->reverb() / 100.0f);
+                    ChannelState st = c->state();
+                    sampler->setSlotVolumeLocal(s, st.volumeLocal);
+                    sampler->setSlotVolumeRemote(s, st.volumeRemote);
                 }
+                // The previously-highest slot index is unused now - drop
+                // its leftover per-slot state.
+                const int freed = page->channels().size();
+                sampler->clearSlotSandbox(freed);
+                sampler->setSlotLoop(freed, false);
+                sampler->setSlotReverse(freed, false);
             }
             // Channel 0 is the always-present primary.
             for (int i = 0; i < page->channels().size(); ++i) {
@@ -867,6 +942,15 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             double cropStart = 0.0, cropEnd = -1.0;
             sampler->getSlotCrop(slot, cropStart, cropEnd);
             ch->waveform()->setCropRange(cropStart, cropEnd);
+            // Record the play context for the replay-from-cursor path.
+            // s_slotToBtnIdx is set by the SoundButton click handler
+            // BEFORE this signal fires; if absent (macro restore,
+            // drag-from-file) we have no btnIdx -> store -1 and the
+            // replay handler will fall back to "no reusable source".
+            LastPlayedCtx ctx;
+            ctx.btnIdx   = s_slotToBtnIdx.value(slot, -1);
+            ctx.filename = filename;
+            s_lastPlayedCtx[slot] = ctx;
         }, Qt::QueuedConnection);
         QObject::connect(sampler, &Sampler::onStopPlaying, page,
                          [page, sampler](int slot){
@@ -874,10 +958,43 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             // Preview shares slot indices but doesn't own the UI.
             if (sampler && sampler->getState(slot) == Sampler::ePLAYING_PREVIEW) return;
             auto *wave = page->channels().at(slot)->waveform();
+
+            // Hard-clear path: clearRequested marked this slot before
+            // calling sampler->stopPlayback. Wipe the channel back to
+            // the empty "(no file)" state and drop every map entry so
+            // the X button + reload glyph go away. Without this branch
+            // the synchronous cleanup done in clearRequested would be
+            // overwritten right here by the soft replay-ready path.
+            if (s_pendingHardClear.remove(slot)) {
+                wave->setPlaying(false);
+                wave->setReplayReady(false);
+                wave->setFilename(QString());
+                wave->clearPlayback();
+                s_lastPlayedCtx.remove(slot);
+                s_slotToBtnIdx.remove(slot);
+                return;
+            }
+
             wave->setPlaying(false);
-            wave->setFilename(QString());
-            wave->clearPlayback();
-            s_slotToBtnIdx.remove(slot);
+            // Replay-from-cursor UX: KEEP filename + waveform + crop
+            // markers visible after stop so the channel still shows
+            // what it just played. Switch the play/pause button glyph
+            // to the reload icon via setReplayReady so the user can
+            // restart the sound with a single click.
+            //
+            // Cursor policy: ALWAYS snap to cropStart on a soft stop,
+            // whether the audio reached the end on its own or the user
+            // hit the red stop button. The "default position" is the
+            // head of the cropped region; the user can still move the
+            // cursor via waveform click / skip before clicking replay,
+            // and that parked position will be honoured.
+            wave->setPlaybackFraction(wave->cropStartFraction());
+            wave->setReplayReady(true);
+            // s_slotToBtnIdx is intentionally NOT removed here - the
+            // waveform's right-click crop editor needs to keep finding
+            // the cell, and the replay handler reads it back. It is
+            // cleared on clearRequested (red X), removeChannelRequested,
+            // or when a fresh playback overwrites it.
         }, Qt::QueuedConnection);
         QObject::connect(sampler, &Sampler::onPausePlaying, page,
                          [page](int slot){
@@ -946,7 +1063,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             if (isPrimary) model->setPitchValue(v);
             if (sampler) {
                 // Match legacy ConfigQt scaling: factor = 3^(v/100).
-                float factor = static_cast<float>(std::pow(3.0, v / 100.0));
+                float factor = AudioUtils::sliderToPitchFactor(v);
                 sampler->setSlotPitchFactor(slot, factor);
                 if (isPrimary) sampler->setPitchFactor(factor);
             }
@@ -956,7 +1073,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                          [model, sampler, slot, isPrimary, ch](int v){
             if (isPrimary) model->setSpeedValue(v);
             if (sampler) {
-                float factor = static_cast<float>(std::pow(3.0, v / 100.0));
+                float factor = AudioUtils::sliderToPitchFactor(v);
                 sampler->setSlotSpeedFactor(slot, factor);
                 if (isPrimary) sampler->setSpeedFactor(factor);
             }
@@ -978,19 +1095,147 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                          [sampler, slot]{ if (sampler) sampler->unpausePlayback(slot); });
         QObject::connect(ch->waveform(), &WaveformPlayer::pauseClicked,
                          [sampler, slot]{ if (sampler) sampler->pausePlayback(slot); });
+        // Replay-from-cursor. Audio is finished or was stopped. Resolve
+        // the originating cell, replay the sound, then seek to wherever
+        // the user parked the cursor (clamped to the crop range so the
+        // restart never lands outside the audible window).
+        QObject::connect(ch->waveform(), &WaveformPlayer::replayClicked,
+                         [model, sampler, slot, ch]{
+            if (!sampler) return;
+            auto it = s_lastPlayedCtx.find(slot);
+            if (it == s_lastPlayedCtx.end()) return;
+            const int btnIdx = it->btnIdx;
+            const QString expectedFile = it->filename;
+
+            // The cell may have been emptied / replaced since the
+            // original play. If so, drop the replay context and clear
+            // the channel: the soundboard's source of truth is the
+            // cell, not the channel.
+            const SoundInfo *info = (btnIdx >= 0)
+                ? model->getSoundInfo(btnIdx) : nullptr;
+            if (!info || info->filename.isEmpty()
+                || info->filename != expectedFile) {
+                s_lastPlayedCtx.remove(slot);
+                s_slotToBtnIdx.remove(slot);
+                auto *wave = ch->waveform();
+                wave->setPlaying(false);
+                wave->setReplayReady(false);
+                wave->setFilename(QString());
+                wave->clearPlayback();
+                return;
+            }
+
+            // Snapshot the cursor BEFORE play (the start signal will
+            // overwrite m_playbackPosition once the audio thread begins
+            // emitting positions). Clamp to [cropStart, cropEnd - eps]
+            // so we never restart past the end of the cut.
+            const double curFrac   = ch->waveform()->cursorFraction();
+            const double startFrac = ch->waveform()->cropStartFraction();
+            const double endFrac   = ch->waveform()->cropEndFraction();
+            const double totalLen  = ch->waveform()->totalLength();
+            double seekFrac = curFrac;
+            if (seekFrac < startFrac) seekFrac = startFrac;
+            if (seekFrac > endFrac - 0.005) seekFrac = startFrac; // wrap from end
+            const double seekSec = seekFrac * totalLen;
+
+            sampler->stopPlayback(slot);  // belt and braces; should be no-op
+            if (!sampler->playSoundInSlot(slot, *info, false))
+                return;
+            s_slotToBtnIdx[slot] = btnIdx;
+
+            // Mirror the buttonClicked path's volume + FX setup so the
+            // replay honours the channel's current sliders + per-button
+            // FX state.
+            sampler->setSlotVolumeLocal (slot, ch->volume()->local());
+            sampler->setSlotVolumeRemote(slot, ch->volume()->remote());
+            const bool globalFx = model->getGlobalFxEnabled();
+            if (globalFx && info->fxRemember) {
+                sampler->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(info->fxPitch));
+                sampler->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(info->fxSpeed));
+                sampler->setSlotReverbMix  (slot, info->fxReverb / 100.0f);
+            } else if (globalFx) {
+                sampler->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(ch->fx()->pitch()));
+                sampler->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(ch->fx()->speed()));
+                sampler->setSlotReverbMix  (slot, ch->fx()->reverb() / 100.0f);
+            } else {
+                sampler->setSlotPitchFactor(slot, 1.0f);
+                sampler->setSlotSpeedFactor(slot, 1.0f);
+                sampler->setSlotReverbMix  (slot, 0.0f);
+            }
+
+            // Honour the parked cursor unless it would land at the very
+            // start of the crop region (in which case the natural play
+            // entry point is already correct - no seek needed).
+            if (seekSec > 0.05)
+                sampler->seek(seekSec, slot);
+        });
+        // Red "X" next to the filename label. Wipes every trace of the
+        // sound from the channel: stops any residual playback, drops
+        // replay state + slot/btn bookkeeping, hides clear button.
+        QObject::connect(ch->waveform(), &WaveformPlayer::clearRequested,
+                         [sampler, slot, ch]{
+            // Mark the slot for a hard clear BEFORE asking Sampler to
+            // stop - the stop() call queues an onStopPlaying signal
+            // that would otherwise transition the channel back into
+            // soft replay-ready state a couple of ms later and undo
+            // our work. The hard-clear branch in the onStopPlaying
+            // handler reads the flag and short-circuits.
+            s_pendingHardClear.insert(slot);
+            if (sampler) sampler->stopPlayback(slot);
+            // Synchronous UI cleanup so the X button + reload glyph
+            // disappear instantly - the queued onStopPlaying tick
+            // arrives a frame later and the hard-clear branch then
+            // confirms the same state (idempotent).
+            auto *wave = ch->waveform();
+            wave->setPlaying(false);
+            wave->setReplayReady(false);
+            wave->setFilename(QString());
+            wave->clearPlayback();
+            s_lastPlayedCtx.remove(slot);
+            s_slotToBtnIdx.remove(slot);
+        });
         QObject::connect(ch->waveform(), &WaveformPlayer::skip,
                          [sampler, slot, ch](int sec){
             if (!sampler) return;
-            double cur = sampler->getPosition(slot);
-            sampler->seek(cur + sec, slot);
-            ch->waveform()->notifySeek();
+            auto *wave = ch->waveform();
+            const auto st = sampler->getState(slot);
+            if (st == Sampler::ePLAYING || st == Sampler::ePAUSED) {
+                double cur = sampler->getPosition(slot);
+                sampler->seek(cur + sec, slot);
+                wave->notifySeek();
+                return;
+            }
+            // Replay / idle state: skip only moves the visual cursor.
+            // The next replay click reads it back via cursorFraction().
+            const double totalLen = wave->totalLength();
+            if (totalLen <= 0.0) return;
+            double curFrac = wave->cursorFraction();
+            if (curFrac < 0.0) curFrac = wave->cropStartFraction();
+            const double startFrac = wave->cropStartFraction();
+            const double endFrac   = wave->cropEndFraction();
+            double newFrac = curFrac + double(sec) / totalLen;
+            if (newFrac < startFrac) newFrac = startFrac;
+            if (newFrac > endFrac)   newFrac = endFrac;
+            wave->setPlaybackFraction(newFrac);
         });
         QObject::connect(ch->waveform(), &WaveformPlayer::seekRequested,
                          [sampler, slot, ch](double frac){
             if (!sampler) return;
-            double len = sampler->getLength(slot);
-            if (len > 0.0) sampler->seek(frac * len, slot);
-            ch->waveform()->notifySeek();
+            auto *wave = ch->waveform();
+            const auto st = sampler->getState(slot);
+            if (st == Sampler::ePLAYING || st == Sampler::ePAUSED) {
+                double len = sampler->getLength(slot);
+                if (len > 0.0) sampler->seek(frac * len, slot);
+                wave->notifySeek();
+                return;
+            }
+            // Replay / idle state: clamp to crop range and just move
+            // the cursor. No audio fires until the user clicks reload.
+            const double startFrac = wave->cropStartFraction();
+            const double endFrac   = wave->cropEndFraction();
+            if (frac < startFrac) frac = startFrac;
+            if (frac > endFrac)   frac = endFrac;
+            wave->setPlaybackFraction(frac);
         });
         QObject::connect(ch->waveform(), &WaveformPlayer::loopToggled,
                          [sampler, slot](bool on){
@@ -1029,7 +1274,18 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         auto *primary = page->channelAt(0);
         auto *fresh   = page->channelAt(idx);
         if (!primary || !fresh) return;
-        fresh->applyState(primary->state());
+        // Copy ONLY the per-channel settings the user expects to
+        // propagate (vol / fx / sandbox / loop / reverse / sync). The
+        // primary channel's filename + playback position belong to
+        // its currently-loaded sound and must NOT leak into a fresh
+        // channel: copying them made the new channel pretend the
+        // primary's sound was already loaded there too, showing the
+        // filename label + waveform + replay icon for a sound it had
+        // never played.
+        ChannelState st = primary->state();
+        st.filename.clear();
+        st.playbackPos = 0.0;
+        fresh->applyState(st);
     });
 
     QObject::connect(page->resetButton(), &ResetChannelsBtn::resetRequested,
@@ -1122,8 +1378,8 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         // Multi-channel always on: one sampler slot per Channel widget.
         sampler->setMultiMode(true);
         model->setMultiSoundboard(true);
-        sampler->setPitchFactor(static_cast<float>(std::pow(3.0, model->getPitchValue()  / 100.0)));
-        sampler->setSpeedFactor(static_cast<float>(std::pow(3.0, model->getSpeedValue()  / 100.0)));
+        sampler->setPitchFactor(AudioUtils::sliderToPitchFactor(model->getPitchValue() ));
+        sampler->setSpeedFactor(AudioUtils::sliderToPitchFactor(model->getSpeedValue() ));
     }
 
     // Push ConfigModel vol/FX onto channel 0.
@@ -1166,43 +1422,144 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     });
     page->updateChannelsAreaHeight(!model->getHideWaveform());
 
-    // Pause / Resume all toggle
+    // Pause-all is a tristate now:
+    //   * Pause / Resume all - the classic toggle, when at least one
+    //     channel is actively playing or paused.
+    //   * Replay all          - when every channel is stopped but at
+    //     least one still has a last-played sound on record. Click
+    //     restarts each replay-ready channel from its parked cursor.
+    //   * Disabled            - nothing playing, nothing replayable.
     auto *pauseBtn = page->pauseAllBtn();
-    pauseBtn->setCheckable(true);
-    QObject::connect(pauseBtn, &QPushButton::toggled, pauseBtn,
-                     [pauseBtn, sampler](bool checked){
-        if (!sampler) return;
-        if (checked) {
-            sampler->pausePlayback(-1);
-            pauseBtn->setText(QObject::tr("Resume all"));
-            pauseBtn->setIcon(QIcon(":/icon/img/playarrow_32.png"));
-        } else {
-            sampler->unpausePlayback(-1);
-            pauseBtn->setText(QObject::tr("Pause all"));
-            pauseBtn->setIcon(QIcon(":/icon/img/pausebutton_32.png"));
+    pauseBtn->setCheckable(false);    // we drive the icon manually now
+
+    enum class PauseAllMode { Idle, Pause, Resume, Replay };
+    auto modeProp = std::make_shared<int>(0);
+
+    auto computeMode = [sampler, page]() -> PauseAllMode {
+        if (!sampler) return PauseAllMode::Idle;
+        bool anyPlaying = false, anyPaused = false;
+        const int n = page->channels().size();
+        for (int i = 0; i < n; ++i) {
+            auto st = sampler->getState(i);
+            if (st == Sampler::ePLAYING)      anyPlaying = true;
+            else if (st == Sampler::ePAUSED)  anyPaused  = true;
         }
+        if (anyPlaying) return PauseAllMode::Pause;
+        if (anyPaused)  return PauseAllMode::Resume;
+        if (!s_lastPlayedCtx.isEmpty()) return PauseAllMode::Replay;
+        return PauseAllMode::Idle;
+    };
+    auto applyMode = [pauseBtn, modeProp](PauseAllMode m){
+        *modeProp = static_cast<int>(m);
+        switch (m) {
+        case PauseAllMode::Pause:
+            pauseBtn->setEnabled(true);
+            pauseBtn->setText(QObject::tr("Pause all"));
+            pauseBtn->setIcon(IconFactory::pause());
+            pauseBtn->setToolTip(QObject::tr("Pause every active channel"));
+            break;
+        case PauseAllMode::Resume:
+            pauseBtn->setEnabled(true);
+            pauseBtn->setText(QObject::tr("Resume all"));
+            pauseBtn->setIcon(IconFactory::play());
+            pauseBtn->setToolTip(QObject::tr("Resume every paused channel"));
+            break;
+        case PauseAllMode::Replay:
+            pauseBtn->setEnabled(true);
+            pauseBtn->setText(QObject::tr("Replay all"));
+            pauseBtn->setIcon(IconFactory::reload());
+            pauseBtn->setToolTip(QObject::tr(
+                "Replay every channel that still has a sound loaded"));
+            break;
+        case PauseAllMode::Idle:
+            pauseBtn->setEnabled(false);
+            pauseBtn->setText(QObject::tr("Pause all"));
+            pauseBtn->setIcon(IconFactory::pause());
+            pauseBtn->setToolTip(QObject::tr(
+                "No active or replayable channels"));
+            break;
+        }
+    };
+    auto refreshPauseAll = [computeMode, applyMode]{
+        applyMode(computeMode());
+    };
+    refreshPauseAll();
+
+    QObject::connect(pauseBtn, &QPushButton::clicked, pauseBtn,
+                     [pauseBtn, sampler, page, model, modeProp, refreshPauseAll]{
+        const PauseAllMode m = static_cast<PauseAllMode>(*modeProp);
+        if (!sampler) return;
+        switch (m) {
+        case PauseAllMode::Pause:
+            sampler->pausePlayback(-1);
+            break;
+        case PauseAllMode::Resume:
+            sampler->unpausePlayback(-1);
+            break;
+        case PauseAllMode::Replay:
+            for (auto it = s_lastPlayedCtx.begin();
+                 it != s_lastPlayedCtx.end(); ++it) {
+                const int slot   = it.key();
+                const int btnIdx = it->btnIdx;
+                if (slot < 0 || slot >= page->channels().size()) continue;
+                if (btnIdx < 0) continue;
+                const SoundInfo *info = model->getSoundInfo(btnIdx);
+                if (!info || info->filename.isEmpty()
+                    || info->filename != it->filename) continue;
+                sampler->stopPlayback(slot);
+                if (!sampler->playSoundInSlot(slot, *info, false)) continue;
+                s_slotToBtnIdx[slot] = btnIdx;
+                auto *ch = page->channels().at(slot);
+                sampler->setSlotVolumeLocal (slot, ch->volume()->local());
+                sampler->setSlotVolumeRemote(slot, ch->volume()->remote());
+                const bool globalFx = model->getGlobalFxEnabled();
+                if (globalFx && info->fxRemember) {
+                    sampler->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(info->fxPitch));
+                    sampler->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(info->fxSpeed));
+                    sampler->setSlotReverbMix  (slot, info->fxReverb / 100.0f);
+                } else if (globalFx) {
+                    sampler->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(ch->fx()->pitch()));
+                    sampler->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(ch->fx()->speed()));
+                    sampler->setSlotReverbMix  (slot, ch->fx()->reverb() / 100.0f);
+                } else {
+                    sampler->setSlotPitchFactor(slot, 1.0f);
+                    sampler->setSlotSpeedFactor(slot, 1.0f);
+                    sampler->setSlotReverbMix  (slot, 0.0f);
+                }
+            }
+            break;
+        case PauseAllMode::Idle:
+            break;
+        }
+        refreshPauseAll();
     });
+
     if (sampler) {
         QObject::connect(sampler, &Sampler::onStartPlaying, pauseBtn,
-                         [pauseBtn](int, bool, QString){
-            if (pauseBtn->isChecked()) {
-                QSignalBlocker b(pauseBtn);
-                pauseBtn->setChecked(false);
-                pauseBtn->setText(QObject::tr("Pause all"));
-                pauseBtn->setIcon(QIcon(":/icon/img/pausebutton_32.png"));
-            }
-        }, Qt::QueuedConnection);
+                         [refreshPauseAll](int, bool, QString){ refreshPauseAll(); },
+                         Qt::QueuedConnection);
+        QObject::connect(sampler, &Sampler::onStopPlaying, pauseBtn,
+                         [refreshPauseAll](int){ refreshPauseAll(); },
+                         Qt::QueuedConnection);
+        QObject::connect(sampler, &Sampler::onPausePlaying, pauseBtn,
+                         [refreshPauseAll](int){ refreshPauseAll(); },
+                         Qt::QueuedConnection);
+        QObject::connect(sampler, &Sampler::onUnpausePlaying, pauseBtn,
+                         [refreshPauseAll](int){ refreshPauseAll(); },
+                         Qt::QueuedConnection);
     }
+    // Belt-and-braces 500 ms tick. Catches replay-state changes that
+    // don't flow through Sampler signals (clearRequested handler, cell
+    // unbind detected at replay time, etc.).
+    auto *pauseAllTimer = new QTimer(pauseBtn);
+    pauseAllTimer->setInterval(500);
+    QObject::connect(pauseAllTimer, &QTimer::timeout, pauseBtn, refreshPauseAll);
+    pauseAllTimer->start();
 
     QObject::connect(page->stopAllBtn(), &QPushButton::clicked,
-                     pauseBtn, [sampler, pauseBtn]{
+                     pauseBtn, [sampler, refreshPauseAll]{
         if (sampler) sampler->stopPlayback(-1);
-        if (pauseBtn->isChecked()) {
-            QSignalBlocker b(pauseBtn);
-            pauseBtn->setChecked(false);
-            pauseBtn->setText(QObject::tr("Pause all"));
-            pauseBtn->setIcon(QIcon(":/icon/img/pausebutton_32.png"));
-        }
+        refreshPauseAll();
     });
 
     // Profile switcher wiring
@@ -1267,8 +1624,8 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 if (sampler->playSoundInSlot(i, info, false)) {
                     sampler->setSlotVolumeLocal (i, st.volumeLocal);
                     sampler->setSlotVolumeRemote(i, st.volumeRemote);
-                    sampler->setSlotPitchFactor (i, static_cast<float>(std::pow(3.0, st.pitch / 100.0)));
-                    sampler->setSlotSpeedFactor (i, static_cast<float>(std::pow(3.0, st.speed / 100.0)));
+                    sampler->setSlotPitchFactor (i, AudioUtils::sliderToPitchFactor(st.pitch));
+                    sampler->setSlotSpeedFactor (i, AudioUtils::sliderToPitchFactor(st.speed));
                     sampler->setSlotReverbMix   (i, st.reverb / 100.0f);
                     sampler->setSlotSandboxState(i, st.sandbox);
                     if (st.playbackPos > 0.0)
@@ -1325,7 +1682,14 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 auto *ch = page->channels().at(i);
                 if (!active) {
                     if ((*wasActive)[i]) {
-                        ch->waveform()->clearPlayback();
+                        // Replay UX: KEEP the waveform / filename / time
+                        // label after the playing -> silent transition.
+                        // onStopPlaying already snapped the cursor + set
+                        // the channel to replay-ready, so calling
+                        // clearPlayback() here would wipe the visual
+                        // context the user is about to act on (the X
+                        // button + the reload icon both rely on the
+                        // filename still being visible).
                         (*wasActive)[i] = false;
                     }
                     continue;
@@ -1336,7 +1700,9 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 if (len > 0.0) {
                     ch->waveform()->setPlaybackFraction(pos / len);
                     ch->waveform()->setPosition(pos, len);
-                } else {
+                } else if (!ch->waveform()->isReplayReady()) {
+                    // No length AND not in replay-ready mode -> the slot
+                    // genuinely has no sound loaded. Safe to wipe.
                     ch->waveform()->clearPlayback();
                     (*wasActive)[i] = false;
                 }
@@ -1466,8 +1832,8 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
             // matches the audible signal. Sandbox state is taken by
             // value so subsequent slider tweaks during the export don't
             // mutate the bake.
-            const float pitchFactor  = static_cast<float>(std::pow(3.0, src_ch->fx()->pitch()  / 100.0));
-            const float speedFactor  = static_cast<float>(std::pow(3.0, src_ch->fx()->speed()  / 100.0));
+            const float pitchFactor  = AudioUtils::sliderToPitchFactor(src_ch->fx()->pitch() );
+            const float speedFactor  = AudioUtils::sliderToPitchFactor(src_ch->fx()->speed() );
             const float reverbMix    = src_ch->fx()->reverb() / 100.0f;
             const bool  sandboxOn    = model->getAudioSandboxEnabled() && src_ch->sandboxState().enabled;
             // No QObject parent: the thread owns its own lifetime and
@@ -1592,14 +1958,21 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         // Separate, slow timer pushes the per-channel DSP CPU% into any
         // sandbox dialog that is currently open. 1 Hz tick - the
         // measurement is rolling and the user does not need 60 Hz on a
-        // diagnostic readout. Also drained when the page is hidden so
-        // there is no measurement noise + no needless atomic exchanges
-        // while the soundboard isn't on screen.
+        // diagnostic readout. Drained when the page is hidden so there
+        // is no measurement noise while the soundboard isn't on screen.
+        //
+        // The previous "!anyPlaying" early-exit made the CPU label
+        // FREEZE at the last reading whenever every slot was idle or
+        // the user toggled the sandbox off - the label never returned
+        // to "<0.1%". Always pushing the current cpuPercent() value
+        // (which is 0 at rest because the audio thread accumulated
+        // zero frames) keeps the display honest. Channel::pushSandboxCpu
+        // is a no-op when the per-channel sandbox dialog isn't open,
+        // so the loop is effectively free for the common case.
         auto *cpuTimer = new QTimer(page);
         cpuTimer->setInterval(1000);
         QObject::connect(cpuTimer, &QTimer::timeout, page, [page, sampler](){
             if (!page->isVisible()) return;
-            if (!sampler->anyPlaying()) return;
             const int n = page->channels().size();
             for (int i = 0; i < n; ++i)
                 page->channels().at(i)->pushSandboxCpu(

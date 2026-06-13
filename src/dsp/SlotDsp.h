@@ -119,6 +119,12 @@ public:
     // Lock-free; the audio thread updates atomics from runFftAnalysis.
     void getEqBandLevels(float out[16]) const;
 
+    // Output-domain gain hint for the EQ FFT analyser. Sampler pushes
+    // (volume slider * intensity) here so the per-band LEDs reflect what
+    // the listener actually hears (post-chain spectrum * volume), not
+    // the raw decoded input. Lock-free read in the audio path.
+    void setOutputGain(float g) { m_outputGain.store(g, std::memory_order_relaxed); }
+
 private:
     // Per-path DSP state. Capture path (server-bound) and playback
     // path (local-bound) keep INDEPENDENT EQ + Positional + Reverb
@@ -195,4 +201,10 @@ private:
     float  m_fxReverbWet = 0.0f;     // FxPanel reverb routed here
     void   refreshReverbWet();
     void   recomputeActive();
+
+    // Pushed by Sampler before each process() / produceStretchedShort()
+    // call. The audio path multiplies the post-chain signal by this gain
+    // before feeding the EQ analyser, so LEDs reflect "what the listener
+    // hears" - shaped by EQ + every effect + slot volume + intensity.
+    std::atomic<float> m_outputGain{1.0f};
 };

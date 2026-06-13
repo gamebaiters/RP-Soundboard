@@ -8,6 +8,7 @@
 
 
 #include "common.h"
+#include "AudioUtils.h"
 
 #include <cstdio>
 #include <cmath>
@@ -109,20 +110,20 @@ void ModelObserver_Prog::notify(ConfigModel &model, ConfigModel::notifications_e
 		break;
 	case ConfigModel::NOTIFY_SET_PITCH_SPEED:
 	{
-		float factor = (float)pow(3.0, data / 100.0);
+		float factor = AudioUtils::sliderToPitchFactor(data);
 		sampler->setPitchFactor(factor);
 		sampler->setSpeedFactor(factor);
 		break;
 	}
 	case ConfigModel::NOTIFY_SET_PITCH:
 	{
-		float factor = (float)pow(3.0, data / 100.0);
+		float factor = AudioUtils::sliderToPitchFactor(data);
 		sampler->setPitchFactor(factor);
 		break;
 	}
 	case ConfigModel::NOTIFY_SET_SPEED:
 	{
-		float factor = (float)pow(3.0, data / 100.0);
+		float factor = AudioUtils::sliderToPitchFactor(data);
 		sampler->setSpeedFactor(factor);
 		break;
 	}
@@ -352,10 +353,9 @@ CAPI void sb_kill()
 	// / flushClientSelfUpdates from us hits freed pointers in that DLL.
 	if (tsMgr) tsMgr->onConnectionLost();
 
-	// Stop the singleton visualizer thread FIRST. It's a std::thread that holds
-	// references to DLL code; if it survives DLL unload, FreeLibrary fails and
-	// TS3's plugin uninstall leaves the file locked.
-	SampleVisualizerThread::GetInstance().stop(true);
+	// Visualizer threads are now per-SoundView instances; each widget's
+	// destructor stops + joins its own thread when the windows are torn
+	// down below, so no global visualizer stop is needed here.
 
 	if (uiTranslator)
 	{

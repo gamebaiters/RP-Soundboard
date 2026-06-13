@@ -409,16 +409,6 @@ private:
 	int getAudioStreamNum() const;
 	int buildFilterGraph(bool allowPitch = true);
 	int _seek(double seconds); // Internal seek without locking (caller must hold m_mutex)
-	// Reverse-playback pre-decode: drains the whole filter graph into
-	// m_reverseBuf, then reverses the interleaved short buffer in
-	// place. Called once from open() when m_reverse is true.
-	int preDecodeAndReverse();
-	// Re-decode + re-reverse the buffer with the current pitch/speed
-	// factors. Called whenever the user moves the FxPanel pitch /
-	// speed sliders while a reverse playback is active. Keeps the
-	// playhead at the same forward-file position so the cursor does
-	// not jump.
-	int rebuildReverseBuffer();
 
 	typedef std::lock_guard<std::mutex> Lock;
 private:
@@ -439,36 +429,29 @@ private:
 	mutable std::mutex m_mutex;
 	int64_t m_decodedSamples;
 	int64_t m_convertedSamples;
-	double m_filePosition;          // actual position in original file (seconds), written under m_mutex
+	// Actual position in the original file (seconds). Written under
+	// m_mutex; read lock-free by getPosition() from the audio thread -
+	// atomic so the unsynchronised read is well-defined.
+	std::atomic<double> m_filePosition{0.0};
+	// File length cached once at the end of open() so getLength() never
+	// needs m_mutex. The chunked-reverse worker holds m_mutex for tens
+	// of ms per decode; the audio thread polls getLength() every cycle,
+	// so a mutex there stalls the TS3 callback (reverse-mode stutter).
+	std::atomic<double> m_cachedLengthSec{-1.0};
 	float m_pitchFactor;
 	float m_speedFactor;
 	float m_reverbMix;
-	// Reverse playback toggle. Set BEFORE open(); the decoder reads the
-	// whole file into m_reverseBuf, reverses it, and readSamples then
-	// replays from the buffer. areverse-as-filter does not work with
-	// the streaming readSamples loop (areverse needs input EOF).
+	// Reverse playback toggle. Set BEFORE open(); when true open()
+	// spawns the chunked streaming-reverse worker (see below). The old
+	// whole-file pre-decode path was removed once streaming reverse
+	// became the only mode.
 	bool  m_reverse        = false;
-	bool  m_reverseReady   = false;
-	std::vector<short> m_reverseBuf;
-	int64_t            m_reversePos = 0;   // output sample index
-	// Deferred rebuild: setPitch/setSpeed mark dirty + record the
-	// current steady-clock tick. readSamples performs the heavy
-	// re-decode only after the dirty flag has been quiet for ~250 ms.
-	// Coalesces a slider drag at 60 Hz into a single rebuild.
-	bool                 m_reverseRebuildPending = false;
-	std::chrono::steady_clock::time_point m_reverseRebuildTouch;
-	// Speed factor captured at the last rebuild. The forward-time
-	// mapping uses this value because the reverse buffer was decoded
-	// with atempo applied - output sample count is fileDur/speedF.
-	float                m_reverseSpeedAtBuild   = 1.0f;
 	// LUFS auto-normalisation toggle. Set BEFORE open(); buildFilterGraph
 	// appends a loudnorm filter targeting -16 LUFS integrated.
 	bool  m_autoNormalize = false;
-	// Cooperative cancel token for the reverse pre-decode pass. Polled
-	// inside preDecodeAndReverse's hot loop so a worker spawned by the
-	// async setSlotReverse path can be asked to give up without waiting
-	// on a multi-minute file. Lifetime owned by caller (Sampler holds a
-	// shared_ptr<atomic<bool>> per slot).
+	// Cooperative cancel token set by the async setSlotReverse worker so
+	// an in-flight open() can be asked to give up early. Lifetime owned
+	// by caller (Sampler holds a shared_ptr<atomic<bool>> per slot).
 	std::atomic<bool> *m_cancelToken = nullptr;
 
 	// ===== STREAMING REVERSE (chunked seek-and-decode) =====
@@ -520,16 +503,11 @@ private:
 	                           double maxForward);
 	void stopStreamingReverse();
 	int m_abufferDeclaredRate;      // rate declared to abuffer (may differ from codec rate for pitch)
-	int64_t m_maxConvertedSamples;
-	// End-of-playback bound in INPUT-file seconds. m_maxConvertedSamples
-	// was the previous mechanism but, being in OUTPUT samples, it became
-	// inconsistent under any non-1.0 speedFactor: a 10-second crop with
-	// speed=2 stopped the decoder at 20 s of input (because 10*48000
-	// output samples * 2 = 20 s of source) instead of at the requested
-	// 10 s mark. m_maxFilePosition is compared against m_filePosition
-	// (which is tracked in input seconds) so the bound stays correct no
+	// End-of-playback bound in INPUT-file seconds, compared against
+	// m_filePosition (also input-time) so the bound stays correct no
 	// matter how pitch / speed are adjusted during playback. 0.0 means
-	// "unbounded". When both are set m_maxFilePosition wins.
+	// "unbounded". (The old OUTPUT-samples bound m_maxConvertedSamples
+	// was removed: it desynced under any non-1.0 speedFactor.)
 	double  m_maxFilePosition;
 	// Forward-time lower bound. Reverse playback stops when
 	// m_filePosition crosses below this; forward seeking past it does
@@ -585,8 +563,8 @@ void InputFileFFmpeg::reset()
 	m_decodedSamples = 0;
 	m_convertedSamples = 0;
 	m_filePosition = 0.0;
+	m_cachedLengthSec = -1.0;
 	m_abufferDeclaredRate = 0;
-	m_maxConvertedSamples = 0;
 	m_maxFilePosition = 0.0;
 	m_nextSeekTimestamp = 0;
 	m_skipSamples = 0;
@@ -819,7 +797,12 @@ int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
 	// -16 LUFS integrated, -1 dBTP true peak, 11 LU range. Single-pass
 	// mode (slower convergence but no two-pass cost) - good enough for
 	// SFX/short content, the dominant soundboard use-case.
-	if (m_autoNormalize) filters += "loudnorm=I=-16:TP=-1:LRA=11,";
+	// SKIPPED in reverse mode: the streaming-reverse worker rebuilds the
+	// filter graph for every 3 s chunk, so single-pass loudnorm restarts
+	// its convergence at every chunk boundary - audible as loudness
+	// pumping at the chunk cadence. Reverse playback therefore runs
+	// without auto-normalisation.
+	if (m_autoNormalize && !m_reverse) filters += "loudnorm=I=-16:TP=-1:LRA=11,";
 
 	filters += "aformat=sample_fmts=s16:sample_rates=48000";
 
@@ -1080,19 +1063,25 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 	}
 
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59, 37, 100)
-	logInfo("Opened file: %s; Codec: %s, Channels: %i, Rate: %i, Format: %s, Timebase: %i/%i, Sample-Estimation: %ll",
+	logInfo("Opened file: %s; Codec: %s, Channels: %i, Rate: %i, Format: %s, Timebase: %i/%i, Sample-Estimation: %lld",
 		filename, codec->long_name, m_codecCtx->ch_layout.nb_channels, m_codecCtx->sample_rate,
 		av_get_sample_fmt_name(m_codecCtx->sample_fmt), m_fmtCtx->streams[m_streamIndex]->time_base.num, m_fmtCtx->streams[m_streamIndex]->time_base.den,
-		outputSamplesEstimation());
+		(long long)outputSamplesEstimation());
 #else
-	logInfo("Opened file: %s; Codec: %s, Channels: %i, Rate: %i, Format: %s, Timebase: %i/%i, Sample-Estimation: %ll",
+	logInfo("Opened file: %s; Codec: %s, Channels: %i, Rate: %i, Format: %s, Timebase: %i/%i, Sample-Estimation: %lld",
 		filename, codec->long_name, m_codecCtx->channels, m_codecCtx->sample_rate,
 		av_get_sample_fmt_name(m_codecCtx->sample_fmt), m_fmtCtx->streams[m_streamIndex]->time_base.num, m_fmtCtx->streams[m_streamIndex]->time_base.den,
-		outputSamplesEstimation());
+		(long long)outputSamplesEstimation());
 #endif
 
 	m_opened = true;
 	dbgLog("  file opened successfully, estimation=%lld samples", (long long)outputSamplesEstimation());
+
+	// Cache the file length once so getLength() is lock-free from now
+	// on (the audio thread polls it every cycle).
+	m_cachedLengthSec.store(
+		(double)outputSamplesEstimation() / (double)m_outputSamplerate,
+		std::memory_order_relaxed);
 
 	// Use internal _seek (no lock) — we already hold m_mutex from open()
 	if(startPosSeconds > 0.0 && !m_reverse)
@@ -1124,174 +1113,6 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 		m_filePosition = cursorForward;
 	}
 
-	return 0;
-}
-
-int InputFileFFmpeg::preDecodeAndReverse()
-{
-	AVFrame *frame = av_frame_alloc();
-	AVFrame *filt_frame = av_frame_alloc();
-	AVPacket *packet = av_packet_alloc();
-	if (!frame || !filt_frame || !packet) {
-		if (frame) av_frame_free(&frame);
-		if (filt_frame) av_frame_free(&filt_frame);
-		if (packet) av_packet_free(&packet);
-		return -1;
-	}
-
-	// Pre-reserve the destination buffer. The decoder appends in small
-	// chunks (typical AVFrame nb_samples = 1024) and the default
-	// std::vector growth strategy is amortised O(1) but still costs a
-	// realloc + memcpy on every doubling. For a 5-minute stereo file
-	// that's ~28M shorts (~57 MB) growing through ~24 reallocations.
-	// outputSamplesEstimation() gives a tight bound from the container
-	// header so one allocation covers the whole decode.
-	int channels = m_outputChannels;
-	if (channels <= 0) channels = 2;
-	int64_t estSamples = outputSamplesEstimation();
-	if (estSamples > 0) {
-		// outputSamplesEstimation is in the INPUT-time domain; reverse
-		// buffer is in the OUTPUT-rate-with-atempo domain. Divide by
-		// speedFactor (which atempo applies) to get OUT samples.
-		double speedF = (m_speedFactor > 0.0f) ? (double)m_speedFactor : 1.0;
-		int64_t expected = (int64_t)((double)estSamples / speedF) + 4096;
-		m_reverseBuf.reserve((size_t)(expected * channels));
-	}
-
-	bool cancelled = false;
-	int packetCounter = 0;
-	auto checkCancel = [&]() {
-		// Poll the cancel token every 64 packets to keep overhead
-		// negligible while still bailing within ~10-50 ms of a request.
-		if (!m_cancelToken) return false;
-		if ((++packetCounter & 63) != 0) return false;
-		return m_cancelToken->load(std::memory_order_relaxed);
-	};
-
-	auto drainSink = [&]() {
-		while (av_buffersink_get_frame(m_bufSinkCtx, filt_frame) >= 0) {
-			int outSamples = filt_frame->nb_samples;
-			if (outSamples > 0) {
-				short *outPtr = (short*)filt_frame->extended_data[0];
-				size_t prev = m_reverseBuf.size();
-				m_reverseBuf.resize(prev + outSamples * m_outputChannels);
-				std::memcpy(m_reverseBuf.data() + prev, outPtr,
-				            outSamples * m_outputChannels * sizeof(short));
-			}
-			av_frame_unref(filt_frame);
-		}
-	};
-
-	while (av_read_frame(m_fmtCtx, packet) >= 0) {
-		if (packet->stream_index == m_streamIndex) {
-			if (avcodec_send_packet(m_codecCtx, packet) == 0) {
-				while (avcodec_receive_frame(m_codecCtx, frame) == 0) {
-					if (m_abufferDeclaredRate > 0)
-						frame->sample_rate = m_abufferDeclaredRate;
-					av_buffersrc_add_frame_flags(m_bufSrcCtx, frame,
-					                              AV_BUFFERSRC_FLAG_KEEP_REF);
-					drainSink();
-					av_frame_unref(frame);
-				}
-			}
-		}
-		av_packet_unref(packet);
-		if (checkCancel()) { cancelled = true; break; }
-	}
-
-	if (!cancelled) {
-		avcodec_send_packet(m_codecCtx, NULL);
-		while (avcodec_receive_frame(m_codecCtx, frame) == 0) {
-			av_buffersrc_add_frame_flags(m_bufSrcCtx, frame,
-			                              AV_BUFFERSRC_FLAG_KEEP_REF);
-			drainSink();
-			av_frame_unref(frame);
-		}
-		av_buffersrc_add_frame_flags(m_bufSrcCtx, NULL, 0);
-		drainSink();
-	}
-
-	av_frame_free(&frame);
-	av_frame_free(&filt_frame);
-	av_packet_free(&packet);
-
-	if (cancelled) {
-		m_reverseBuf.clear();
-		m_reverseBuf.shrink_to_fit();
-		dbgLog("  preDecodeAndReverse cancelled");
-		return -1;
-	}
-
-	int64_t totalSamples = (int64_t)m_reverseBuf.size() / channels;
-	// In-place buffer reverse. Stereo fast-path swaps interleaved
-	// pairs as one uint32 each, halving the loop body's instruction
-	// count vs the per-channel std::swap. Mono / other layouts fall
-	// back to the generic path.
-	if (channels == 2 && totalSamples > 1) {
-		uint32_t *p32 = reinterpret_cast<uint32_t*>(m_reverseBuf.data());
-		for (int64_t i = 0, j = totalSamples - 1; i < j; ++i, --j)
-			std::swap(p32[i], p32[j]);
-	} else {
-		for (int64_t i = 0, j = totalSamples - 1; i < j; ++i, --j) {
-			for (int c = 0; c < channels; ++c) {
-				std::swap(m_reverseBuf[i * channels + c],
-				          m_reverseBuf[j * channels + c]);
-			}
-		}
-	}
-
-	m_reversePos    = 0;
-	m_reverseReady  = true;
-	// Speed factor as it was at decode time. All future forward-time
-	// math uses this value, NOT the live m_speedFactor: changing the
-	// slider after a rebuild leaves m_speedFactor diverged until the
-	// next rebuild settles.
-	m_reverseSpeedAtBuild = (m_speedFactor > 0.0f) ? m_speedFactor : 1.0f;
-	double speedF = m_reverseSpeedAtBuild;
-	// Initial position = cropEnd if set, otherwise file length. Map
-	// forward time to output samples via speedF.
-	double startFwd = (m_maxFilePosition > 0.0)
-		? m_maxFilePosition
-		: (double)totalSamples / (double)m_outputSamplerate * speedF;
-	int64_t startOutSamples = (int64_t)(
-		startFwd * (double)m_outputSamplerate / speedF + 0.5);
-	if (startOutSamples < 0) startOutSamples = 0;
-	if (startOutSamples > totalSamples) startOutSamples = totalSamples;
-	m_reversePos    = totalSamples - startOutSamples;
-	m_filePosition  = startFwd;
-	m_convertedSamples = 0;
-	dbgLog("  preDecodeAndReverse OK: %lld samples buffered",
-	       (long long)totalSamples);
-	return 0;
-}
-
-int InputFileFFmpeg::rebuildReverseBuffer()
-{
-	// Save user-visible forward position so the cursor does not jump.
-	double savedFwd = m_filePosition;
-	int channelsOut = m_outputChannels > 0 ? m_outputChannels : 2;
-	// Drop existing buffer + re-build the filter graph with current
-	// pitch / speed factors via _seek(0). Then drain the whole file
-	// through it again.
-	m_reverseBuf.clear();
-	m_reverseReady = false;
-	m_reversePos   = 0;
-	int sret = _seek(0.0);
-	if (sret < 0) return sret;
-	int pret = preDecodeAndReverse();
-	if (pret < 0) return pret;
-	// Map savedFwd to output samples via the FRESH speed factor
-	// (preDecodeAndReverse already cached it into m_reverseSpeedAtBuild).
-	int64_t totalSamples = (int64_t)m_reverseBuf.size() / channelsOut;
-	double speedF = (m_reverseSpeedAtBuild > 0.0f)
-		? (double)m_reverseSpeedAtBuild : 1.0;
-	int64_t forwardOutSamples = (int64_t)(
-		savedFwd * (double)m_outputSamplerate / speedF + 0.5);
-	if (forwardOutSamples < 0) forwardOutSamples = 0;
-	if (forwardOutSamples > totalSamples) forwardOutSamples = totalSamples;
-	m_reversePos    = totalSamples - forwardOutSamples;
-	m_filePosition  = savedFwd;
-	m_done          = false;
 	return 0;
 }
 
@@ -1787,25 +1608,6 @@ int InputFileFFmpeg::_seek( double seconds )
 	if (!m_opened || !m_fmtCtx)
 		return -1;
 
-	if (m_reverseReady) {
-		// seconds = FORWARD-FILE time. Convert to output sample index
-		// via the speed factor captured at buffer build (the buffer
-		// has atempo baked in, so 1 forward second = sampleRate /
-		// speedAtBuild output samples).
-		int channels = m_outputChannels > 0 ? m_outputChannels : 2;
-		int64_t totalSamples = (int64_t)m_reverseBuf.size() / channels;
-		double speedF = (m_reverseSpeedAtBuild > 0.0f)
-			? (double)m_reverseSpeedAtBuild : 1.0;
-		int64_t forwardOutSamples = (int64_t)(
-			seconds * (double)m_outputSamplerate / speedF + 0.5);
-		if (forwardOutSamples < 0) forwardOutSamples = 0;
-		if (forwardOutSamples > totalSamples) forwardOutSamples = totalSamples;
-		m_reversePos    = totalSamples - forwardOutSamples;
-		m_filePosition  = seconds;
-		m_done          = (m_reversePos >= totalSamples);
-		return 0;
-	}
-
 	AVRational time_base = m_fmtCtx->streams[m_streamIndex]->time_base;
 	int64_t ts = (int64_t)(seconds / time_base.num * time_base.den);
 	if(LogFFmpegError(avformat_seek_file(m_fmtCtx, m_streamIndex, INT64_MIN, ts, ts, 0), "Seeking failed") < 0)
@@ -1840,7 +1642,14 @@ double InputFileFFmpeg::getPosition() const
 //---------------------------------------------------------------
 double InputFileFFmpeg::getLength() const
 {
-	// outputSamplesEstimation accesses m_fmtCtx — needs lock for thread safety
+	// Lock-free fast path: open() caches the length once (it never
+	// changes for an opened file). Taking m_mutex here stalled the
+	// audio thread behind the chunked-reverse worker's per-chunk
+	// decode (which holds m_mutex for tens of ms).
+	double cached = m_cachedLengthSec.load(std::memory_order_relaxed);
+	if (cached >= 0.0)
+		return cached;
+	// Pre-open fallback (rare): compute under the lock.
 	Lock lock(m_mutex);
 	return (double)outputSamplesEstimation() / (double)m_outputSamplerate;
 }
@@ -1951,63 +1760,6 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 		return -1;
 	}
 
-	if (m_reverseReady) {
-		// Deferred rebuild: coalesce a slider drag into a single
-		// re-decode 250 ms after the last value change. Cheap dirty
-		// check; the expensive work only fires once.
-		if (m_reverseRebuildPending) {
-			auto now = std::chrono::steady_clock::now();
-			auto ms  = std::chrono::duration_cast<std::chrono::milliseconds>(
-			              now - m_reverseRebuildTouch).count();
-			if (ms >= 250) {
-				m_reverseRebuildPending = false;
-				rebuildReverseBuffer();
-				if (!m_reverseReady) return 0;
-			}
-		}
-		int channels = m_outputChannels > 0 ? m_outputChannels : 2;
-		int64_t totalSamples = (int64_t)m_reverseBuf.size() / channels;
-		int64_t avail = totalSamples - m_reversePos;
-		if (avail <= 0) {
-			m_done = true;
-			return 0;
-		}
-		int toWrite = (avail > 4096) ? 4096 : (int)avail;
-		// Forward-time lower bound (cropStart). Output samples per
-		// forward second = sampleRate / speedAtBuild because the
-		// buffer was decoded with atempo applied.
-		double speedF = (m_reverseSpeedAtBuild > 0.0f)
-			? (double)m_reverseSpeedAtBuild : 1.0;
-		if (m_minFilePosition > 0.0) {
-			double curFwd = (double)(totalSamples - m_reversePos)
-			              / (double)m_outputSamplerate * speedF;
-			double remainingFwd = curFwd - m_minFilePosition;
-			if (remainingFwd <= 0.0) {
-				m_done = true;
-				return 0;
-			}
-			int maxSamples = (int)(remainingFwd
-			              * (double)m_outputSamplerate / speedF);
-			if (maxSamples < toWrite) {
-				toWrite = maxSamples;
-				if (toWrite <= 0) {
-					m_done = true;
-					return 0;
-				}
-			}
-		}
-		short *ptr = m_reverseBuf.data() + m_reversePos * channels;
-		m_freeverb.process(ptr, toWrite, m_reverbMix);
-		sampleBuffer->produce(ptr, toWrite);
-		m_reversePos       += toWrite;
-		m_convertedSamples += toWrite;
-		m_filePosition = (double)(totalSamples - m_reversePos)
-		                / (double)m_outputSamplerate * speedF;
-		if (m_reversePos >= totalSamples) m_done = true;
-		if (m_filePosition <= m_minFilePosition) m_done = true;
-		return toWrite;
-	}
-
 	AVFrame *frame = av_frame_alloc();
 	AVFrame *filt_frame = av_frame_alloc();
 	AVPacket *packet = av_packet_alloc();
@@ -2061,21 +1813,6 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 							outSamples -= skippedSamples;
 						}
 
-						if(m_maxConvertedSamples > 0)
-						{
-							int64_t remaining = m_maxConvertedSamples - m_convertedSamples;
-							if (remaining <= 0)
-							{
-								outSamples = 0;
-								m_done = true;
-							}
-							else if (outSamples > remaining)
-							{
-								outSamples = (int)remaining;
-								m_done = true;
-							}
-						}
-
 						// Input-time cap (the one the crop UI actually feeds).
 						// Computed against m_filePosition so live speed / pitch
 						// changes never desync the end of playback from the
@@ -2107,7 +1844,7 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 							sampleBuffer->produce(outPtr, outSamples);
 							written += outSamples;
 							m_convertedSamples += outSamples;
-							m_filePosition += (double)outSamples * (double)m_speedFactor / (double)m_outputSamplerate;
+							m_filePosition = m_filePosition + (double)outSamples * (double)m_speedFactor / (double)m_outputSamplerate;
 							properFrames++;
 						}
 
@@ -2150,14 +1887,6 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 				outSamples -= skippedSamples;
 			}
 
-			if(m_maxConvertedSamples > 0)
-			{
-				int64_t remaining = m_maxConvertedSamples - m_convertedSamples;
-				if (remaining <= 0)
-					outSamples = 0;
-				else if (outSamples > remaining)
-					outSamples = (int)remaining;
-			}
 			// Input-time cap (see twin block above).
 			if (outSamples > 0 && m_maxFilePosition > 0.0)
 			{
@@ -2182,7 +1911,7 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 				sampleBuffer->produce(outPtr, outSamples);
 				written += outSamples;
 				m_convertedSamples += outSamples;
-				m_filePosition += (double)outSamples * (double)m_speedFactor / (double)m_outputSamplerate;
+				m_filePosition = m_filePosition + (double)outSamples * (double)m_speedFactor / (double)m_outputSamplerate;
 			}
 			av_frame_unref(filt_frame);
 		}
@@ -2262,17 +1991,12 @@ void InputFileFFmpeg::setPitchFactor(float factor)
 	{
 		Lock lock(m_mutex);
 		if (m_pitchFactor != factor) {
-			dbgLog("setPitchFactor(%.4f -> %.4f) pos=%.3f opened=%d", m_pitchFactor, factor, m_filePosition, m_opened);
+			dbgLog("setPitchFactor(%.4f -> %.4f) pos=%.3f opened=%d", m_pitchFactor, factor, m_filePosition.load(), m_opened);
 			m_pitchFactor = factor;
 			if (m_opened) {
 				if (m_streamingReverse) {
 					restartStreaming = true;
 					restartPos       = m_filePosition;
-				} else if (m_reverseReady) {
-					// Defer: a slider drag spams this method 60x/s;
-					// rebuilding on every call would melt the GUI.
-					m_reverseRebuildPending = true;
-					m_reverseRebuildTouch   = std::chrono::steady_clock::now();
 				} else {
 					int ret = _seek(m_filePosition);
 					dbgLog("  setPitchFactor _seek returned %d (src=%p sink=%p)", ret, m_bufSrcCtx, m_bufSinkCtx);
@@ -2297,15 +2021,12 @@ void InputFileFFmpeg::setSpeedFactor(float factor)
 	{
 		Lock lock(m_mutex);
 		if (m_speedFactor != factor) {
-			dbgLog("setSpeedFactor(%.4f -> %.4f) pos=%.3f opened=%d", m_speedFactor, factor, m_filePosition, m_opened);
+			dbgLog("setSpeedFactor(%.4f -> %.4f) pos=%.3f opened=%d", m_speedFactor, factor, m_filePosition.load(), m_opened);
 			m_speedFactor = factor;
 			if (m_opened) {
 				if (m_streamingReverse) {
 					restartStreaming = true;
 					restartPos       = m_filePosition;
-				} else if (m_reverseReady) {
-					m_reverseRebuildPending = true;
-					m_reverseRebuildTouch   = std::chrono::steady_clock::now();
 				} else {
 					int ret = _seek(m_filePosition);
 					dbgLog("  setSpeedFactor _seek returned %d (src=%p sink=%p)", ret, m_bufSrcCtx, m_bufSinkCtx);

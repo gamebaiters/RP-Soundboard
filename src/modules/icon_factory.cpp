@@ -136,6 +136,30 @@ QIcon reload(const QColor &c)
     return finish(pm);
 }
 
+QIcon clear(const QColor &c)
+{
+    // Filled red disc with a centered white X. Same canvas + inset as
+    // the rest of the set so it reads as the toolbar's "clear / unset"
+    // affordance. Used next to the waveform filename label.
+    QPixmap pm = canvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    const qreal s = kSize - kInset * 2.0;
+    p.drawEllipse(QRectF(kInset, kInset, s, s));
+    // White X: two diagonal strokes inset from the disc so the arms
+    // don't visually clip the rim.
+    const qreal armInset = kInset + 11.0;
+    QPen xPen(Qt::white, 8.0, Qt::SolidLine, Qt::RoundCap);
+    p.setPen(xPen);
+    p.drawLine(QPointF(armInset,       armInset),
+               QPointF(kSize - armInset, kSize - armInset));
+    p.drawLine(QPointF(kSize - armInset, armInset),
+               QPointF(armInset,       kSize - armInset));
+    return finish(pm);
+}
+
 QIcon sandbox(const QColor &c)
 {
     // Three mixer faders: the universal "audio effects rack" glyph.

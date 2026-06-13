@@ -1,3 +1,131 @@
+GameBaiters Soundboard v2.2.11
+==============================
+
+UX-focused release on top of v2.2.10. Reworks the channel transport
+around a replay-from-cursor flow, a tristate Pause-all that doubles
+as Replay-all, an explicit clear button, and a fully recalibrated EQ
+spectrum meter that now tracks what the listener actually hears
+(post-chain + volume) at a real-world dB scale.
+
+
+Channel transport: replay-from-cursor
+-------------------------------------
+
+- Audio finishing naturally or being stopped via the red stop button
+  no longer wipes the channel back to "(no file)". The filename,
+  waveform paint, crop markers and time label all stay visible; the
+  play/pause button switches to the reload glyph and a single click
+  restarts the same sound from wherever the cursor sits.
+- Cursor position policy: every stop snaps the visual cursor back to
+  cropStart so the next replay starts cleanly from the head of the
+  cropped region. User-driven cursor moves in the stopped state
+  (waveform click, ±5 / ±10 skip buttons) are honoured by the next
+  replay and stay clamped inside [cropStart, cropEnd].
+- Skip buttons and waveform click in the stopped state only move the
+  cursor — no audio fires until the user clicks reload. This keeps
+  the "stopped" state genuinely silent.
+- The replay context is validated against the source cell at click
+  time: if the cell was emptied or rebound to a different file in
+  the meantime, the channel cleans itself back to empty instead of
+  trying to play a stale path.
+
+Pause-all becomes tristate
+--------------------------
+
+- The bottom-row "Pause all" button is now a state machine:
+    * at least one channel playing or paused -> classic
+      Pause all / Resume all toggle
+    * every channel stopped but at least one with a replay context ->
+      "Replay all" with the reload icon; click replays every channel
+      that still has its original cell loaded
+    * nothing playing, nothing replayable -> disabled
+- "Stop all" continues to mean stop, and now also refreshes the
+  Pause-all label so the transition into Replay-all is immediate.
+
+Clear button
+------------
+
+- New red disc + white X to the LEFT of the filename label on every
+  channel. Visible only when there is actually a sound loaded or a
+  replay context to wipe. Click stops any residual playback and
+  fully resets the channel back to the empty state, including the
+  replay bookkeeping and the per-slot button mapping.
+- The clear button is set NoFocus so a click never steals keyboard
+  focus from the channel header. Without that the channel's title
+  QLineEdit was getting selectAll-d on tab-focus transfer the
+  instant the clear button hid itself, visually highlighting the
+  channel name.
+
+EQ spectrum meter — full recalibration
+--------------------------------------
+
+- The per-band level analyser is fed POST-chain and POST-volume now,
+  so the LEDs reflect exactly what the listener hears. EQ boosts,
+  every effect in the chain, mono fold, soft-limit, the slot's
+  volume slider, and the earrape-protection intensity all colour the
+  LEDs honestly.
+- Scale switched from linear /160 (where loud bass was the only
+  thing that ever visibly moved) to a pro-audio dB window of
+  -48..+3 dB. Quiet content (~-30 dBFS) renders at 47 % instead of
+  3 %; 0 dBFS / clipping content saturates the strip cleanly.
+- Full-scale reference recalibrated to kFftSize/8 to compensate for
+  practical losses: softLimit caps time-domain peaks around
+  -0.5 dB, distorted/squarewave content spreads its fundamental
+  across multiple bins so the peak bin lands around -3 to -6 dB. The
+  old kFftSize/4 reference left the meter pinned 6 cells below the
+  top even on real earrape; +6 dB of calibration brings clipped
+  material all the way up.
+- Above-thumb cells (the "cut" zone above the slider knob) keep
+  responding to audio level but at half the saturation of the
+  below-thumb zone, with a darker ghost overlay on the rising
+  meter column. The spectrum stays readable even on heavily cut
+  bands - "the cursor is below this cell but the spectrum is here".
+
+EQ band coverage — frequency-adaptive Q
+---------------------------------------
+
+- The 2/3-octave default Q (2.145) gave the low five bands a
+  bandwidth so narrow that the 20 Hz slider only affected
+  ~14-26 Hz, a range below the content of nearly every real audio
+  file. Bands 0..4 (20, 25, 40, 63, 100 Hz) now use Q = 1.4,
+  roughly doubling their bandwidth so the slider actually catches
+  the bulk of real bass content. The mid + high register stays at
+  the original 2.145 for precision.
+- A first attempt at Q = 0.7 on the same bands was reverted: five
+  adjacent low bands at that Q overlapped so heavily that a smile-
+  curve preset (+12 dB on each) summed to +20+ dB in the 30..80 Hz
+  region and slammed softLimit into earrape. Q = 1.4 keeps smile
+  presets musical while still making the low sliders feel alive.
+
+DSP CPU% readout
+----------------
+
+- The CPU % indicator in the sandbox dialog no longer freezes at
+  the last reading when every channel is idle. The polling timer
+  always pushes the current cpuPercent(), which simply reads 0 at
+  rest, so the label transitions cleanly into "CPU <0.1%" instead
+  of stranding the previous value on screen.
+
+Bug fixes
+---------
+
+- Linked-volume channel inheritance no longer copies the primary
+  channel's loaded filename + playback position into a fresh
+  channel. New channels now inherit only vol / fx / sandbox / loop
+  / reverse / sync, and start with an empty filename label / wave-
+  form as expected.
+- Waveform dim overlay covers the full widget height. The crop-
+  marker overlay was drawing height()-1 and leaving the very last
+  row of pixels under the dim band visible; the dim now reaches
+  the bottom edge cleanly.
+- The X-clear path was racing the queued onStopPlaying handler and
+  the replay-ready state used to re-appear right after the user
+  clicked clear. A pending-hard-clear flag now lets the queued
+  handler take the hard-clear branch and produces a single, stable
+  cleared state.
+
+
+=====================================================================
 GameBaiters Soundboard v2.2.10
 ==============================
 

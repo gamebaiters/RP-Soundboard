@@ -1,4 +1,5 @@
 #include "Limiter.h"
+#include "../AudioUtils.h"
 #include <iterator>
 
 void Limiter::setSampleRate(double sr) {
@@ -7,7 +8,7 @@ void Limiter::setSampleRate(double sr) {
 
 void Limiter::setParams(float ceilingDb, float lookaheadMs, float releaseMs,
                          Mode mode, float ratio, float gateThreshDb) {
-    m_ceiling = std::pow(10.0f, ceilingDb / 20.0f);
+    m_ceiling = AudioUtils::dbToLinear(ceilingDb);
     if (m_ceiling < 0.001f) m_ceiling = 0.001f;
     m_lookaheadSamples = static_cast<int>(lookaheadMs * 0.001f * m_sampleRate);
     if (m_lookaheadSamples < 1) m_lookaheadSamples = 1;
@@ -15,7 +16,7 @@ void Limiter::setParams(float ceilingDb, float lookaheadMs, float releaseMs,
     m_releaseCoeff = 1.0f - std::exp(-1.0f / (std::max(1.0f, releaseMs) * 0.001f * static_cast<float>(m_sampleRate)));
     m_mode = mode;
     m_ratio = std::max(1.0f, ratio);
-    m_gateThresh = std::pow(10.0f, gateThreshDb / 20.0f);
+    m_gateThresh = AudioUtils::dbToLinear(gateThreshDb);
 }
 
 void Limiter::processStereo(float &l, float &r) {
@@ -34,7 +35,7 @@ void Limiter::processStereo(float &l, float &r) {
     float targetGainDb = 0.0f;
     if (m_mode == LimiterMode || m_mode == CompressorMode) {
         if (maxPeak > m_ceiling) {
-            float overDb = 20.0f * std::log10(maxPeak / m_ceiling);
+            float overDb = AudioUtils::linearToDb(maxPeak / m_ceiling);
             float effectiveRatio = (m_mode == LimiterMode) ? 100.0f : m_ratio;
             targetGainDb = -(1.0f - 1.0f / effectiveRatio) * overDb;
         }
@@ -51,7 +52,7 @@ void Limiter::processStereo(float &l, float &r) {
     }
 
     int readPos = (m_delayPos - m_lookaheadSamples + kMaxLookahead) % kMaxLookahead;
-    float gain = std::pow(10.0f, m_gainDb / 20.0f);
+    float gain = AudioUtils::dbToLinear(m_gainDb);
     l = m_delayL[readPos] * gain;
     r = m_delayR[readPos] * gain;
 

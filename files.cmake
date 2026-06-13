@@ -8,6 +8,8 @@ set(sources
 	src/AudioEffectsDialog.h
 	src/buildinfo.c
 	src/buildinfo.h
+	src/AudioUtils.h
+	src/ColorUtils.h
 	src/bytebuffer.h
 	src/common.h
 	src/config_qt.cpp

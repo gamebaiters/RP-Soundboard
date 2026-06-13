@@ -7,6 +7,7 @@
 //----------------------------------
 
 #include "common.h"
+#include "AudioUtils.h"
 
 #include <cmath>
 #include <QFileDialog>
@@ -1216,7 +1217,7 @@ PlaybackBar *ConfigQt::createPlaybackBar(int slot, const QString &filename)
 
 	// Lambda to update FX labels
 	auto updateBarFxLabels = [bar]() {
-		auto toF = [](int v) -> float { return (float)pow(3.0, v / 100.0); };
+		auto toF = [](int v) -> float { return AudioUtils::sliderToPitchFactor(v); };
 		bar->pitchLabel->setText(QString("%1x").arg(toF(bar->pitchSlider->value()), 0, 'f', 2));
 		bar->speedLabel->setText(QString("%1x").arg(toF(bar->speedSlider->value()), 0, 'f', 2));
 		bar->combinedLabel->setText(QString("%1x").arg(toF(bar->combinedSlider->value()), 0, 'f', 2));
@@ -1227,29 +1228,29 @@ PlaybackBar *ConfigQt::createPlaybackBar(int slot, const QString &filename)
 	// FX connections
 	connect(bar->pitchSlider, &QSlider::valueChanged, [this, bar, slot, updateBarFxLabels](int val) {
 		Sampler *s = sb_getSampler();
-		if (s) s->setSlotPitchFactor(slot, (float)pow(3.0, val / 100.0));
+		if (s) s->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(val));
 		if (bar->syncCheckbox->isChecked()) {
 			bar->speedSlider->blockSignals(true);
 			bar->speedSlider->setValue(val);
 			bar->speedSlider->blockSignals(false);
-			if (s) s->setSlotSpeedFactor(slot, (float)pow(3.0, val / 100.0));
+			if (s) s->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(val));
 		}
 		updateBarFxLabels();
 	});
 	connect(bar->speedSlider, &QSlider::valueChanged, [this, bar, slot, updateBarFxLabels](int val) {
 		Sampler *s = sb_getSampler();
-		if (s) s->setSlotSpeedFactor(slot, (float)pow(3.0, val / 100.0));
+		if (s) s->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(val));
 		if (bar->syncCheckbox->isChecked()) {
 			bar->pitchSlider->blockSignals(true);
 			bar->pitchSlider->setValue(val);
 			bar->pitchSlider->blockSignals(false);
-			if (s) s->setSlotPitchFactor(slot, (float)pow(3.0, val / 100.0));
+			if (s) s->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(val));
 		}
 		updateBarFxLabels();
 	});
 	connect(bar->combinedSlider, &QSlider::valueChanged, [this, bar, slot, updateBarFxLabels](int val) {
 		Sampler *s = sb_getSampler();
-		float f = (float)pow(3.0, val / 100.0);
+		float f = AudioUtils::sliderToPitchFactor(val);
 		bar->pitchSlider->blockSignals(true);
 		bar->speedSlider->blockSignals(true);
 		bar->pitchSlider->setValue(val);
@@ -1717,7 +1718,7 @@ void ConfigQt::buildPitchSpeedUI()
 void ConfigQt::updatePitchSpeedLabels()
 {
 	// Logarithmic mapping: factor = 3^(value/100), so 0=1.00x, 100=3.00x, -100=0.33x
-	auto sliderToFactor = [](int value) -> float { return (float)pow(3.0, value / 100.0); };
+	auto sliderToFactor = [](int value) -> float { return AudioUtils::sliderToPitchFactor(value); };
 	m_pitchValueLabel->setText(QString("%1x").arg(sliderToFactor(m_pitchSlider->value()), 0, 'f', 2));
 	m_speedValueLabel->setText(QString("%1x").arg(sliderToFactor(m_speedSlider->value()), 0, 'f', 2));
 	m_combinedValueLabel->setText(QString("%1x").arg(sliderToFactor(m_combinedSlider->value()), 0, 'f', 2));

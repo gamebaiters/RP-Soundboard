@@ -70,13 +70,48 @@ void EqRack::runFftAnalysis() {
             double mag = std::sqrt(double(re) * re + double(im) * im);
             if (mag > peakMag) peakMag = mag;
         }
-        // Map peak magnitude to [0..1]. Full-scale sine through a Hann
-        // window of length kFftSize produces a peak bin magnitude of
-        // ~ kFftSize / 4 (coherent gain 0.5 then magnitude-of-complex).
-        // /160 keeps the meter saturating slightly BEFORE 0 dBFS so
-        // realistic loud material (RMS ~ -6 dBFS, peak ~ 0 dBFS) hits
-        // the top of the strip cleanly.
-        float level = float(peakMag / 160.0);
+        // Pro-audio dB scaling, no per-band tilt.
+        //
+        // Earlier iterations tried a pink-noise tilt (subtract 3 dB/oct
+        // from low bands so a bass-heavy mix wouldn't pin the low LEDs
+        // to the ceiling). It overshot: a 0 dBFS / clipping bass would
+        // get -17 dB worth of compensation subtracted and end up around
+        // 60 % on the LED instead of saturating. The user reported
+        // "bass clipping clearly, LEDs never past half" - the tilt was
+        // hiding real signal level.
+        //
+        // Reverted to flat dB scale. Bass-heavy mixes will simply show
+        // higher low bands than high bands - that's what the spectrum
+        // actually IS. Clipping content reads as clipping. Quiet
+        // content still gets honest visual range via the dB window
+        // below.
+        //
+        // Full-scale-sine reference. A 0 dBFS sine through Hann window
+        // of length kFftSize produces a peak bin magnitude of
+        // ~kFftSize/4 (coherent gain 0.5 + magnitude-of-complex). In
+        // practice the peak we observe on real "loud" material is
+        // ~6 dB lower than that theoretical max: softLimit caps the
+        // time-domain peak at ~0.95 (~-0.45 dB) and clipped/distorted
+        // content spreads its fundamental energy across several bins
+        // so the strongest bin tops out around -3 to -6 dB. That left
+        // the LED stuck around 87 % even on real earrape - "6 notches
+        // below the top" in the user's words.
+        //
+        // Set the reference at kFftSize/8 instead so the actual
+        // observed peak on loud audio reaches +3 dB displayed (clamped
+        // to ceiling -> LED top). Equivalent to a +6 dB sensitivity
+        // calibration. Quiet content keeps the full -48..0 dBFS range
+        // because the floor moves with it.
+        constexpr double kFullScaleMag = double(kFftSize) / 8.0;  // 256 at kFftSize=2048
+        constexpr double kFloorDb      = -48.0;
+        constexpr double kCeilDb       =   3.0;
+        double db = kFloorDb;
+        if (peakMag > 1e-12) {
+            db = 20.0 * std::log10(peakMag / kFullScaleMag);
+            if (db < kFloorDb) db = kFloorDb;
+            if (db > kCeilDb)  db = kCeilDb;
+        }
+        float level = float((db - kFloorDb) / (kCeilDb - kFloorDb));
         if (level > 1.0f) level = 1.0f;
         if (level < 0.0f) level = 0.0f;
         float prev = m_bandLevel[b].load(std::memory_order_relaxed);
@@ -124,15 +159,32 @@ float EqRack::bandGainDb(int band) const {
 
 void EqRack::recompute(int band) {
     double f0 = bandFrequency(band);
+    // Frequency-adaptive Q. The 2/3-octave default (kQ = 2.145) is the
+    // right number for the mid + high register: narrow enough to be
+    // selective, just wide enough that adjacent bands sum cleanly at
+    // the seams. At the sub/low-bass end (20..100 Hz) that Q is too
+    // tight - the 20 Hz slider only affects ~14..26 Hz, which is
+    // below the content of nearly every real audio file.
+    //
+    // First attempt set Q = 0.7 on bands 0..4. That widened them too
+    // much - five adjacent low bands at Q=0.7 overlap so heavily that
+    // a smile-curve preset (+12 dB on all of them at once) summed to
+    // +20+ dB in the 30..80 Hz region and instantly slammed softLimit
+    // into a hard-clip earrape. Q = 1.4 is the compromise: each low
+    // band still catches roughly 2x its old span (20 Hz band now
+    // covers ~13..27 Hz vs 14..26 before), the slider FEELS like it
+    // does something on real bass content, AND adjacent bands stack
+    // gently enough for the classic smile EQ to stay musical.
+    const double q = (band <= 4) ? 1.4 : kQ;
     // Skip bands that fall above Nyquist - leave them at unity so the
     // cascade is well-defined even at low sample rates.
     if (f0 >= m_sampleRate * 0.45) {
-        m_left[band].setParams(m_sampleRate * 0.4, kQ, 0.0, m_sampleRate);
-        m_right[band].setParams(m_sampleRate * 0.4, kQ, 0.0, m_sampleRate);
+        m_left[band].setParams(m_sampleRate * 0.4, q, 0.0, m_sampleRate);
+        m_right[band].setParams(m_sampleRate * 0.4, q, 0.0, m_sampleRate);
         return;
     }
-    m_left[band].setParams(f0, kQ, m_gainDb[band], m_sampleRate);
-    m_right[band].setParams(f0, kQ, m_gainDb[band], m_sampleRate);
+    m_left[band].setParams(f0, q, m_gainDb[band], m_sampleRate);
+    m_right[band].setParams(f0, q, m_gainDb[band], m_sampleRate);
 }
 
 void EqRack::processStereo(float &l, float &r) {

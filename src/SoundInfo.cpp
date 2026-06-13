@@ -8,6 +8,7 @@
 
 
 #include "SoundInfo.h"
+#include "ColorUtils.h"
 
 #define NAME_PATH "path"
 #define NAME_CUSTOM_TEXT "customText"
@@ -50,17 +51,7 @@
 #define DEFAULT_IS_MACRO false
 
 
-QColor stringToColor(const QString &str)
-{
-	QRgb rgb = str.toUInt(nullptr, 16);
-	// don't construct directly from QRgb because alpha is ignored that way
-	return QColor(qRed(rgb), qGreen(rgb), qBlue(rgb), qAlpha(rgb));
-}
-
-QString colorToString(const QColor &col)
-{
-	return QString::number(col.rgba(), 16);
-}
+// stringToColor / colorToString live in ColorUtils.h (shared header).
 
 
 //---------------------------------------------------------------

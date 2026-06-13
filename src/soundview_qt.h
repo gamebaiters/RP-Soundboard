@@ -20,6 +20,7 @@
 #include "dsp/SandboxState.h"
 
 class QTimer;
+class SampleVisualizerThread;
 
 class SoundView : public QWidget
 {
@@ -27,9 +28,17 @@ class SoundView : public QWidget
 
 public:
 	SoundView(QWidget *parent = NULL);
+	~SoundView();
 	void setSound(const SoundInfo &sound);
 	void setPlaybackPosition(double fraction);
+	// Last set playback cursor fraction (0..1). -1.0 if no cursor.
+	// Used by the replay path to seek to wherever the user parked the
+	// cursor while the channel was stopped.
+	double currentPosition() const { return m_playbackPosition; }
 	void clearPlayback();
+	// Reverse-direction hint for the "played portion" tint: in reverse
+	// the already-played region is to the RIGHT of the cursor.
+	void setReverse(bool on);
 	void setAdaptToFx(bool on);
 	void setSandboxState(const SandboxState &s);
 	// Live FxPanel state (per-channel simple FX outside the sandbox).
@@ -75,6 +84,7 @@ private:
 	void preparePaths();
 	void applyFxToBins(std::vector<float> &binsL, std::vector<float> &binsR, size_t count) const;
 	double fractionFromMouseX(int x) const;
+	double clampFractionToCrop(double fraction) const;
 	void startStretchLoadAnimation(int durationMs);
 
 private:
@@ -106,6 +116,13 @@ private:
 	double         m_cropEnd     = -1.0;
 	double         m_totalLength = 0.0;
 	bool           m_showCropMarkers = true;
+	// Reverse playback direction (affects only the played-portion tint).
+	bool           m_reverse = false;
+
+	// Per-view waveform analyser. Was a process-wide singleton: two
+	// channels loading different files fought over the same bin array
+	// and one channel ended up painting the other's waveform.
+	std::unique_ptr<SampleVisualizerThread> m_vis;
 };
 
 #endif // rpsbsrc__soundview_qt_H__

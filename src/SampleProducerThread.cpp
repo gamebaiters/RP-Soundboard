@@ -50,6 +50,7 @@ void SampleProducerThread::start()
 void SampleProducerThread::stop(bool wait)
 {
 	m_stop.store(true);
+	m_cv.notify_all();
 	if(wait && m_thread.joinable())
 		m_thread.join();
 }
@@ -69,8 +70,22 @@ bool SampleProducerThread::isRunning()
 //---------------------------------------------------------------
 void SampleProducerThread::setSource( SampleSource *source )
 {
-	Lock lock(m_mutex);
-	m_source = source;
+	{
+		Lock lock(m_mutex);
+		m_source = source;
+	}
+	wake();
+}
+
+
+//---------------------------------------------------------------
+// Purpose: kick the fill loop out of its inter-cycle wait so a fresh
+// source / cleared buffer is refilled immediately.
+//---------------------------------------------------------------
+void SampleProducerThread::wake()
+{
+	m_wake.store(true, std::memory_order_release);
+	m_cv.notify_all();
 }
 
 #define MIN_BUFFER_SAMPLES (48000 / 2)
@@ -96,9 +111,16 @@ void SampleProducerThread::run()
 			m_stop.store(true);
 		}
 
-		// We now have half a second of samples available and have done
-		// so much work that we deserve a little rest
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		// Steady-state refill cadence stays 100 ms (the buffers hold
+		// >= 0.5 s), but setSource()/wake() interrupts the wait so a
+		// freshly clicked sound starts producing samples instantly
+		// instead of after a worst-case 100 ms nap.
+		std::unique_lock<std::recursive_mutex> lk(m_mutex);
+		m_cv.wait_for(lk, std::chrono::milliseconds(100), [this]{
+			return m_wake.load(std::memory_order_acquire)
+			    || m_stop.load(std::memory_order_relaxed);
+		});
+		m_wake.store(false, std::memory_order_relaxed);
 	}
 }
 

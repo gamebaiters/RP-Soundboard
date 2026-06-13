@@ -127,6 +127,11 @@ private:
     // continuous trajectory anyway.
     static constexpr int kCtrlBlock = 32;
     int m_ctrlCounter = 0;
+    // Position snapshot taken at the last recomputeCoeffs(). When the
+    // smoothed position hasn't moved and head sway is off, the control
+    // tick skips the full coefficient recompute (~20 transcendentals)
+    // - a large win for static 3D Manual placements.
+    float m_lastCX = 1e9f, m_lastCY = 1e9f, m_lastCZ = 1e9f;
 
     // ====== Head-sway LFO ======
     // Slow azimuth wobble that simulates the natural micro-movements

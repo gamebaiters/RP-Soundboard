@@ -1,4 +1,5 @@
 #include "Compressor.h"
+#include "../AudioUtils.h"
 
 void Compressor::setSampleRate(double sr) {
     m_sampleRate = (sr > 0) ? sr : 48000.0;
@@ -9,14 +10,14 @@ void Compressor::setParams(float thresholdDb, float ratio, float attackMs, float
     m_thresholdDb = thresholdDb;
     m_ratio = std::max(1.0f, ratio);
     m_kneeDb = std::max(0.0f, kneeDb);
-    m_makeupGain = std::pow(10.0f, makeupDb / 20.0f);
+    m_makeupGain = AudioUtils::dbToLinear(makeupDb);
     m_attackCoeff = 1.0f - std::exp(-1.0f / (std::max(0.1f, attackMs) * 0.001f * static_cast<float>(m_sampleRate)));
     m_releaseCoeff = 1.0f - std::exp(-1.0f / (std::max(1.0f, releaseMs) * 0.001f * static_cast<float>(m_sampleRate)));
 }
 
 void Compressor::processStereo(float &l, float &r) {
     float peak = std::max(std::abs(l), std::abs(r));
-    float inputDb = (peak > 1e-6f) ? 20.0f * std::log10(peak) : -96.0f;
+    float inputDb = (peak > 1e-6f) ? AudioUtils::linearToDb(peak) : -96.0f;
 
     float coeff = (inputDb > m_envDb) ? m_attackCoeff : m_releaseCoeff;
     m_envDb = m_envDb + coeff * (inputDb - m_envDb);
@@ -30,7 +31,7 @@ void Compressor::processStereo(float &l, float &r) {
         gainDb = -(1.0f - 1.0f / m_ratio) * overDb;
     }
 
-    float gain = std::pow(10.0f, gainDb / 20.0f) * m_makeupGain;
+    float gain = AudioUtils::dbToLinear(gainDb) * m_makeupGain;
     l *= gain;
     r *= gain;
 }

@@ -29,7 +29,7 @@ struct ScopedCpuTimer {
 
 void SlotDsp::getEqBandLevels(float out[16]) const
 {
-    for (int i = 0; i < 16; ++i)
+    for (int i = 0; i < EqRack::kNumBands; ++i)
         out[i] = m_play.eq.bandLevel(i);
 }
 
@@ -576,6 +576,7 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
     constexpr float kInv = 1.0f / 32768.0f;
 
     if (!m_active) {
+        const float outGain = m_outputGain.load(std::memory_order_relaxed);
         for (int i = 0; i < frames; ++i) {
             float l = (channels >= 2)
                           ? interleaved[i * channels + 0] * kInv
@@ -583,6 +584,16 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
             float r = (channels >= 2)
                           ? interleaved[i * channels + 1] * kInv
                           : l;
+            // Feed analyser with the OUTPUT-domain signal: bypass path
+            // emits (l, r) unchanged, then Sampler scales by volume *
+            // intensity before mixing into the TS3 buffer. Multiplying
+            // here by the same gain makes the LEDs match what the
+            // listener actually hears - the slider truly lowers them.
+            // Only the playback path drives the LEDs (getEqBandLevels
+            // reads m_play exclusively) so the capture path skips the
+            // FFT.
+            if (!isCapture)
+                p.eq.feedAnalysis(l * outGain, r * outGain);
             float al = std::fabs(l);
             float ar = std::fabs(r);
             m_peakL = (m_peakL > al) ? m_peakL * m_peakDecay : al;
@@ -593,6 +604,7 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
         return;
     }
 
+    const float outGain = m_outputGain.load(std::memory_order_relaxed);
     for (int i = 0; i < frames; ++i) {
         float l = (channels >= 2)
                       ? interleaved[i * channels + 0] * kInv
@@ -604,11 +616,6 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
         // Inject anti-denormal bias before any stateful filter.
         float dither = antiDenormDither(i);
         l += dither; r -= dither;
-
-        // Always feed the EQ analyser regardless of the eqEnabled
-        // gate so the per-band LED widgets keep reflecting the input
-        // spectrum even when the EQ stage is bypassed.
-        p.eq.feedAnalysis(l, r);
 
         for (int si = 0; si < SandboxState::Stage_COUNT; ++si) {
             int stage = m_state.pipelineOrder[si];
@@ -624,17 +631,30 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
         l = softLimit(l);
         r = softLimit(r);
 
+        // Feed EQ analyser POST-chain + scaled by the output gain so the
+        // per-band LEDs reflect what the listener actually hears: EQ
+        // shaping, every effect, mono fold, soft-limit, AND the slot's
+        // volume / intensity. Playback path only - getEqBandLevels reads
+        // m_play exclusively, so running the FFT on the capture path was
+        // pure wasted CPU.
+        if (!isCapture)
+            p.eq.feedAnalysis(l * outGain, r * outGain);
+
         float al = std::fabs(l);
         float ar = std::fabs(r);
         m_peakL = (m_peakL > al) ? m_peakL * m_peakDecay : al;
         m_peakR = (m_peakR > ar) ? m_peakR * m_peakDecay : ar;
 
-        constexpr float kHeadroom = 0.95f;
+        // No extra headroom scaling: softLimit already bounds the
+        // signal strictly inside [-1, +1], so the old 0.95 factor was
+        // just an unconditional -0.45 dB level drop whenever the chain
+        // was active - audible as "enabling the sandbox makes it
+        // quieter" even with neutral settings.
         if (channels >= 2) {
-            interleaved[i * channels + 0] = clampToShort(l * kHeadroom * 32767.0f);
-            interleaved[i * channels + 1] = clampToShort(r * kHeadroom * 32767.0f);
+            interleaved[i * channels + 0] = clampToShort(l * 32767.0f);
+            interleaved[i * channels + 1] = clampToShort(r * 32767.0f);
         } else {
-            interleaved[i] = clampToShort((l + r) * 0.5f * kHeadroom * 32767.0f);
+            interleaved[i] = clampToShort((l + r) * 0.5f * 32767.0f);
         }
     }
 
@@ -660,6 +680,7 @@ void SlotDsp::produceStretchedShort(short *out, int frames, int channels,
         s.ps.fillStereo(tmpL.data(), tmpR.data(), frames);
     }
 
+    const float outGain = m_outputGain.load(std::memory_order_relaxed);
     for (int i = 0; i < frames; ++i) {
         float l = tmpL[i];
         float r = tmpR[i];
@@ -682,16 +703,23 @@ void SlotDsp::produceStretchedShort(short *out, int frames, int channels,
         l = softLimit(l);
         r = softLimit(r);
 
+        // Feed EQ analyser POST-chain + scaled by the output gain - see
+        // process() for the rationale. Without this the per-band LEDs
+        // froze whenever paulstretch was enabled.
+        if (!isCapture)
+            p.eq.feedAnalysis(l * outGain, r * outGain);
+
         float al = std::fabs(l), ar = std::fabs(r);
         m_peakL = (m_peakL > al) ? m_peakL * m_peakDecay : al;
         m_peakR = (m_peakR > ar) ? m_peakR * m_peakDecay : ar;
 
-        constexpr float kHeadroom = 0.95f;
+        // See process(): softLimit already bounds to [-1, +1], no
+        // extra headroom scaling needed.
         if (channels >= 2) {
-            out[i * channels + 0] = clampToShort(l * kHeadroom * 32767.0f);
-            out[i * channels + 1] = clampToShort(r * kHeadroom * 32767.0f);
+            out[i * channels + 0] = clampToShort(l * 32767.0f);
+            out[i * channels + 1] = clampToShort(r * 32767.0f);
         } else {
-            out[i] = clampToShort((l + r) * 0.5f * kHeadroom * 32767.0f);
+            out[i] = clampToShort((l + r) * 0.5f * 32767.0f);
         }
     }
 

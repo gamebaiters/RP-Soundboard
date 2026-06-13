@@ -9,6 +9,7 @@
 
 
 #include <QPainter>
+#include "AudioUtils.h"
 #include <QTimer>
 #include <QMouseEvent>
 #include <QContextMenuEvent>
@@ -41,6 +42,21 @@ SoundView::SoundView( QWidget *parent /*= NULL*/ ) :
 }
 
 
+SoundView::~SoundView()
+{
+	if (m_vis)
+		m_vis->stop(true);
+}
+
+
+void SoundView::setReverse(bool on)
+{
+	if (m_reverse == on) return;
+	m_reverse = on;
+	update();
+}
+
+
 //---------------------------------------------------------------
 // Purpose:
 //---------------------------------------------------------------
@@ -52,7 +68,9 @@ void SoundView::paintEvent(QPaintEvent *evt)
 	Theme::Colors tc = Theme::colors();
 	QColor bgFill, bgFrame, playedTint;
 	if (tc.enabled) {
-		Theme::Derived d = Theme::derive(tc);
+		// Memoised - paintEvent fires at up to 30 Hz per channel and
+		// derive() is a few dozen HSL conversions.
+		const Theme::Derived &d = Theme::derivedCached();
 		bgFill   = d.surfaceAlt;
 		bgFrame  = d.border;
 		playedTint = QColor(d.accent.red(), d.accent.green(), d.accent.blue(), 50);
@@ -87,16 +105,25 @@ void SoundView::paintEvent(QPaintEvent *evt)
 		if (cursorMaxX > w1) cursorMaxX = w1;
 	}
 
-	// Draw played portion background
+	// Draw played portion background. Forward playback: tint from the
+	// left edge (crop start) up to the cursor. Reverse playback: the
+	// already-played region is to the RIGHT of the cursor (the cursor
+	// walks right-to-left), so tint cursor -> crop end instead.
 	if (m_playbackPosition > 0.0 && m_playbackPosition <= 1.0)
 	{
 		int posX = (int)(m_playbackPosition * (width() - 1));
 		if (posX > cursorMaxX) posX = cursorMaxX;
-		int x0 = std::max(1, cursorMinX);
-		if (posX > x0) {
-			painter.setPen(Qt::NoPen);
-			painter.setBrush(playedTint);
-			painter.drawRect(x0, 1, posX - x0, height() - 2);
+		if (posX < cursorMinX) posX = cursorMinX;
+		painter.setPen(Qt::NoPen);
+		painter.setBrush(playedTint);
+		if (m_reverse) {
+			int x1 = std::min(width() - 2, cursorMaxX);
+			if (x1 > posX)
+				painter.drawRect(posX, 1, x1 - posX, height() - 2);
+		} else {
+			int x0 = std::max(1, cursorMinX);
+			if (posX > x0)
+				painter.drawRect(x0, 1, posX - x0, height() - 2);
 		}
 	}
 
@@ -128,13 +155,18 @@ void SoundView::paintEvent(QPaintEvent *evt)
 			int startPixel = int(start / m_totalLength * w1);
 			int endPixel   = int(end   / m_totalLength * w1);
 
-			// Dim the trimmed-away regions.
+			// Dim the trimmed-away regions. drawRect(x,y,w,h) covers
+			// pixel rows [y .. y+h-1], so passing height()-1 leaves the
+			// last visible row uncovered - the user reported a couple
+			// of unobscured pixels at the bottom of the dimmed band.
+			// Use the full height() so the overlay reaches the bottom
+			// edge of the widget cleanly.
 			painter.setPen(Qt::NoPen);
 			painter.setBrush(QColor(0, 0, 0, 150));
 			if (hasStart)
-				painter.drawRect(0, 0, startPixel, height() - 1);
+				painter.drawRect(0, 0, startPixel, height());
 			if (hasEnd)
-				painter.drawRect(endPixel + 1, 0, w1 - (endPixel + 1), height() - 1);
+				painter.drawRect(endPixel + 1, 0, w1 - (endPixel + 1), height());
 
 			// Explicit marker line + flag label at each defined point.
 			painter.setRenderHint(QPainter::Antialiasing, true);
@@ -255,7 +287,11 @@ void SoundView::setSound( const SoundInfo &sound )
 	m_active = true;
 	if(filenameDiffers && !sound.filename.isEmpty())
 	{
-		SampleVisualizerThread::GetInstance().startAnalysis(sound.filename.toUtf8(), 1024);
+		// Per-view analyser (lazy): each SoundView owns its own thread
+		// so concurrent channels never overwrite each other's bins.
+		if (!m_vis)
+			m_vis.reset(new SampleVisualizerThread());
+		m_vis->startAnalysis(sound.filename.toUtf8(), 1024);
 		m_timer->start(100);
 	}
 	else
@@ -340,8 +376,8 @@ void SoundView::setShowCropMarkers(bool on)
 //---------------------------------------------------------------
 void SoundView::onTimer()
 {
-	SampleVisualizerThread &t = SampleVisualizerThread::GetInstance();
-	if (!t.isRunning() && m_drawnBins >= t.getBinsProcessed())
+	if (!m_vis) { m_timer->stop(); return; }
+	if (!m_vis->isRunning() && m_drawnBins >= m_vis->getBinsProcessed())
 		m_timer->stop();
 	update();
 }
@@ -482,7 +518,7 @@ void SoundView::applyFxToBins(std::vector<float> &binsL, std::vector<float> &bin
 					totalWeight += w;
 				}
 				if (totalWeight > 0.0f) gainDb /= totalWeight;
-				float gain = std::pow(10.0f, gainDb / 20.0f);
+				float gain = AudioUtils::dbToLinear(gainDb);
 				binsL[i] *= gain;
 				binsR[i] *= gain;
 			}
@@ -491,7 +527,7 @@ void SoundView::applyFxToBins(std::vector<float> &binsL, std::vector<float> &bin
 
 	// Compressor: roughly reduce peaks above threshold
 	if (s.compEnabled && s.compRatio > 1.01f) {
-		float threshLin = std::pow(10.0f, s.compThresholdDb / 20.0f);
+		float threshLin = AudioUtils::dbToLinear(s.compThresholdDb);
 		float ratio = s.compRatio;
 		for (size_t i = 0; i < count; ++i) {
 			for (float *ch : {&binsL[i], &binsR[i]}) {
@@ -499,7 +535,7 @@ void SoundView::applyFxToBins(std::vector<float> &binsL, std::vector<float> &bin
 				if (a > threshLin) {
 					float over = a - threshLin;
 					float compressed = threshLin + over / ratio;
-					float makeupLin = std::pow(10.0f, s.compMakeupDb / 20.0f);
+					float makeupLin = AudioUtils::dbToLinear(s.compMakeupDb);
 					*ch = (*ch < 0 ? -compressed : compressed) * makeupLin;
 				}
 			}
@@ -629,7 +665,7 @@ void SoundView::applyFxToBins(std::vector<float> &binsL, std::vector<float> &bin
 
 	// Limiter: clamp peaks
 	if (s.limiterEnabled) {
-		float ceil = std::pow(10.0f, s.limiterCeiling / 20.0f);
+		float ceil = AudioUtils::dbToLinear(s.limiterCeiling);
 		for (size_t i = 0; i < count; ++i) {
 			if (binsL[i] >  ceil) binsL[i] =  ceil;
 			if (binsL[i] < -ceil) binsL[i] = -ceil;
@@ -669,7 +705,9 @@ void SoundView::applyFxToBins(std::vector<float> &binsL, std::vector<float> &bin
 
 void SoundView::preparePaths()
 {
-	SampleVisualizerThread &t = SampleVisualizerThread::GetInstance();
+	if (!m_vis)
+		return;
+	SampleVisualizerThread &t = *m_vis;
 	size_t bins = t.getBinsProcessed();
 	if(m_drawnBins < bins)
 	{
@@ -735,6 +773,28 @@ double SoundView::fractionFromMouseX(int x) const
 
 
 //---------------------------------------------------------------
+// Purpose: clamp a seek fraction inside the active crop range so a
+// click on the dimmed (trimmed-away) regions snaps the visual cursor
+// to the crop edge immediately instead of painting it in dead space
+// for one frame before Sampler::seek clamps the audio anyway. NOT
+// applied to the right-click crop editor - setting a marker inside the
+// dimmed region (e.g. moving the start earlier) must stay possible.
+//---------------------------------------------------------------
+double SoundView::clampFractionToCrop(double fraction) const
+{
+	if (m_showCropMarkers && m_totalLength > 0.0)
+	{
+		double lo = (m_cropStart > 0.0) ? m_cropStart / m_totalLength : 0.0;
+		double hi = (m_cropEnd   > 0.0) ? m_cropEnd   / m_totalLength : 1.0;
+		if (hi > 1.0) hi = 1.0;
+		if (fraction < lo) fraction = lo;
+		if (fraction > hi) fraction = hi;
+	}
+	return fraction;
+}
+
+
+//---------------------------------------------------------------
 // Purpose:
 //---------------------------------------------------------------
 void SoundView::mousePressEvent(QMouseEvent *evt)
@@ -742,7 +802,7 @@ void SoundView::mousePressEvent(QMouseEvent *evt)
 	if (evt->button() == Qt::LeftButton && m_playbackPosition >= 0.0)
 	{
 		m_dragging = true;
-		double frac = fractionFromMouseX(evt->x());
+		double frac = clampFractionToCrop(fractionFromMouseX(evt->x()));
 		m_playbackPosition = frac;
 		update();
 	}
@@ -756,7 +816,7 @@ void SoundView::mouseMoveEvent(QMouseEvent *evt)
 {
 	if (m_dragging)
 	{
-		double frac = fractionFromMouseX(evt->x());
+		double frac = clampFractionToCrop(fractionFromMouseX(evt->x()));
 		m_playbackPosition = frac;
 		update();
 	}
@@ -771,7 +831,7 @@ void SoundView::mouseReleaseEvent(QMouseEvent *evt)
 	if (m_dragging)
 	{
 		m_dragging = false;
-		double frac = fractionFromMouseX(evt->x());
+		double frac = clampFractionToCrop(fractionFromMouseX(evt->x()));
 		// Snap the cursor to the release point immediately - without
 		// this, the next position poll (~16 ms later) painted the
 		// cursor drifting a bit forward as the buffered samples drained.

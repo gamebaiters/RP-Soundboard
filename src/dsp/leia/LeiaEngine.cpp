@@ -78,26 +78,38 @@ void LeiaEngine::processChunk(const float* stereoIn, float* stereoOut, int frame
         m_mixR[i] = (m_hrtfOutLR[i] + m_hrtfOutRR[i]) * clarity;
     }
 
-    // Early reflections, gated and scaled by Width.
-    float widthNorm = m_width.load(std::memory_order_relaxed) * 0.01f;
+    // Early reflections. Gated ONLY on the enable switch - the old
+    // code also multiplied the whole reflection field by Width, so a
+    // user who turned reflections on while Width sat at 0 heard
+    // nothing at all (silent parameter coupling, recurring confusion).
+    // Width now controls the STEREO SPREAD of the reflection field via
+    // a mid/side scale: 0 % = mono reflections (room collapsed to the
+    // centre), 50 % = natural, 100 % = doubled side energy. The
+    // reflection loudness itself is governed by reflLevel inside
+    // ShoeboxRoom, where it belongs.
     bool reflOn = m_reflEnable.load(std::memory_order_relaxed);
-    if (reflOn && widthNorm > 1e-6f) {
+    if (reflOn) {
+        float widthNorm = m_width.load(std::memory_order_relaxed) * 0.01f;
         m_room.setRoomSize(m_roomSize.load(std::memory_order_relaxed));
         m_room.setReflectionLevel(m_reflLevel.load(std::memory_order_relaxed));
         m_room.setRoomType(m_roomType.load(std::memory_order_relaxed));
         m_room.setEnabled(true);
 
         // ShoeboxRoom::process adds reflections in-place, so run on
-        // scratch copies and add back scaled by width.
+        // scratch copies, isolate the reflection component, then add
+        // it back with the width-scaled side channel.
         std::memcpy(m_hrtfOutLL.data(), m_mixL.data(), frames * sizeof(float));
         std::memcpy(m_hrtfOutLR.data(), m_mixR.data(), frames * sizeof(float));
         m_room.process(m_hrtfOutLL.data(), m_hrtfOutLR.data(), frames,
                        azimuth, elevation);
+        const float sideScale = widthNorm * 2.0f;   // 0..2, unity at 50 %
         for (int i = 0; i < frames; ++i) {
             float reflL = m_hrtfOutLL[i] - m_mixL[i];
             float reflR = m_hrtfOutLR[i] - m_mixR[i];
-            m_mixL[i] += reflL * widthNorm;
-            m_mixR[i] += reflR * widthNorm;
+            float mid  = 0.5f * (reflL + reflR);
+            float side = 0.5f * (reflL - reflR) * sideScale;
+            m_mixL[i] += mid + side;
+            m_mixR[i] += mid - side;
         }
     }
 

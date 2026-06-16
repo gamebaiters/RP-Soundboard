@@ -17,7 +17,14 @@ public:
                   const SandboxState &sandbox, bool sandboxEnabled,
                   double sampleRate = 48000.0,
                   QObject *parent = nullptr);
+    ~AudioExporter() override;
     void run() override;
+
+    // sb_kill calls this once during plugin teardown: every still-running
+    // exporter gets requestInterruption() + a brief join window. Without
+    // this, a parentless exporter would keep its QThread alive after the
+    // plugin DLL unloaded, leaving TS3.exe as a zombie in task manager.
+    static void cancelAllAndWait(int waitMsPerThread = 250);
 
 signals:
     void progress(int percent);

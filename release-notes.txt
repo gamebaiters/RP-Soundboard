@@ -1,3 +1,198 @@
+GameBaiters Soundboard v2.2.12
+==============================
+
+UX + stability release on top of v2.2.11. Reverse-mode pitch / speed
+drag no longer stalls or freezes audio, the channel meter LEDs become
+a high-precision continuous VU strip, the settings window is fully
+re-organised under nine clear macro-categories, the waveform now has
+seamless loading + drag-preview + right-click ghost marker + a
+"loaded but stopped" visual, the preview-only checkbox screams
+"server not hearing" with a smooth colour fade, and a long-standing
+TS3-zombie-on-close UAF window in the audio callbacks is closed.
+
+
+Reverse playback — meticulous drag stability
+--------------------------------------------
+
+- Reverse-mode pitch / speed slider drag no longer halts audio mid-
+  stream. Previously each event wiped the whole chunk queue from the
+  GUI thread, faster than the worker could refill it (~150 ms / chunk
+  decode); a continuous drag starved the reader and the slot fell to
+  silence within a second, sometimes ending the playback as if the
+  file had finished. Setters are now lock-free atomic factor stores
+  + a single restart-pending flag; the worker handles all queue work
+  on its own thread.
+- Continuity guarantee: worker keeps the chunk that the reader is
+  currently draining, drops the rest, anchors the next decode at the
+  trimmed chunk's earlier edge so cursor mapping stays bit-accurate
+  to the audio actually played. User hears ~150 ms of old-factor
+  audio max instead of up to 3 s, then the new factors land. No
+  audible stalls, no premature stops, even under continuous slider
+  spam at 30+ events / second.
+- New atomic distinction: setSpeed / setPitch take the "keep front,
+  rebuild tail" path; an external seek still uses the full-wipe
+  path (it IS a real jump). Audio engine flags reset cleanly on a
+  fresh reverse session so a previously natural-end state never
+  carries over to bias done() in the new attempt.
+- The pitch / speed slider drag also re-syncs the GUI thread without
+  the previous m_mutex contention against the worker's per-chunk
+  decode — UI no longer freezes for ~150 ms while the worker is
+  inside FFmpeg.
+
+
+Channel meter — continuous VU + theme-correct surround
+------------------------------------------------------
+
+- The discrete LED grid (~33 segments at typical width) is replaced
+  with a per-pixel VU bar: ~200 px of resolution, ~6x more precise
+  for the same physical width. A 0.4 dB delta at -20 dB now moves
+  the fill ~1 px on a 200 px bar instead of doing nothing until the
+  next LED tick.
+- Render layers per row: faint full-width gradient (cyan -> green
+  -> amber -> red) as the always-visible scale; bright gradient
+  clipped to live-level fill with a hard right edge for a crisp
+  position read; 3 thin tick lines at -12 / -6 / -3 dB as eye
+  landmarks; a rounded peak-hold marker (pill, not sharp line) at
+  the held peak.
+- Peak-hold behaviour: when the wiring delivers exactly (0, 0) for a
+  silent slot, the marker switches to a fast-decay slide (~480 ms)
+  all the way down to the left edge before vanishing. Real audio
+  never sends a literal 0.0f peak on both channels so an active
+  loud-then-quiet-then-loud passage still gets the classic slow
+  hold tail.
+- The four small "corner" regions outside the rounded LED panel
+  used to fill with a hardcoded grey (#333437) that drifted from
+  both the default and themed channel surface — leaving 4 visible
+  "wrong-colour" patches against the parent channel. Now always
+  pulled from Theme::derivedCached().surface, the SAME colour the
+  channel frame paints, so the meter blends seamlessly under any
+  theme.
+
+
+Waveform — seamless load, drag preview, ghost markers, stopped state
+--------------------------------------------------------------------
+
+- Seamless analyser load: progressive bin growth no longer "resizes"
+  the waveform at the end of load. While analysis is running the
+  view shows a thin centred loading stripe; once the analyser
+  finishes, the full path appears in a single ~250 ms alpha fade-in.
+  The old visible "stretch then snap to width" jump at finalizeBins
+  is gone.
+- Drag preview cursor: while the user holds the mouse on the wave
+  the LIVE playback cursor keeps tracking audio (yellow solid line
+  on top of the played-portion tint), and a SEPARATE translucent
+  dashed warm-yellow cursor + halo follows the finger to show where
+  the seek will land on release. Previously the drag overwrote the
+  live cursor every move while the 60 Hz position poll restored it
+  immediately — the cursor flickered between finger and audio
+  position. Release commits seek and snaps the live cursor cleanly.
+- Right-click ghost marker: opening the crop context menu now draws
+  a pulsing semi-transparent dashed line at the click position +
+  faint halo for the duration of the menu. Visual spatial
+  confirmation of where the Start / End marker is about to land.
+  Cleared automatically when the menu closes regardless of action.
+- "Loaded but stopped" visual: a sound that is loaded but not
+  playing is rendered at ~37 % alpha (ghosted), reading as
+  "stopped, ready to replay". PAUSE counts as PLAYING and stays
+  rendered at full opacity (cursor frozen mid-stream, audio still
+  loaded in the player). Plumbed through WaveformPlayer::setPlaying
+  so existing wiring engages it automatically.
+- Reverse FX feedback overlay: pitch / speed slider drag in reverse
+  now draws a brief paulstretch-style progress overlay ("Applying
+  pitch / speed / pitch + speed... 0..95 %") for ~400 ms (matches
+  the worker rebuild window). Reverb edits flash a shorter 250 ms
+  acknowledgement since they apply instantly per sample. Same
+  visual machinery as the existing paulstretch loading overlay.
+
+
+Settings window — full macro-category reorganisation
+----------------------------------------------------
+
+- 12 scattered sections collapsed into 9 macro-categories, ordered
+  most-touched first. Settings that were sitting in the wrong group
+  have been moved to where they actually belong, and small
+  single-line "lone" sections have been folded into larger ones.
+- New layout:
+    1. General        - language combo (was its own section), global
+                        FX master, earrape protection, restore-session
+                        (was wrongly under Channels — it is global
+                        persistence behaviour, not per-channel UI).
+    2. Channels       - link-volumes, remember-fx, hide-waveform,
+                        adapt-waveform, crop-markers, PLUS
+                        "show meter on each channel" and "show export
+                        button on each channel" (were wrongly under
+                        "Audio sandbox" — they are channel UI, not DSP).
+    3. Audio sandbox && 3D HRTF - sandbox master, default 3D HRTF
+                        engine combo (was wrongly under Channels — the
+                        sandbox DSP is the engine consumer), custom
+                        Leia SOFA picker (was its own section), reset
+                        all sandbox.
+    4. Button grid
+    5. Hotkeys
+    6. Profiles && Config I/O - active profile + profile export /
+                        import + full configuration export / import
+                        (was a separate section).
+    7. Appearance     - renamed from "Custom theme" to match user-
+                        facing terminology.
+    8. Reset behaviour
+    9. Advanced       - renamed from "Logging" to match user-facing
+                        terminology. Debug log toggle + real-time
+                        log viewer + sandbox debug snapshot.
+- Persistence keys for expand / collapse state carry a "_v2" suffix
+  so the reorg does NOT drag stale open / closed state from the old
+  layout into the new one.
+
+
+Preview-only checkbox — smooth colour fade
+------------------------------------------
+
+- "Preview only (server hears nothing)" now SHOWS the fact at a
+  glance: the label smoothly fades back and forth between warm
+  orange (#ff8a1e) and deep red (#d4262e) at 30 Hz with a 1.2 s
+  full cycle. No more easy-to-miss tiny checkbox state.
+- Per-widget setStyleSheet override is used because the global QSS
+  cascade beat the previous palette-role approach (no visible
+  colour change). NO bold weight — keeps label width constant so
+  the surrounding controls never get pushed around when the box
+  toggles.
+- Fix for the "checkbox was checked at startup but did not blink":
+  the wiring restores it under a QSignalBlocker, so ::toggled never
+  fired on first open. New MainPage::showEvent re-syncs the blink
+  state when the soundboard becomes visible — covers any restore
+  path regardless of whether it emits ::toggled.
+
+
+P1..P4 profile buttons — visible borders
+----------------------------------------
+
+- Per-widget QSS gives each P1..P4 button a 1 px solid border, 4 px
+  rounded corners, padding, and explicit hover / pressed / checked
+  variants (checked = #3c6e9c accent fill, white text). Previously
+  the global QSS had no profileRole rule so the buttons rendered
+  borderless — they read as labels, not buttons. Now they read
+  unambiguously as buttons even when no custom theme is active.
+
+
+TS3 close — UAF race fix (zombie TS3.exe)
+-----------------------------------------
+
+- The "soundboard plugin crashed" dialog on TS3 close + the
+  zombie TS3.exe in task manager are addressed by closing the
+  remaining UAF window between the audio callback's null-check and
+  its dereference of the sampler pointer.
+- Sampler global is now atomic (std::atomic<Sampler*>). Audio
+  callbacks snapshot the pointer under an acquire load; sb_kill
+  stores nullptr under a release fence, sleeps 50 ms (~2x TS3's
+  20 ms audio tick) so any callback that already passed the null
+  check completes its work, THEN calls shutdown + delete. No more
+  in-flight callback hitting a freed Sampler mid-dereference.
+- Pairs with the existing v2.2.6 lock-free meter pre-scan and the
+  AudioExporter registry cancel + the TalkStateManager onConnect-
+  ionLost teardown — every known hold-TS3-alive path during
+  shutdown is now closed.
+
+
+=====================================================================
 GameBaiters Soundboard v2.2.11
 ==============================
 

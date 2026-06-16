@@ -81,6 +81,11 @@ protected:
     // any dirty model state so the next open finds the latest settings.
     void closeEvent(class QCloseEvent *e) override;
     void hideEvent (class QHideEvent  *e) override;
+    // Re-sync the preview-only blink state when the soundboard window
+    // becomes visible. The wiring restores the checkbox under a
+    // QSignalBlocker, so a checked-at-startup state never emits
+    // ::toggled and the blink would never have started without this.
+    void showEvent (class QShowEvent  *e) override;
 
 private:
     SearchBar          *m_search;
@@ -107,4 +112,15 @@ private:
 
     // Macro restore
     class QPushButton  *m_restoreMacroBtn = nullptr;
+
+    // Preview-only checkbox: when checked, label fades smoothly
+    // between two warning colours so the user always sees at a glance
+    // that the server is NOT hearing the soundboard. Forgotten
+    // preview-only flag = user thinks playback is going to the channel
+    // but it's silent on the server side — the blink kills that
+    // confusion. Stylesheet-based override (the global QSS cascade
+    // wins over palette role colours, so palette tricks did nothing).
+    class QTimer       *m_previewBlinkTimer = nullptr;
+    class QElapsedTimer *m_previewBlinkPhase = nullptr;
+    void syncPreviewBlink();   // start/stop based on current check state
 };

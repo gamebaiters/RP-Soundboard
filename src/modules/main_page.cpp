@@ -29,6 +29,10 @@
 #include <QResizeEvent>
 #include <QCloseEvent>
 #include <QHideEvent>
+#include <QTimer>
+#include <QElapsedTimer>
+#include <QShowEvent>
+#include <cmath>
 
 MainPage::MainPage(QWidget *parent)
     : QWidget(parent)
@@ -108,6 +112,31 @@ MainPage::MainPage(QWidget *parent)
     // Profile switcher buttons
     m_profileGroup = new QButtonGroup(this);
     m_profileGroup->setExclusive(true);
+    // Visible border so the P1..P4 read as buttons even when no theme
+    // is active. The global QSS had no profileRole rule, so without
+    // this the QToolButtons rendered borderless (looked like labels).
+    // Per-widget stylesheet beats the cascade — checked variant shows
+    // an accent fill so the active profile stays unambiguous.
+    static const char *kProfileBtnQss =
+        "QToolButton {"
+        "  background-color: #2b2c30;"
+        "  color: #d8d8d8;"
+        "  border: 1px solid #5a5d63;"
+        "  border-radius: 4px;"
+        "  padding: 2px 6px;"
+        "}"
+        "QToolButton:hover {"
+        "  background-color: #3a3c40;"
+        "  border-color: #7a7d83;"
+        "}"
+        "QToolButton:pressed {"
+        "  background-color: #1f2024;"
+        "}"
+        "QToolButton:checked {"
+        "  background-color: #3c6e9c;"
+        "  color: white;"
+        "  border-color: #4a8bc2;"
+        "}";
     for (int i = 0; i < 4; ++i) {
         m_profileButtons[i] = new QToolButton(this);
         m_profileButtons[i]->setText(tr("P%1").arg(i + 1));
@@ -115,6 +144,7 @@ MainPage::MainPage(QWidget *parent)
         m_profileButtons[i]->setMinimumSize(36, 28);
         m_profileButtons[i]->setToolTip(tr("Profile %1").arg(i + 1));
         m_profileButtons[i]->setProperty("profileRole", QVariant(QString("selector")));
+        m_profileButtons[i]->setStyleSheet(kProfileBtnQss);
         m_profileGroup->addButton(m_profileButtons[i], i);
     }
     m_profileButtons[0]->setChecked(true);
@@ -145,6 +175,51 @@ MainPage::MainPage(QWidget *parent)
         "Useful to test a sound or check timing before playing it for\n"
         "everyone in voice."));
     bottom->addWidget(m_previewOnly);
+    // Smooth preview-only blink. Three pieces:
+    //   1) Stylesheet-based color override (the global QSS sets the
+    //      QCheckBox color and beats QPalette role colours, so the
+    //      previous palette-only attempt rendered no visible change
+    //      under the themed UI).
+    //   2) 30 Hz timer + sin-wave phase between two warning colours
+    //      (warm orange <-> deep red) so the pulse fades smoothly
+    //      rather than hopping between two discrete states.
+    //   3) syncPreviewBlink() is also invoked from showEvent — the
+    //      wiring restores the checkbox under a QSignalBlocker, so
+    //      a checked-at-startup state never triggers ::toggled and
+    //      the blink stayed dead. showEvent fires after wiring has
+    //      pushed the restored model into the widgets.
+    m_previewBlinkTimer = new QTimer(this);
+    m_previewBlinkTimer->setInterval(33);   // ~30 Hz fade frame rate
+    m_previewBlinkPhase = new QElapsedTimer();
+    connect(m_previewBlinkTimer, &QTimer::timeout, this, [this]{
+        // Period 1200 ms full cycle (back-and-forth fade). Half-cycle
+        // ~600 ms — comfortably recognisable, not seizure-inducing.
+        constexpr double kPeriodMs = 1200.0;
+        const double phase = std::fmod(
+            static_cast<double>(m_previewBlinkPhase->elapsed()), kPeriodMs)
+            / kPeriodMs;
+        // 0..1 triangular via |sin| — symmetric ramp up/down.
+        const double t = 0.5 - 0.5 * std::cos(phase * 2.0 * 3.14159265358979);
+        // Lerp from warm orange #ff8a1e to deep red #d4262e. Both
+        // stay highly saturated so neither phase looks dim.
+        auto lerp = [](int a, int b, double k){
+            return static_cast<int>(a + (b - a) * k + 0.5);
+        };
+        int rr = lerp(0xff, 0xd4, t);
+        int gg = lerp(0x8a, 0x26, t);
+        int bb = lerp(0x1e, 0x2e, t);
+        QString hex = QString::asprintf("#%02x%02x%02x", rr, gg, bb);
+        // Per-widget stylesheet overrides the inherited QSS — Qt
+        // applies widget styles on top of cascade. Bold weight was
+        // removed (per user request) so the label width stays
+        // constant and surrounding controls do not get pushed
+        // around when the box toggles. Colour fade alone is enough
+        // signal.
+        m_previewOnly->setStyleSheet(QString(
+            "QCheckBox { color: %1; }").arg(hex));
+    });
+    connect(m_previewOnly, &QCheckBox::toggled, this,
+            [this](bool){ syncPreviewBlink(); });
     bottom->addSpacing(12);
     for (int i = 0; i < 4; ++i) bottom->addWidget(m_profileButtons[i]);
     bottom->addWidget(new HelpBubble(tr(
@@ -214,6 +289,35 @@ void MainPage::hideEvent(QHideEvent *e) {
     // without firing closeEvent (e.g. tab switch in older builds).
     ConfigModel::flushPendingWrite();
     QWidget::hideEvent(e);
+}
+
+void MainPage::showEvent(QShowEvent *e) {
+    QWidget::showEvent(e);
+    // Re-sync the preview-only blink. The wiring restores the
+    // checkbox under a QSignalBlocker so a checked-at-startup state
+    // never triggers ::toggled — calling syncPreviewBlink here picks
+    // it up regardless of how the state got set.
+    syncPreviewBlink();
+}
+
+void MainPage::syncPreviewBlink() {
+    if (!m_previewOnly || !m_previewBlinkTimer || !m_previewBlinkPhase)
+        return;
+    if (m_previewOnly->isChecked()) {
+        if (!m_previewBlinkTimer->isActive()) {
+            m_previewBlinkPhase->start();
+            m_previewBlinkTimer->start();
+        }
+        // Force one immediate frame so the user sees the warning
+        // colour before the first timer tick fires (~33 ms otherwise).
+        m_previewOnly->setStyleSheet(
+            QStringLiteral("QCheckBox { color: #ff8a1e; }"));
+    } else {
+        m_previewBlinkTimer->stop();
+        // Clear the per-widget override so the inherited QSS theme
+        // styling resumes — empty string disables widget-level QSS.
+        m_previewOnly->setStyleSheet(QString());
+    }
 }
 
 void MainPage::triggerButton(int idx) {

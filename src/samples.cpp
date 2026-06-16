@@ -612,6 +612,24 @@ void Sampler::shutdown()
 		m_retiredWorkers.clear();
 	}
 
+	// Stop every producer FIRST, then close + delete InputFiles. The
+	// old order (close + delete, then stop) created a use-after-free
+	// window: producer threads still pointed at the just-deleted
+	// InputFile and were free to dereference it before they noticed
+	// m_stop. Symptom in the wild was a leftover TS3.exe in task
+	// manager — the producer hung on a dead pointer, its std::thread
+	// dtor called std::terminate, and Windows kept the process around
+	// in a half-dead state long enough that the user force-killed it
+	// and TS3 popped a crash-on-exit dialog. Detach + stop is safe
+	// because producer.stop() joins the thread before returning, so
+	// by the time we close() the InputFile no other thread can touch
+	// it.
+	for (int i = 0; i < MAX_SLOTS; i++) {
+		PlaybackSlot &slot = m_slots[i];
+		slot.producerThread.setSource(NULL);
+		slot.producerThread.stop();
+	}
+
 	std::lock_guard<std::mutex> Lock(m_mutex);
 
 	for (int i = 0; i < MAX_SLOTS; i++)
@@ -623,7 +641,6 @@ void Sampler::shutdown()
 			delete slot.inputFile;
 			slot.inputFile = NULL;
 		}
-		slot.producerThread.stop();
 	}
 }
 

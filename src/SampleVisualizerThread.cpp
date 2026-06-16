@@ -13,7 +13,16 @@
 #include "SampleVisualizerThread.h"
 #include "SampleBuffer.h"
 
-#define MIN_SAMPLES_PER_ITERATION (1024 * 32)
+// Bumped 32 K -> 512 K samples per outer iteration. The old value
+// processed ~0.74 s of 44.1 kHz audio per cycle, so a 3-minute file
+// needed ~250 outer iterations and at the previous 1 ms inter-cycle
+// sleep that meant 250 ms of cumulative sleep on TOP of the decode
+// time - the "waveform is too slow to load" complaint. 512 K = ~11.6 s
+// per cycle, so the same 3-minute file fits in ~16 iterations end to
+// end. Single-cycle peak heap usage is unchanged (the per-bin temp
+// buffer scales with samplesPerBin, not the iteration size); only
+// the loop overhead shrinks.
+#define MIN_SAMPLES_PER_ITERATION (1024 * 512)
 #define SAMPLE_RATE 44100;
 
 
@@ -89,8 +98,12 @@ void SampleVisualizerThread::startAnalysis( const char *filename, size_t numBins
 	m_bins.clear();
 	// Pre-reserve so push_back never reallocates: the GUI reads the
 	// getBins() pointer without holding m_mutex, so a realloc during
-	// growth would hand it a dangling pointer.
-	m_bins.reserve(numBins * 2 + 16);
+	// growth would hand it a dangling pointer. Generously sized to
+	// absorb estimation undershoot (VBR MP3 without Xing header etc.)
+	// without ever triggering a vector reallocation — the previous
+	// reserve was numBins*2+16 which capped at 1032 bins and crashed /
+	// produced garbage the moment the decoder spilled past that.
+	m_bins.reserve(numBins * 32 + 16);
 	m_newFile = true;
 
 	if(!m_running)
@@ -149,6 +162,7 @@ void SampleVisualizerThread::run()
 			openNewFile();
 
 		int readSamplesThisIt = 0;
+		bool justFinished = false;
 		while(m_file && readSamplesThisIt < MIN_SAMPLES_PER_ITERATION)
 		{
 			int samples = m_file->readSamples(&m_buffer);
@@ -157,6 +171,7 @@ void SampleVisualizerThread::run()
 				m_file->close();
 				delete m_file;
 				m_file = NULL;
+				justFinished = true;
 			}
 			if(samples > 0)
 			{
@@ -164,6 +179,27 @@ void SampleVisualizerThread::run()
 				processSamples(samples);
 			}
 		}
+
+		// EOF: normalise m_bins to exactly m_numBins. The decoder's
+		// actual sample count routinely diverges from
+		// outputSamplesEstimation() (VBR MP3 estimation lies, MP3 / AAC
+		// encoder padding overshoots, some malformed containers
+		// undershoot) - which left the user with two visible bugs:
+		//   * overshoot (estimation > actual): fewer bins than 1024
+		//     generated → right edge of the waveform was blank dead
+		//     space and the silence built into the file end fell
+		//     entirely inside the drawn region.
+		//   * undershoot (estimation < actual): MORE than 1024 bins
+		//     generated → tail bins drawn past the widget's right edge
+		//     and clipped off-screen. Files with audible content then
+		//     a silent tail showed the audible part filling the entire
+		//     visible width and the silent tail completely invisible -
+		//     "I hear silence at the end but the waveform doesn't
+		//     show it".
+		// Resampling here keeps the GUI's hardcoded "i / 1024 * fw"
+		// drawing math correct for every file.
+		if (justFinished)
+			finalizeBins();
 
 		// Self-terminate when the file is fully processed and no new
 		// analysis was queued - an idle view must not keep a thread
@@ -177,8 +213,15 @@ void SampleVisualizerThread::run()
 			m_mutex.unlock();
 			return;
 		}
+		// Skip the inter-cycle sleep while there is still a file being
+		// analysed: decode is the slow part and the old 1 ms nap was
+		// pure waste between batches. Sleep only when m_file is gone
+		// (file just finished, queued newFile not yet wired in by
+		// openNewFile) so the next outer loop doesn't busy-spin.
+		const bool stillDecoding = (m_file != NULL);
 		m_mutex.unlock();
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		if (!stillDecoding)
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
 }
 
@@ -247,7 +290,87 @@ void SampleVisualizerThread::processSamples(size_t newSamples)
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose: after EOF, resize the bin array to exactly m_numBins so
+// the GUI's hardcoded "i / numBins * fw" mapping always lands the
+// right edge of the waveform at the right edge of the widget. Both
+// the over- and undershoot cases are user-visible:
+//   * fewer source bins than target → linearly interpolate across
+//     groups, then pad any remaining tail with zero bins so the
+//     genuine end-of-file silence shows up as a flat line.
+//   * more source bins than target → average the per-target source
+//     group's [min,max] into one bin per target slot.
+// We deliberately avoid changing the buffer's underlying capacity:
+// shrinks via resize() never realloc, the GUI's lock-free pointer
+// read stays valid.
+//---------------------------------------------------------------
+void SampleVisualizerThread::finalizeBins()
+{
+	const size_t target = m_numBins;
+	if (target == 0) return;
+	const size_t srcBins = m_bins.size() / 2;
+	if (srcBins == target) {
+		m_numBinsProcessed = target;
+		return;
+	}
+
+	std::vector<int> out;
+	out.resize(target * 2);
+
+	if (srcBins == 0) {
+		// Whole file silent or decode failed - flat line everywhere.
+		for (size_t i = 0; i < target * 2; ++i) out[i] = 0;
+	}
+	else if (srcBins > target) {
+		// Downsample: each target bin absorbs srcBins/target source bins.
+		// Use floor() spacing + last-bin catch so no source bin is dropped
+		// and the silence-at-end always lands in the right target bin.
+		for (size_t i = 0; i < target; ++i) {
+			size_t s0 = (size_t)((double)i      / target * srcBins);
+			size_t s1 = (size_t)((double)(i + 1) / target * srcBins);
+			if (s1 <= s0) s1 = s0 + 1;
+			if (s1 > srcBins) s1 = srcBins;
+			int mn = m_bins[s0 * 2];
+			int mx = m_bins[s0 * 2 + 1];
+			for (size_t s = s0 + 1; s < s1; ++s) {
+				if (m_bins[s * 2]     < mn) mn = m_bins[s * 2];
+				if (m_bins[s * 2 + 1] > mx) mx = m_bins[s * 2 + 1];
+			}
+			out[i * 2]     = mn;
+			out[i * 2 + 1] = mx;
+		}
+	}
+	else {
+		// Upsample: estimation overshot the real audio length. Map each
+		// target bin to its source bin via nearest-neighbour; trailing
+		// target bins past the source range fall to zero (silence) so
+		// the cursor's end-of-file region is visually correct.
+		for (size_t i = 0; i < target; ++i) {
+			double srcFrac = (double)i / target * srcBins;
+			size_t s = (size_t)srcFrac;
+			if (s >= srcBins) {
+				out[i * 2]     = 0;
+				out[i * 2 + 1] = 0;
+			} else {
+				out[i * 2]     = m_bins[s * 2];
+				out[i * 2 + 1] = m_bins[s * 2 + 1];
+			}
+		}
+	}
+
+	// In-place swap into the reserved buffer so the underlying pointer
+	// stays valid for any concurrent GUI read. resize() to the same
+	// capacity is a no-op; assigning element-wise then resize() to
+	// target*2 leaves m_bins.data() unchanged because target*2 ≤
+	// reserve(numBins * 32 + 16).
+	m_bins.resize(target * 2);
+	for (size_t i = 0; i < target * 2; ++i)
+		m_bins[i] = out[i];
+	m_numBinsProcessed = target;
+}
+
+
+//---------------------------------------------------------------
+// Purpose:
 //---------------------------------------------------------------
 void SampleVisualizerThread::getMinMax( const short *data, size_t count, int &min, int &max )
 {

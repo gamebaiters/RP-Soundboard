@@ -11,6 +11,20 @@
 #include <algorithm>
 #include <memory>
 #include <exception>
+#include <mutex>
+#include <set>
+
+namespace {
+// Registry of live exporters. Wiring code creates exporters with
+// parent=nullptr (so the worker is not yanked when the soundboard
+// window closes mid-export). sb_kill therefore has no Qt object tree
+// to walk, and a zombie exporter blocked the plugin DLL from
+// unloading — TS3.exe stayed in task manager. The registry gives
+// sb_kill a single chokepoint to cancel + join every still-running
+// exporter.
+std::mutex            g_exportersMu;
+std::set<AudioExporter*> g_exporters;
+} // namespace
 
 namespace {
 
@@ -43,6 +57,46 @@ AudioExporter::AudioExporter(const QString &inputFile, const QString &outputFile
     , m_sandboxEnabled(sandboxEnabled)
     , m_sampleRate(sampleRate > 0.0 ? sampleRate : 48000.0)
 {
+    std::lock_guard<std::mutex> lg(g_exportersMu);
+    g_exporters.insert(this);
+}
+
+AudioExporter::~AudioExporter()
+{
+    {
+        std::lock_guard<std::mutex> lg(g_exportersMu);
+        g_exporters.erase(this);
+    }
+    // Belt-and-braces: a QThread dying with run() still active would
+    // call std::terminate via ~QThread. The wiring already chains
+    // finished -> deleteLater so we normally arrive here after run()
+    // returned, but a stray code path could still get us here mid-run.
+    if (isRunning()) {
+        requestInterruption();
+        if (!wait(500)) {
+            terminate();
+            wait(100);
+        }
+    }
+}
+
+void AudioExporter::cancelAllAndWait(int waitMsPerThread)
+{
+    // Snapshot the registry: the exporters' own finished -> deleteLater
+    // chain may erase entries while we wait, and walking the live set
+    // would invalidate iterators.
+    std::vector<AudioExporter*> snap;
+    {
+        std::lock_guard<std::mutex> lg(g_exportersMu);
+        snap.assign(g_exporters.begin(), g_exporters.end());
+    }
+    for (AudioExporter *e : snap) {
+        if (e) e->requestInterruption();
+    }
+    for (AudioExporter *e : snap) {
+        if (!e) continue;
+        if (e->isRunning()) e->wait(waitMsPerThread);
+    }
 }
 
 void AudioExporter::run() {

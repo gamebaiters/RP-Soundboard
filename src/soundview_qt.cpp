@@ -57,6 +57,14 @@ void SoundView::setReverse(bool on)
 }
 
 
+void SoundView::setGhosted(bool on)
+{
+	if (m_ghosted == on) return;
+	m_ghosted = on;
+	update();
+}
+
+
 //---------------------------------------------------------------
 // Purpose:
 //---------------------------------------------------------------
@@ -199,6 +207,33 @@ void SoundView::paintEvent(QPaintEvent *evt)
 		}
 	}
 
+	// Right-click crop ghost marker. Pulses while the context menu is
+	// open so the user sees where the start / end is going to land.
+	// Drawn BEFORE the playback cursor so the live cursor stays on
+	// top — ghost is "future intent", cursor is "current state".
+	if (m_ghostMarkerSec >= 0.0 && m_totalLength > 0.0
+	    && m_ghostBlinkVisible)
+	{
+		double frac = m_ghostMarkerSec / m_totalLength;
+		if (frac < 0.0) frac = 0.0;
+		if (frac > 1.0) frac = 1.0;
+		int gx = static_cast<int>(frac * (width() - 1) + 0.5);
+		painter.setRenderHint(QPainter::Antialiasing, true);
+		// Faint glow halo to make the line readable against any
+		// waveform colour.
+		painter.setPen(Qt::NoPen);
+		painter.setBrush(QColor(255, 255, 255, 28));
+		painter.drawRect(gx - 3, 0, 7, height());
+		// Dashed core line — distinguishes ghost from solid markers /
+		// solid playback cursor.
+		QPen ghostPen(QColor(255, 240, 200, 220), 2);
+		ghostPen.setStyle(Qt::DashLine);
+		ghostPen.setDashPattern({3.0, 3.0});
+		painter.setPen(ghostPen);
+		painter.drawLine(gx, 0, gx, height() - 1);
+		painter.setRenderHint(QPainter::Antialiasing, false);
+	}
+
 	// Draw position cursor
 	if (m_playbackPosition >= 0.0 && m_playbackPosition <= 1.0)
 	{
@@ -207,6 +242,34 @@ void SoundView::paintEvent(QPaintEvent *evt)
 		if (posX > cursorMaxX) posX = cursorMaxX;
 		painter.setPen(QPen(QColor(255, 200, 0), 2));
 		painter.drawLine(posX, 0, posX, height() - 1);
+	}
+
+	// Drag-preview cursor — finger position while the user holds the
+	// mouse over the waveform. Painted on top of the live cursor in a
+	// distinct translucent style so the user sees BOTH "where audio
+	// is now" and "where I am about to seek to". On release the
+	// release handler clears m_dragPreview and snaps m_playbackPosition
+	// to the released spot — no flicker, no race with the position
+	// poll.
+	if (m_dragging && m_dragPreview >= 0.0 && m_dragPreview <= 1.0)
+	{
+		int dx = (int)(m_dragPreview * (width() - 1));
+		if (dx < cursorMinX) dx = cursorMinX;
+		if (dx > cursorMaxX) dx = cursorMaxX;
+		painter.setRenderHint(QPainter::Antialiasing, true);
+		// Faint glow halo so the preview is visible against any
+		// waveform colour.
+		painter.setPen(Qt::NoPen);
+		painter.setBrush(QColor(0xfd, 0xe0, 0x70, 60));
+		painter.drawRect(dx - 4, 0, 9, height());
+		// Dashed core — visually distinct from the solid live cursor
+		// (yellow, 2 px). User can tell at a glance which is which.
+		QPen dragPen(QColor(0xff, 0xf2, 0xa8, 230), 2);
+		dragPen.setStyle(Qt::DashLine);
+		dragPen.setDashPattern({4.0, 3.0});
+		painter.setPen(dragPen);
+		painter.drawLine(dx, 0, dx, height() - 1);
+		painter.setRenderHint(QPainter::Antialiasing, false);
 	}
 
 	// Draw FX adaptation badge
@@ -257,9 +320,16 @@ void SoundView::paintEvent(QPaintEvent *evt)
 		f.setPixelSize(10);
 		painter.setFont(f);
 		painter.setPen(QColor(255, 255, 255, static_cast<int>(200 * (1.0f - progress * 0.7f))));
-		QString label = progress < 0.95f
-			? tr("Applying paulstretch... %1%").arg(static_cast<int>(progress * 100))
-			: tr("Paulstretch ready");
+		QString label;
+		if (progress < 0.95f) {
+			// Dynamic template — paulstretch and reverse-mode FX
+			// overlays share this paint code via m_loadLabelActive.
+			label = m_loadLabelActive.contains(QLatin1String("%1"))
+				? m_loadLabelActive.arg(static_cast<int>(progress * 100))
+				: m_loadLabelActive;
+		} else {
+			label = m_loadLabelDone;
+		}
 		painter.drawText(QRect(0, 0, width(), height() - barH - 4),
 		                 Qt::AlignCenter, label);
 	}
@@ -291,6 +361,16 @@ void SoundView::setSound( const SoundInfo &sound )
 		// so concurrent channels never overwrite each other's bins.
 		if (!m_vis)
 			m_vis.reset(new SampleVisualizerThread());
+		// Reset reveal state for the new file so the loading indicator
+		// shows and the fade-in fires at the next completion.
+		m_analysisReady = false;
+		m_revealActive  = false;
+		if (m_revealTimer) m_revealTimer->stop();
+		// A fresh file load starts unghosted — playback is about to
+		// begin. setPlaying(true) from the wiring would clear this
+		// anyway, but explicit reset prevents a one-frame ghost
+		// flash between setSound and setPlaying.
+		m_ghosted = false;
 		m_vis->startAnalysis(sound.filename.toUtf8(), 1024);
 		m_timer->start(100);
 	}
@@ -336,6 +416,12 @@ void SoundView::clearPlayback()
 	m_timer->stop();
 	m_loadActive = false;
 	m_loadTimer->stop();
+	m_analysisReady = false;
+	m_revealActive  = false;
+	if (m_revealTimer) m_revealTimer->stop();
+	// Ghost flag belongs to the "loaded but stopped" state — a true
+	// clear wipes the slot so the next setSound starts unghosted.
+	m_ghosted = false;
 	// Crop markers must not survive a stop / sound change.
 	m_cropStart = 0.0;
 	m_cropEnd = -1.0;
@@ -377,21 +463,107 @@ void SoundView::setShowCropMarkers(bool on)
 void SoundView::onTimer()
 {
 	if (!m_vis) { m_timer->stop(); return; }
-	if (!m_vis->isRunning() && m_drawnBins >= m_vis->getBinsProcessed())
+	// Only repaint while ANALYSIS-still-running OR a final ready
+	// transition is pending. While loading we draw a loading bar
+	// (drawWaves bails out — no progressive path growth so the user
+	// never sees a "resize at end of load"). At completion ONE
+	// repaint fades the full-resolution path in.
+	bool finished = !m_vis->isRunning();
+	bool repaintFinalFrame = finished && !m_analysisReady;
+	if (finished && m_drawnBins >= m_vis->getBinsProcessed()
+	             && m_analysisReady) {
 		m_timer->stop();
+	}
+	if (repaintFinalFrame) {
+		m_analysisReady = true;
+		// Fade-in: short alpha ramp so the transition from loading
+		// indicator to full waveform is smooth instead of a hard pop.
+		m_revealElapsed.start();
+		m_revealActive = true;
+		if (!m_revealTimer) {
+			m_revealTimer = new QTimer(this);
+			m_revealTimer->setInterval(16); // ~60 Hz
+			connect(m_revealTimer, &QTimer::timeout,
+			        this, [this]{
+				if (m_revealElapsed.elapsed() >= kRevealMs) {
+					m_revealActive = false;
+					m_revealTimer->stop();
+				}
+				update();
+			});
+		}
+		m_revealTimer->start();
+	}
 	update();
 }
 
 
 //---------------------------------------------------------------
-// Purpose:
+// Purpose: paint the per-channel waveform. While the visualizer is
+// still analysing we draw NOTHING — only a thin loading indicator
+// stripe so the user has feedback without ever seeing the path
+// progressively extend / re-resize at end of load. The full
+// waveform appears in one go with a short alpha fade-in.
 //---------------------------------------------------------------
 void SoundView::drawWaves(QPainter *painter)
 {
 	if (!m_active)
 		return;
 
+	const bool analysing =
+		m_vis && (m_vis->isRunning() || !m_analysisReady);
+
+	if (analysing) {
+		// Subtle horizontal indicator centred vertically. Acts as a
+		// "loading" affordance without committing to any waveform
+		// shape that would later have to be re-rendered.
+		Theme::Colors tc = Theme::colors();
+		QColor base = tc.enabled ? tc.waveform : QColor(0, 180, 255);
+		int alpha = 60; // dim
+		painter->setPen(Qt::NoPen);
+		painter->setBrush(QColor(base.red(), base.green(), base.blue(),
+		                         alpha));
+		int y = height() / 2;
+		painter->drawRect(2, y - 1, width() - 4, 2);
+		return;
+	}
+
 	preparePaths();
+
+	// Reveal fade-in: render the full path at increasing alpha for
+	// kRevealMs after analysis completion. After the fade the
+	// painter state is restored to whatever the caller set up so
+	// the rest of paintEvent draws normally.
+	int alpha = 255;
+	if (m_revealActive) {
+		qint64 e = m_revealElapsed.elapsed();
+		double t = (double)e / (double)kRevealMs;
+		if (t < 0.0) t = 0.0;
+		if (t > 1.0) t = 1.0;
+		alpha = (int)(t * 255.0);
+	}
+	// Ghosted (loaded but not playing): cap alpha so the waveform
+	// reads as "stopped, ready to replay". Pause does NOT flip this —
+	// only the wiring's true-stop edge does. Used together with the
+	// reveal fade so a freshly loaded sound still fades in before
+	// settling at the ghost alpha.
+	if (m_ghosted) {
+		int ghostAlpha = 95;
+		if (alpha > ghostAlpha) alpha = ghostAlpha;
+	}
+	if (alpha < 255) {
+		QColor pen  = painter->pen().color();
+		QColor brsh = painter->brush().color();
+		QPen   p    = painter->pen();
+		QBrush b    = painter->brush();
+		QColor penA(pen.red(),  pen.green(),  pen.blue(),  alpha);
+		QColor brA (brsh.red(), brsh.green(), brsh.blue(),
+		            std::min(180, alpha));
+		p.setColor(penA);
+		b.setColor(brA);
+		painter->setPen(p);
+		painter->setBrush(b);
+	}
 
 	painter->drawPath(m_path[0]);
 	painter->drawPath(m_path[1]);
@@ -448,12 +620,34 @@ void SoundView::setLiveFx(int pitch, int speed, int reverb)
 {
 	if (pitch == m_fxPitch && speed == m_fxSpeed && reverb == m_fxReverb)
 		return;
+	bool pitchChanged  = (pitch  != m_fxPitch);
+	bool speedChanged  = (speed  != m_fxSpeed);
+	bool reverbChanged = (reverb != m_fxReverb);
 	m_fxPitch  = pitch;
 	m_fxSpeed  = speed;
 	m_fxReverb = reverb;
 	if (m_adaptToFx) {
 		m_drawnBins = 0;
 		update();
+	}
+	// Reverse-mode feedback overlay. Pitch/speed in reverse trigger
+	// a chunk-worker rebuild (~150 ms decode + queue refill) so the
+	// user gets ~400 ms of visible progress. Reverb is instant but
+	// still flashes a short 250 ms acknowledgement so the slider
+	// drag feels responsive. Same overlay machinery as paulstretch.
+	if (m_active && m_reverse) {
+		if (pitchChanged || speedChanged) {
+			QString label = (pitchChanged && speedChanged)
+				? tr("Applying pitch + speed... %1%")
+				: (pitchChanged ? tr("Applying pitch... %1%")
+				                : tr("Applying speed... %1%"));
+			QString done = tr("FX ready");
+			startFxLoadAnimation(400, label, done);
+		} else if (reverbChanged) {
+			startFxLoadAnimation(250,
+			                     tr("Applying reverb... %1%"),
+			                     tr("Reverb ready"));
+		}
 	}
 }
 
@@ -472,6 +666,21 @@ void SoundView::startStretchLoadAnimation(int durationMs)
 	m_loadDurationMs = durationMs;
 	m_loadElapsed.start();
 	m_loadActive = true;
+	m_loadLabelActive = tr("Applying paulstretch... %1%");
+	m_loadLabelDone   = tr("Paulstretch ready");
+	m_loadTimer->start();
+	update();
+}
+
+void SoundView::startFxLoadAnimation(int durationMs,
+                                     const QString &activeTemplate,
+                                     const QString &doneText)
+{
+	m_loadDurationMs = durationMs;
+	m_loadElapsed.start();
+	m_loadActive = true;
+	m_loadLabelActive = activeTemplate;
+	m_loadLabelDone   = doneText;
 	m_loadTimer->start();
 	update();
 }
@@ -709,7 +918,15 @@ void SoundView::preparePaths()
 		return;
 	SampleVisualizerThread &t = *m_vis;
 	size_t bins = t.getBinsProcessed();
-	if(m_drawnBins < bins)
+	// Bins SHRINK on EOF when the visualizer resamples a runaway
+	// undershoot (more than numBins source bins generated) back down
+	// to numBins. Without the != path, drawnBins would stay at the
+	// progressive overshoot value, preparePaths would skip recompute,
+	// and the user would keep seeing the pre-finalise paths whose
+	// trailing bins live OFF-screen — the silence-at-end stays
+	// invisible. Trigger recompute on any count change, not just
+	// growth.
+	if (m_drawnBins != bins)
 	{
 		double fhh = (double)height() * 0.5;
 		double fw = (double)width();
@@ -803,7 +1020,10 @@ void SoundView::mousePressEvent(QMouseEvent *evt)
 	{
 		m_dragging = true;
 		double frac = clampFractionToCrop(fractionFromMouseX(evt->x()));
-		m_playbackPosition = frac;
+		// Do NOT overwrite m_playbackPosition: the live cursor must
+		// keep tracking audio while the user previews the seek with
+		// the finger. Only the drag-preview overlay moves.
+		m_dragPreview = frac;
 		update();
 	}
 }
@@ -817,7 +1037,7 @@ void SoundView::mouseMoveEvent(QMouseEvent *evt)
 	if (m_dragging)
 	{
 		double frac = clampFractionToCrop(fractionFromMouseX(evt->x()));
-		m_playbackPosition = frac;
+		m_dragPreview = frac;
 		update();
 	}
 }
@@ -832,10 +1052,11 @@ void SoundView::mouseReleaseEvent(QMouseEvent *evt)
 	{
 		m_dragging = false;
 		double frac = clampFractionToCrop(fractionFromMouseX(evt->x()));
-		// Snap the cursor to the release point immediately - without
-		// this, the next position poll (~16 ms later) painted the
-		// cursor drifting a bit forward as the buffered samples drained.
+		// Commit: snap the LIVE cursor to the release point so the
+		// next position poll (~16 ms later) does not paint the
+		// cursor drifting from the previous audio position to here.
 		m_playbackPosition = frac;
+		m_dragPreview      = -1.0;
 		update();
 		emit seekRequested(frac);
 	}
@@ -907,6 +1128,28 @@ void SoundView::contextMenuEvent(QContextMenuEvent *evt)
 			});
 		}
 	}
+	// Ghost marker: pulsing semi-transparent line at the click
+	// position so the user sees exactly where the marker is about to
+	// land while the menu is open. Cleared after menu.exec returns
+	// regardless of which action was picked (or cancel).
+	m_ghostMarkerSec    = clickSec;
+	m_ghostBlinkVisible = true;
+	if (!m_ghostTimer) {
+		m_ghostTimer = new QTimer(this);
+		m_ghostTimer->setInterval(220);   // ~2.3 Hz pulse
+		connect(m_ghostTimer, &QTimer::timeout, this, [this]{
+			m_ghostBlinkVisible = !m_ghostBlinkVisible;
+			update();
+		});
+	}
+	m_ghostTimer->start();
+	update();
+
 	menu.exec(evt->globalPos());
+
+	if (m_ghostTimer) m_ghostTimer->stop();
+	m_ghostMarkerSec    = -1.0;
+	m_ghostBlinkVisible = true;
+	update();
 	evt->accept();
 }

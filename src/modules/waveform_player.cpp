@@ -318,6 +318,12 @@ void WaveformPlayer::setPlaying(bool on) {
         // opposite state.
         m_replayReady = false;
     }
+    // Loaded-but-stopped visual: ghost the waveform so the user can
+    // tell at a glance the file is loaded but not actively playing.
+    // Pause does NOT flip this (setPaused leaves m_playing true so
+    // this stays unghosted) — matches the user's mental model where
+    // paused = "playing, just frozen".
+    if (m_wave) m_wave->setGhosted(!on);
     refreshPlayPauseAffordance();
     refreshClearButton();
 }

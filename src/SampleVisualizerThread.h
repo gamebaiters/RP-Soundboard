@@ -57,6 +57,7 @@ private:
 	void threadFunc();
 	void openNewFile();
 	void processSamples(size_t newSamples);
+	void finalizeBins();
 	static void getMinMax(const short *data, size_t count, int &min, int &max);
 
 	typedef std::lock_guard<std::mutex> Lock;

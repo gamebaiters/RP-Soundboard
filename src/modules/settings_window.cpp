@@ -143,17 +143,52 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     m_resetAllFiles->setChecked(true);
     m_resetAllSandbox->setChecked(true);
 
-    // ============== Audio section ==============
-    auto *audioLay = new QVBoxLayout;
-    audioLay->addLayout(checkRow(m_globalFx, tr(
+    // ============== General section ==============
+    // Combined "Audio" + "Language" + global persistence. Items that
+    // apply globally to the soundboard regardless of channel / sandbox.
+    auto *generalLay = new QVBoxLayout;
+    // Language sub-row (was its own section before — too small for
+    // its own ExpandableSection; folded into General).
+    {
+        auto *row = new QHBoxLayout;
+        row->addWidget(new QLabel(tr("Interface language:")));
+        auto *langCombo = new QComboBox(this);
+        langCombo->addItem(tr("Automatic (system language)"), QStringLiteral("auto"));
+        langCombo->addItem(QStringLiteral("English"),  QStringLiteral("en"));
+        langCombo->addItem(QStringLiteral("Italiano"), QStringLiteral("it"));
+        QSettings ls(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        int ci = langCombo->findData(ls.value(QStringLiteral("language"),
+                                              QStringLiteral("auto")).toString());
+        langCombo->setCurrentIndex(ci >= 0 ? ci : 0);
+        row->addWidget(langCombo, 1);
+        row->addWidget(new HelpBubble(tr(
+            "Italian is selected automatically when the system language "
+            "is Italian. A change here is applied the next time the "
+            "plugin loads (reload the plugin or restart TeamSpeak)."), this));
+        generalLay->addLayout(row);
+        connect(langCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [langCombo](int){
+            QSettings s(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+            s.setValue(QStringLiteral("language"), langCombo->currentData().toString());
+            s.sync();
+        });
+    }
+    generalLay->addLayout(checkRow(m_globalFx, tr(
         "Master switch for the pitch / speed / reverb effects. When OFF\n"
         "every channel hides its FX panel and per-button custom FX are\n"
         "skipped at playback time."), this));
-    audioLay->addLayout(checkRow(m_earrape, tr(
+    generalLay->addLayout(checkRow(m_earrape, tr(
         "Limits local audio output so a too-loud sample cannot deafen you."), this));
-    audioLay->addWidget(m_multi);
+    // Session-restore is global persistence behaviour — not a per-
+    // channel UI option; lifted up to General.
+    generalLay->addLayout(checkRow(m_restoreSession, tr(
+        "Remember channel count, loaded files and all settings on the next open."), this));
+    generalLay->addWidget(m_multi);
 
     // ============== Channels section ==============
+    // Per-channel UI + behaviour. The audio-meter + export-button
+    // toggles WERE under "Audio sandbox" but they control the visible
+    // widgets on each channel row — not sandbox DSP. Moved here.
     auto *channelsLay = new QVBoxLayout;
     channelsLay->addLayout(checkRow(m_linkVolumes, tr(
         "When ON, each new Channel copies settings from the first channel."), this));
@@ -161,8 +196,10 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         "When ON, each channel remembers its pitch / speed / reverb between sessions."), this));
     channelsLay->addLayout(checkRow(m_hideWaveform, tr(
         "Compact channel view: removes the waveform display from every channel."), this));
-    channelsLay->addLayout(checkRow(m_restoreSession, tr(
-        "Remember channel count, loaded files and all settings on the next open."), this));
+    channelsLay->addLayout(checkRow(m_meterVisible, tr(
+        "Render the dual L/R peak meter on each channel."), this));
+    channelsLay->addLayout(checkRow(m_exportEnabled, tr(
+        "Show an Export button on each channel."), this));
     channelsLay->addLayout(checkRow(m_adaptWaveform, tr(
         "When ON, the waveform display adapts to show the visual effect of\n"
         "active audio sandbox effects (especially Paulstretch stretching).\n"
@@ -171,40 +208,6 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         "When ON, a sound that has a per-cell crop start and/or end point\n"
         "shows coloured markers on the waveform at those positions.\n"
         "Only the points that are actually set are drawn."), this));
-
-    // ---- 3D HRTF engine (default for new channels) ----
-    // The Classic parametric engine is deprecated but kept available
-    // for users who prefer its lightweight character. Default is
-    // Leia for every new channel; selection here writes the
-    // SandboxEnginePref QSettings key which Channel ctor reads on
-    // creation. Existing channels with a per-cell saved engine
-    // restore their saved value regardless of this default.
-    {
-        auto *engRow = new QHBoxLayout;
-        engRow->setContentsMargins(0, 0, 0, 0);
-        engRow->setSpacing(6);
-        engRow->addWidget(new QLabel(tr("Default 3D HRTF engine for new channels:"), this));
-        auto *engBox = new QComboBox(this);
-        engBox->addItem(tr("Leia (measured HRTF) - recommended"));
-        engBox->addItem(tr("Classic (parametric, deprecated)"));
-        const int saved = SandboxEnginePref::load();
-        engBox->setCurrentIndex(saved == SandboxState::Engine_Classic ? 1 : 0);
-        connect(engBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
-                this, [](int idx) {
-            SandboxEnginePref::save(idx == 1
-                ? SandboxState::Engine_Classic
-                : SandboxState::Engine_Leia);
-        });
-        engRow->addWidget(engBox, 1);
-        engRow->addWidget(new HelpBubble(tr(
-            "Leia uses measured-HRTF convolution with image-source room\n"
-            "reflections - correct front/back localisation and a far more\n"
-            "convincing sense of space. Classic is the older parametric\n"
-            "Brown-Duda engine; kept for users who prefer its lighter\n"
-            "character. The choice applies to new channels; existing\n"
-            "channels keep their per-cell saved engine."), this));
-        channelsLay->addLayout(engRow);
-    }
 
     // ============== Button grid section ==============
     auto *gridLay = new QFormLayout;
@@ -226,49 +229,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     resetHkRow->addStretch(1);
     hotkeyLay->addLayout(resetHkRow);
 
-    // ============== Custom Leia SOFA dataset section ==============
-    auto *sofaLay = new QVBoxLayout;
-    auto *sofaRow = new QHBoxLayout;
-    auto *sofaPathLbl = new QLabel(tr("(using bundled default)"), this);
-    auto *sofaPickBtn = new QPushButton(tr("Pick custom SOFA..."), this);
-    auto *sofaClearBtn = new QPushButton(tr("Use default"), this);
-    sofaPathLbl->setStyleSheet("color: #aaa;");
-    sofaPathLbl->setWordWrap(true);
-    sofaRow->addWidget(sofaPickBtn);
-    sofaRow->addWidget(sofaClearBtn);
-    sofaRow->addStretch(1);
-    sofaLay->addLayout(sofaRow);
-    sofaLay->addWidget(sofaPathLbl);
-    auto loadSofaPath = [sofaPathLbl, this]{
-        QSettings sset(QStringLiteral("GameBaiters"),
-                       QStringLiteral("Soundboard"));
-        QString p = sset.value(QStringLiteral("leia/custom_sofa_path"))
-                       .toString();
-        sofaPathLbl->setText(p.isEmpty()
-            ? tr("(using bundled default)")
-            : tr("Custom: %1").arg(p));
-    };
-    loadSofaPath();
-    connect(sofaPickBtn, &QPushButton::clicked, this, [this, loadSofaPath]{
-        QString p = QFileDialog::getOpenFileName(
-            this, tr("Pick a SOFA HRTF dataset"), QString(),
-            tr("SOFA datasets (*.sofa);;All files (*.*)"));
-        if (p.isEmpty()) return;
-        QSettings sset(QStringLiteral("GameBaiters"),
-                       QStringLiteral("Soundboard"));
-        sset.setValue(QStringLiteral("leia/custom_sofa_path"), p);
-        loadSofaPath();
-        QMessageBox::information(this, tr("Custom HRTF"),
-            tr("Reopen the soundboard to apply the new dataset."));
-    });
-    connect(sofaClearBtn, &QPushButton::clicked, this, [this, loadSofaPath]{
-        QSettings sset(QStringLiteral("GameBaiters"),
-                       QStringLiteral("Soundboard"));
-        sset.remove(QStringLiteral("leia/custom_sofa_path"));
-        loadSofaPath();
-    });
-
-    // ============== Logging section ==============
+    // ============== Advanced section (was "Logging") ==============
     auto *logLay = new QVBoxLayout;
     logLay->addLayout(checkRow(m_logsEnabled, tr(
         "Writes a debug log file (rpsb_debug.log) inside your TeamSpeak config folder."), this));
@@ -299,14 +260,91 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(copyDebugBtn, &QPushButton::clicked, this,
             &SettingsWindow::copySandboxDebugRequested);
 
-    // ============== Audio sandbox section ==============
+    // ============== Audio sandbox & 3D HRTF section ==============
+    // Sandbox master switch + default 3D HRTF engine + custom SOFA
+    // dataset picker. Previously these lived in three separate
+    // sections; the engine combo was even inside "Channels" which made
+    // no sense — it belongs with the sandbox DSP that consumes it.
     auto *sandboxLay = new QVBoxLayout;
     sandboxLay->addLayout(checkRow(m_sandboxEnabled, tr(
         "Master switch for the per-channel Audio Sandbox button."), this));
-    sandboxLay->addLayout(checkRow(m_meterVisible, tr(
-        "Render the dual L/R peak meter on each channel."), this));
-    sandboxLay->addLayout(checkRow(m_exportEnabled, tr(
-        "Show an Export button on each channel."), this));
+    // ---- 3D HRTF engine (default for new channels) ----
+    // Classic parametric engine is deprecated but kept available
+    // for users who prefer its lightweight character. Default is
+    // Leia for every new channel; selection here writes the
+    // SandboxEnginePref QSettings key which Channel ctor reads on
+    // creation. Existing channels with a per-cell saved engine
+    // restore their saved value regardless of this default.
+    {
+        auto *engRow = new QHBoxLayout;
+        engRow->setContentsMargins(0, 0, 0, 0);
+        engRow->setSpacing(6);
+        engRow->addWidget(new QLabel(tr("Default 3D HRTF engine for new channels:"), this));
+        auto *engBox = new QComboBox(this);
+        engBox->addItem(tr("Leia (measured HRTF) - recommended"));
+        engBox->addItem(tr("Classic (parametric, deprecated)"));
+        const int saved = SandboxEnginePref::load();
+        engBox->setCurrentIndex(saved == SandboxState::Engine_Classic ? 1 : 0);
+        connect(engBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [](int idx) {
+            SandboxEnginePref::save(idx == 1
+                ? SandboxState::Engine_Classic
+                : SandboxState::Engine_Leia);
+        });
+        engRow->addWidget(engBox, 1);
+        engRow->addWidget(new HelpBubble(tr(
+            "Leia uses measured-HRTF convolution with image-source room\n"
+            "reflections - correct front/back localisation and a far more\n"
+            "convincing sense of space. Classic is the older parametric\n"
+            "Brown-Duda engine; kept for users who prefer its lighter\n"
+            "character. The choice applies to new channels; existing\n"
+            "channels keep their per-cell saved engine."), this));
+        sandboxLay->addLayout(engRow);
+    }
+    // ---- Custom Leia SOFA dataset ----
+    {
+        auto *sofaPathLbl = new QLabel(tr("(using bundled default)"), this);
+        auto *sofaPickBtn = new QPushButton(tr("Pick custom SOFA..."), this);
+        auto *sofaClearBtn = new QPushButton(tr("Use default"), this);
+        sofaPathLbl->setStyleSheet("color: #aaa;");
+        sofaPathLbl->setWordWrap(true);
+        auto *sofaRow = new QHBoxLayout;
+        sofaRow->addWidget(new QLabel(tr("HRTF dataset:"), this));
+        sofaRow->addWidget(sofaPickBtn);
+        sofaRow->addWidget(sofaClearBtn);
+        sofaRow->addStretch(1);
+        sandboxLay->addLayout(sofaRow);
+        sandboxLay->addWidget(sofaPathLbl);
+        auto loadSofaPath = [sofaPathLbl, this]{
+            QSettings sset(QStringLiteral("GameBaiters"),
+                           QStringLiteral("Soundboard"));
+            QString p = sset.value(QStringLiteral("leia/custom_sofa_path"))
+                           .toString();
+            sofaPathLbl->setText(p.isEmpty()
+                ? tr("(using bundled default)")
+                : tr("Custom: %1").arg(p));
+        };
+        loadSofaPath();
+        connect(sofaPickBtn, &QPushButton::clicked, this, [this, loadSofaPath]{
+            QString p = QFileDialog::getOpenFileName(
+                this, tr("Pick a SOFA HRTF dataset"), QString(),
+                tr("SOFA datasets (*.sofa);;All files (*.*)"));
+            if (p.isEmpty()) return;
+            QSettings sset(QStringLiteral("GameBaiters"),
+                           QStringLiteral("Soundboard"));
+            sset.setValue(QStringLiteral("leia/custom_sofa_path"), p);
+            loadSofaPath();
+            QMessageBox::information(this, tr("Custom HRTF"),
+                tr("Reopen the soundboard to apply the new dataset."));
+        });
+        connect(sofaClearBtn, &QPushButton::clicked, this, [this, loadSofaPath]{
+            QSettings sset(QStringLiteral("GameBaiters"),
+                           QStringLiteral("Soundboard"));
+            sset.remove(QStringLiteral("leia/custom_sofa_path"));
+            loadSofaPath();
+        });
+    }
+    // ---- Reset all sandbox settings ----
     m_resetAllSandboxBtn->setStyleSheet(
         "QPushButton { background-color: #c63131; color: white;"
         " border: 1px solid #7c1c1c; border-radius: 5px; padding: 4px 12px; }"
@@ -316,14 +354,30 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     resetSbRow->addStretch(1);
     sandboxLay->addLayout(resetSbRow);
 
-    // ============== Profiles section ==============
+    // ============== Profiles & Config I/O section ==============
+    // Profiles + global import/export folded into one persistence
+    // section — both deal with "save and restore the whole soundboard
+    // state to/from a file"; the user previously had to hunt for
+    // them in two separate places.
     for (int i = 0; i < NUM_CONFIGS; ++i)
         m_profileCombo->addItem(tr("Profile %1").arg(i + 1), i);
-    auto *profileLay = new QHBoxLayout;
-    profileLay->addWidget(new QLabel(tr("Active:")));
-    profileLay->addWidget(m_profileCombo, 1);
-    profileLay->addWidget(m_profileExport);
-    profileLay->addWidget(m_profileImport);
+    auto *profileLay = new QVBoxLayout;
+    {
+        auto *row = new QHBoxLayout;
+        row->addWidget(new QLabel(tr("Active profile:")));
+        row->addWidget(m_profileCombo, 1);
+        row->addWidget(m_profileExport);
+        row->addWidget(m_profileImport);
+        profileLay->addLayout(row);
+    }
+    {
+        auto *row = new QHBoxLayout;
+        row->addWidget(new QLabel(tr("Full configuration:")));
+        row->addWidget(m_export);
+        row->addWidget(m_import);
+        row->addStretch(1);
+        profileLay->addLayout(row);
+    }
 
     // ============== Custom theme section ==============
     // Theme remains a QGroupBox (checkable) wrapped inside an ExpandableSection.
@@ -447,64 +501,40 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     resetBehLay->addWidget(m_resetAllFiles);
     resetBehLay->addWidget(m_resetAllSandbox);
 
-    // ============== Import/Export section ==============
-    auto *ioLay = new QHBoxLayout;
-    ioLay->addWidget(m_export);
-    ioLay->addWidget(m_import);
-    ioLay->addStretch(1);
-
     // ============== Close button ==============
     auto *btnRow = new QHBoxLayout;
     btnRow->addStretch(1);
     btnRow->addWidget(m_close);
 
-    // ============== Language section ==============
-    // Self-contained: persisted directly to QSettings and read back at
-    // plugin init. Applied on the next plugin load (no live switch).
-    auto *langLay = new QVBoxLayout;
-    {
-        auto *row = new QHBoxLayout;
-        row->addWidget(new QLabel(tr("Interface language:")));
-        auto *langCombo = new QComboBox(this);
-        langCombo->addItem(tr("Automatic (system language)"), QStringLiteral("auto"));
-        langCombo->addItem(QStringLiteral("English"),  QStringLiteral("en"));
-        langCombo->addItem(QStringLiteral("Italiano"), QStringLiteral("it"));
-        QSettings ls(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
-        int ci = langCombo->findData(ls.value(QStringLiteral("language"),
-                                              QStringLiteral("auto")).toString());
-        langCombo->setCurrentIndex(ci >= 0 ? ci : 0);
-        row->addWidget(langCombo, 1);
-        langLay->addLayout(row);
-        auto *note = new QLabel(tr(
-            "Italian is selected automatically when the system language "
-            "is Italian. A change here is applied the next time the "
-            "plugin loads (reload the plugin or restart TeamSpeak)."), this);
-        note->setWordWrap(true);
-        note->setStyleSheet("color: #999; font-size: 11px;");
-        langLay->addWidget(note);
-        connect(langCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-                this, [langCombo](int){
-            QSettings s(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
-            s.setValue(QStringLiteral("language"), langCombo->currentData().toString());
-            s.sync();
-        });
-    }
-
-    // Build the scrollable body with ExpandableSection for each category
+    // Build the scrollable body with ExpandableSection for each macro
+    // category. Order = "most-touched first". Sections previously
+    // scattered:
+    //   - "Language" merged into General.
+    //   - "Audio" merged into General (only had 2 items).
+    //   - "Import/Export" merged into "Profiles & Config I/O".
+    //   - "HRTF dataset" merged into "Audio sandbox & 3D HRTF".
+    //   - meter / export-button toggles moved from "Audio sandbox"
+    //     to "Channels" (they are channel UI features, not DSP).
+    //   - default 3D HRTF engine combo moved from "Channels" to
+    //     "Audio sandbox & 3D HRTF" (engine choice = sandbox config).
+    //   - "Restore last session" moved from "Channels" to "General"
+    //     (global persistence behaviour, not per-channel).
+    //   - "Logging" renamed "Advanced", "Custom theme" → "Appearance"
+    //     to match user-facing terminology.
+    // Persistence keys carry an "_v2" suffix so the one-time reorg
+    // does not drag stale open/collapsed state from the old layout
+    // (would leave random sections open on first load otherwise).
     auto *body = new QVBoxLayout;
     body->setSpacing(2);
-    body->addWidget(makeSection(tr("Language"),       langLay,     this, "language"));
-    body->addWidget(makeSection(tr("Audio"),          audioLay,    this, "audio"));
-    body->addWidget(makeSection(tr("Channels"),       channelsLay, this, "channels"));
-    body->addWidget(makeSection(tr("Button grid"),    gridLay,     this, "grid"));
-    body->addWidget(makeSection(tr("Hotkeys"),        hotkeyLay,   this, "hotkeys"));
-    body->addWidget(makeSection(tr("Logging"),        logLay,      this, "logging"));
-    body->addWidget(makeSection(tr("Audio sandbox"),  sandboxLay,  this, "sandbox"));
-    body->addWidget(makeSection(tr("HRTF dataset (Leia)"), sofaLay, this, "sofa", false));
-    body->addWidget(makeSection(tr("Profiles"),       profileLay,  this, "profiles"));
-    body->addWidget(makeSection(tr("Custom theme"),   themeWrapLay,this, "theme"));
-    body->addWidget(makeSection(tr("Reset behaviour"),resetBehLay, this, "reset", false));
-    body->addWidget(makeSection(tr("Import / Export"),ioLay,       this, "io",    false));
+    body->addWidget(makeSection(tr("General"),                        generalLay,  this, "general_v2"));
+    body->addWidget(makeSection(tr("Channels"),                       channelsLay, this, "channels_v2"));
+    body->addWidget(makeSection(tr("Audio sandbox && 3D HRTF"),       sandboxLay,  this, "sandbox_v2"));
+    body->addWidget(makeSection(tr("Button grid"),                    gridLay,     this, "grid_v2"));
+    body->addWidget(makeSection(tr("Hotkeys"),                        hotkeyLay,   this, "hotkeys_v2"));
+    body->addWidget(makeSection(tr("Profiles && Config I/O"),         profileLay,  this, "profiles_v2"));
+    body->addWidget(makeSection(tr("Appearance"),                     themeWrapLay,this, "appearance_v2", false));
+    body->addWidget(makeSection(tr("Reset behaviour"),                resetBehLay, this, "reset_v2",      false));
+    body->addWidget(makeSection(tr("Advanced"),                       logLay,      this, "advanced_v2",   false));
     body->addStretch(1);
 
     auto *scrollWidget = new QWidget(this);

@@ -1,6 +1,9 @@
 #include "channel_meter.h"
 #include "../AudioUtils.h"
+#include "theme.h"
 #include <QPainter>
+#include <QPainterPath>
+#include <QLinearGradient>
 #include <algorithm>
 #include <cmath>
 
@@ -9,6 +12,14 @@ constexpr float kFloorDb   = -60.0f;
 // Peak-hold marker jumps up instantly, decays slowly so the user can
 // read transient peaks after they have passed.
 constexpr float kPeakDecay = 0.93f;
+// Faster decay used the instant the meter receives (0, 0) — the
+// silent-slot signal from the wiring. User wanted the marker to
+// SLIDE smoothly all the way down to the left edge and only then
+// vanish (not snap, not stay stuck mid-fall). 0.45 hits the floor
+// in ~12 ticks @ 25 Hz = ~480 ms — visible animation, no perceived
+// lag, no audio-active peak feel cut short (real audio never sends
+// literal 0.0f on both channels).
+constexpr float kStopDecay = 0.45f;
 
 // Level (0..1.5 linear) -> 0..1 normalised position on a -60..0 dB scale.
 float toNorm(float v) {
@@ -22,6 +33,10 @@ float toNorm(float v) {
 ChannelMeter::ChannelMeter(QWidget *parent) : QWidget(parent)
 {
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
+    // Stay opaque (no Qt clear before paintEvent → no flicker), but
+    // paint the 4 corner regions with the THEMED channel surface
+    // colour instead of the previous hardcoded grey. See paintEvent
+    // for the fill source.
     setAttribute(Qt::WA_OpaquePaintEvent, true);
 }
 
@@ -31,9 +46,18 @@ void ChannelMeter::setPeak(float l, float r)
     if (l > 1.5f) l = 1.5f;
     if (r < 0.0f) r = 0.0f;
     if (r > 1.5f) r = 1.5f;
-    // Peak-hold tracks the maximum then decays toward the live level.
-    float newHoldL = (l > m_peakHoldL) ? l : std::max(l, m_peakHoldL * kPeakDecay);
-    float newHoldR = (r > m_peakHoldR) ? r : std::max(r, m_peakHoldR * kPeakDecay);
+    // Silent-slot signal from the wiring is EXACTLY (0, 0) — real
+    // audio essentially never produces a literal 0.0f peak on both
+    // channels at once, so this branch reliably means "playback
+    // ended". Switch the decay rate to a much faster value so the
+    // marker SLIDES smoothly down to the left edge in ~480 ms, then
+    // hits the floor snap and vanishes. User wanted "cursor goes
+    // all the way to the start, then disappears" — not the previous
+    // 4–5 s lazy decay, not the instant snap either.
+    const float decay = (l == 0.0f && r == 0.0f) ? kStopDecay
+                                                 : kPeakDecay;
+    float newHoldL = (l > m_peakHoldL) ? l : std::max(l, m_peakHoldL * decay);
+    float newHoldR = (r > m_peakHoldR) ? r : std::max(r, m_peakHoldR * decay);
     // Snap to floor so the multiplicative decay actually reaches zero
     // (without this, float -> denormal infinite-tail land and the
     // change-detect below keeps pumping micro-paints forever).
@@ -62,12 +86,21 @@ void ChannelMeter::paintEvent(QPaintEvent *)
     p.setRenderHint(QPainter::Antialiasing, true);
     const QRect bg = rect();
 
-    // The widget is opaque (WA_OpaquePaintEvent) so EVERY pixel must be
-    // painted. Fill the whole rect with a channel-grey first: the four
-    // corners left outside the rounded panel keep this color, so the
-    // recessed panel reads as resting on the channel - never as garbage
-    // and never as a detached box.
-    p.fillRect(bg, QColor(0x33, 0x34, 0x37));
+    // Widget is opaque so EVERY pixel must be painted. The 4 corner
+    // regions outside the rounded panel must blend perfectly into
+    // the parent Channel widget (whose m_frame paints
+    // Theme::Derived::surface as its background — see channel.cpp).
+    //
+    // Old version: hardcoded #333437 which matched neither the
+    // default surface (#3a3a3a) nor any themed surface — user saw
+    // 4 visible "wrong-colour" corner spikes at the meter boundary.
+    //
+    // Fix: ALWAYS pull Theme::derivedCached().surface, regardless
+    // of whether the user enabled the custom theme — derivedCached
+    // returns the correct default surface when no custom theme is
+    // set, so this is bit-for-bit identical to what the channel
+    // frame draws behind us.
+    p.fillRect(bg, Theme::derivedCached().surface);
 
     // Rounded recessed LED panel.
     const qreal radius = 6.0;
@@ -87,28 +120,34 @@ void ChannelMeter::paintEvent(QPaintEvent *)
     const int gapY = 3;
     int top = (bg.height() - (barH * 2 + gapY)) / 2;
     if (top < 2) top = 2;
+    int barLeft = padL;
 
-    // Adaptive segment count: ~6 px per segment, clamped so the meter
-    // still reads as discrete LEDs at any channel width.
-    int segCount = barW / 6;
-    if (segCount < 6)  segCount = 6;
-    if (segCount > 46) segCount = 46;
-    int segGap = (barW > segCount * 3) ? 1 : 0;
-    int segW   = (barW - (segCount - 1) * segGap) / segCount;
-    if (segW < 1) segW = 1;
-    int usedW   = segW * segCount + segGap * (segCount - 1);
-    int barLeft = padL + (barW - usedW) / 2;   // always >= padL
+    // Continuous VU-style render. Replaces the old discrete-LED grid
+    // (was ~6 px per segment → ~33 segments at typical channel width)
+    // with a per-pixel gradient fill, so meter resolution equals widget
+    // width: ~200 px instead of ~33 steps = ~6x more precision. The
+    // colour zones (cyan / green / amber / red) become smooth gradient
+    // transitions at the same dB landmarks the LED grid used, so the
+    // visual "where am I on the scale" cue is preserved.
 
-    auto segColor = [](float frac, bool lit) -> QColor {
-        QColor c;
-        if      (frac >= 0.90f) c = QColor(0xe2, 0x4b, 0x4b);   // red
-        else if (frac >= 0.78f) c = QColor(0xe0, 0xa0, 0x22);   // amber
-        else if (frac >= 0.55f) c = QColor(0x49, 0xc0, 0x55);   // green
-        else                    c = QColor(0x3f, 0xb0, 0xe0);   // cyan
-        if (lit) return c;
-        // Unlit: a faint trace of the zone color so the scale is visible.
-        return QColor(c.red() / 6 + 0x18, c.green() / 6 + 0x1a,
-                      c.blue() / 6 + 0x1e);
+    // Bright (lit) gradient: cyan up to -12 dB, green to -6 dB, amber
+    // to -3 dB, red beyond. Stops match the previous LED zone fracs
+    // (0.55 / 0.78 / 0.90 of the -60..0 dB range).
+    auto buildGrad = [](int x0, int x1, int alpha) {
+        QLinearGradient g(x0, 0, x1, 0);
+        QColor cyan (0x3f, 0xb0, 0xe0, alpha);
+        QColor green(0x49, 0xc0, 0x55, alpha);
+        QColor amber(0xe0, 0xa0, 0x22, alpha);
+        QColor red  (0xe2, 0x4b, 0x4b, alpha);
+        g.setColorAt(0.00, cyan);
+        g.setColorAt(0.54, cyan);
+        g.setColorAt(0.60, green);
+        g.setColorAt(0.76, green);
+        g.setColorAt(0.80, amber);
+        g.setColorAt(0.88, amber);
+        g.setColorAt(0.92, red);
+        g.setColorAt(1.00, red);
+        return g;
     };
 
     QFont lf = p.font();
@@ -120,20 +159,67 @@ void ChannelMeter::paintEvent(QPaintEvent *)
         p.drawText(QRect(2, y, padL - 4, barH),
                    Qt::AlignVCenter | Qt::AlignLeft, QString(QChar(label)));
 
-        int lit  = static_cast<int>(std::round(toNorm(v)    * segCount));
-        int peak = static_cast<int>(std::round(toNorm(hold) * segCount));
-        lit  = std::min(std::max(lit, 0), segCount);
-        peak = std::min(std::max(peak, 0), segCount);
+        QRectF track(barLeft, y, barW, barH);
+        const qreal r = std::min<qreal>(barH * 0.45, 2.5);
 
+        // Dim track: faint full-width gradient so the scale stays
+        // readable when the signal is below the floor.
         p.setPen(Qt::NoPen);
-        for (int i = 0; i < segCount; ++i) {
-            int x = barLeft + i * (segW + segGap);
-            float frac = static_cast<float>(i + 1) / segCount;
-            // A segment is on if filled by the level OR it is the
-            // held-peak segment (which stays lit after the peak passes).
-            bool on = (i < lit) || (peak > 0 && i == peak - 1);
-            p.setBrush(segColor(frac, on));
-            p.drawRoundedRect(QRectF(x, y, segW, barH), 1.3, 1.3);
+        p.setBrush(buildGrad(barLeft, barLeft + barW, 38));
+        p.drawRoundedRect(track, r, r);
+
+        // Live level fill, clipped to [0..fillW]. Pixel-precise: a
+        // 0.4 dB delta at -20 dB moves the fill ~1 px on a 200 px bar.
+        float norm   = toNorm(v);
+        float fillWf = norm * static_cast<float>(barW);
+        int   fillW  = static_cast<int>(std::round(fillWf));
+        if (fillW > 0) {
+            p.save();
+            QPainterPath clip;
+            // Round corners only on the LEFT — the right edge of a
+            // partial fill is a hard vertical so the level reads as a
+            // crisp position, not a soft blob.
+            clip.addRoundedRect(track, r, r);
+            p.setClipPath(clip);
+            p.setBrush(buildGrad(barLeft, barLeft + barW, 255));
+            p.drawRect(QRectF(barLeft, y, fillW, barH));
+            p.restore();
+        }
+
+        // Tick marks at the zone boundaries (~-12 / -6 / -3 dB) so
+        // the eye still has reference points without an LED grid.
+        p.setPen(QColor(0xff, 0xff, 0xff, 36));
+        const float tickFracs[] = {0.55f, 0.78f, 0.90f};
+        for (float tf : tickFracs) {
+            int tx = barLeft + static_cast<int>(std::round(tf * barW));
+            p.drawLine(tx, y + 1, tx, y + barH - 1);
+        }
+
+        // Peak-hold marker: rounded vertical bar at the held peak so
+        // transients stay visible after the live level falls. Drawn
+        // only while hold is above the floor — when setPeak receives
+        // (0, 0) the floor snap forces hold to 0 so the marker
+        // vanishes immediately (no slow tail). Rounded via a tiny
+        // QPainterPath rounded rect: sharp 2 px line looked
+        // out-of-place against the rounded track.
+        if (hold > 1e-4f) {
+            float peakNorm = toNorm(hold);
+            int peakX = barLeft + static_cast<int>(
+                std::round(peakNorm * barW));
+            if (peakX >= barLeft && peakX <= barLeft + barW) {
+                QColor pc = (peakNorm >= 0.90f) ? QColor(0xff, 0xc8, 0xc8)
+                          : QColor(0xff, 0xff, 0xff);
+                qreal mw = 2.6;          // bar width — same visual weight as the old 2 px line
+                QRectF markerRect(
+                    static_cast<qreal>(peakX) - mw * 0.5,
+                    static_cast<qreal>(y) + 0.5,
+                    mw,
+                    static_cast<qreal>(barH) - 1.0);
+                qreal mr = std::min<qreal>(mw * 0.5, barH * 0.35);
+                p.setPen(Qt::NoPen);
+                p.setBrush(pc);
+                p.drawRoundedRect(markerRect, mr, mr);
+            }
         }
     };
 

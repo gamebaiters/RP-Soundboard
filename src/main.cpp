@@ -20,6 +20,9 @@
 #include <vector>
 #include <cstdarg>
 #include <map>
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 #include <QObject>
 #include <QMessageBox>
@@ -53,6 +56,7 @@
 #include "modules/hotkey_block.h"
 #include "modules/whats_new_dialog.h"
 #include "modules/log_viewer_dialog.h"
+#include "modules/audio_exporter.h"
 #include <QApplication>
 
 extern "C" void rpsb_close_debug_log();
@@ -78,6 +82,16 @@ ConfigQt *configDialog = NULL;          // legacy window, kept for fallback
 MainPage *mainPage = NULL;              // active modular UI
 AboutQt *aboutDialog = NULL;
 HowToDialog *howToDialog = NULL;
+// Atomic pointer so the audio thread's null-check + dereference races
+// safely against sb_kill nulling the pointer. The old plain pointer
+// allowed a window where TS3's audio thread had passed the null guard
+// in sb_handlePlaybackData / sb_handleCaptureData but had not yet
+// dereferenced — and sb_kill was free to delete the object in that
+// window, crashing the audio thread (TS3 then popped its own
+// "soundboard plugin crashed" dialog on exit and left a zombie TS3.exe
+// in task manager). sb_kill now: store null + fence + brief sleep so
+// any in-flight callback drains, THEN shutdown + delete.
+std::atomic<Sampler*> g_samplerAtomic{nullptr};
 Sampler *sampler = NULL;
 TalkStateManager *tsMgr = NULL;
 
@@ -149,7 +163,14 @@ CAPI void sb_handlePlaybackData(uint64 serverConnectionHandlerID, short* samples
 	if (serverConnectionHandlerID != activeServerId)
 		return; //Ignore other servers
 
-	sampler->fetchOutputSamples(samples, sampleCount, channels, channelSpeakerArray, channelFillMask);
+	// Atomic snapshot. After sb_kill stores nullptr the next call
+	// returns immediately; in-flight calls that already passed the
+	// null check still hold the previously-loaded pointer — sb_kill
+	// then sleeps briefly before delete so those drain.
+	Sampler *s = g_samplerAtomic.load(std::memory_order_acquire);
+	if (!s) return;
+
+	s->fetchOutputSamples(samples, sampleCount, channels, channelSpeakerArray, channelFillMask);
 }
 
 
@@ -157,6 +178,10 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 {
 	if (serverConnectionHandlerID != activeServerId)
 		return; //Ignore other servers
+
+	// Atomic snapshot — see sb_handlePlaybackData.
+	Sampler *s = g_samplerAtomic.load(std::memory_order_acquire);
+	if (!s) return;
 
 	if (g_rpsbPreviewOnly)
 	{
@@ -177,11 +202,11 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 		const size_t needed = static_cast<size_t>(sampleCount) * channels;
 		if (previewScratch.size() < needed) previewScratch.assign(needed, 0);
 		else std::fill_n(previewScratch.begin(), needed, static_cast<short>(0));
-		sampler->fetchInputSamples(previewScratch.data(), sampleCount, channels, NULL);
+		s->fetchInputSamples(previewScratch.data(), sampleCount, channels, NULL);
 		return;
 	}
 
-	int written = sampler->fetchInputSamples(samples, sampleCount, channels, NULL);
+	int written = s->fetchInputSamples(samples, sampleCount, channels, NULL);
 	if(written > 0)
 		*edited |= 0x1;
 }
@@ -297,6 +322,11 @@ CAPI void sb_init()
 		/* This if first QObject instantiated, it will load the resources */
 		sampler = new Sampler();
 		sampler->init();
+		// Publish AFTER init so the audio thread can never see a half-
+		// constructed Sampler. Release fence pairs with the audio
+		// thread's acquire load in sb_handlePlaybackData /
+		// sb_handleCaptureData.
+		g_samplerAtomic.store(sampler, std::memory_order_release);
 
 		tsMgr = new TalkStateManager();
 		tsMgr->setSampler(sampler);
@@ -345,6 +375,14 @@ CAPI void sb_kill()
 	// drops anything still pending in that window.
 	ConfigModel::flushPendingWrite();
 
+	// Cancel + join every still-running AudioExporter. Exporters live
+	// without a Qt parent (so the export survives a closed soundboard
+	// window), which means sb_kill had no other way to reach them.
+	// A live QThread at DLL unload kept TS3.exe in task manager as a
+	// zombie - the user-reported "soundboard process stays open and
+	// TS3 pops a crash dialog when I force-kill it" bug.
+	AudioExporter::cancelAllAndWait(500);
+
 	// Tear down the TalkStateManager active server FIRST so the watchdog
 	// timer stops and any in-flight queued setTalkTransMode calls skip
 	// their ts3Functions invocations. By the time TS3 calls
@@ -378,6 +416,20 @@ CAPI void sb_kill()
 
 	if (sampler)
 	{
+		// STEP 1: null the atomic pointer the audio thread reads from
+		// — any subsequent sb_handlePlaybackData / sb_handleCaptureData
+		// call returns immediately at the null check.
+		g_samplerAtomic.store(nullptr, std::memory_order_release);
+		// STEP 2: brief drain window so any in-flight audio callback
+		// that already passed the null check completes its current
+		// fetchOutputSamples / fetchInputSamples and returns BEFORE
+		// we touch the sampler. TS3 ticks audio at 20 ms intervals
+		// (960 frames @ 48 kHz); 50 ms is two full ticks, well past
+		// the worst case. Without this drain the audio thread could
+		// be mid-deref while sampler->shutdown() ran below and the
+		// teardown joined producer threads from under its feet —
+		// crash on close + zombie TS3.exe in task manager.
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 		sampler->shutdown();
 		delete sampler;
 		sampler = NULL;

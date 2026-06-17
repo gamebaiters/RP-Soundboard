@@ -3329,6 +3329,38 @@ Da OFF, viene sempre mostrata la forma d&apos;onda grezza.</translation>
         <source>Remove both markers</source>
         <translation>Rimuovi entrambi i marcatori</translation>
     </message>
+    <message>
+        <source>Applying pitch... %1%</source>
+        <translation>Applicazione del pitch... %1%</translation>
+    </message>
+    <message>
+        <source>Applying speed... %1%</source>
+        <translation>Applicazione della velocità... %1%</translation>
+    </message>
+    <message>
+        <source>Applying pitch + speed... %1%</source>
+        <translation>Applicazione di pitch + velocità... %1%</translation>
+    </message>
+    <message>
+        <source>FX ready</source>
+        <translation>Effetti pronti</translation>
+    </message>
+    <message>
+        <source>Applying reverb... %1%</source>
+        <translation>Applicazione del riverbero... %1%</translation>
+    </message>
+    <message>
+        <source>Reverb ready</source>
+        <translation>Riverbero pronto</translation>
+    </message>
+    <message>
+        <source>Analysing waveform... %1%</source>
+        <translation>Analisi della forma d'onda... %1%</translation>
+    </message>
+    <message>
+        <source>Waveform ready</source>
+        <translation>Forma d'onda pronta</translation>
+    </message>
 </context>
 <context>
     <name>UpdaterWindow</name>
@@ -3468,6 +3500,10 @@ The right-side label shows: elapsed / total.</source>
 Clicca un punto della forma d&apos;onda per spostarti lì.
 I pulsanti +/- 5s e +/- 10s saltano di quei secondi.
 L&apos;etichetta a destra mostra: trascorso / totale.</translation>
+    </message>
+    <message>
+        <source>Remove the loaded sound from this channel</source>
+        <translation>Rimuovi il suono caricato da questo canale</translation>
     </message>
     <message>
         <location filename="../modules/waveform_player.cpp" line="269"/>

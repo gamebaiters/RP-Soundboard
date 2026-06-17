@@ -39,22 +39,49 @@ public:
 	void setBufferEnabled(SampleBuffer *buffer, bool enabled);
 	void start();
 	void stop(bool wait = true);
+	// Join an already-stopped thread without re-signalling. Pair with
+	// stop(false) for parallel-shutdown patterns where ALL producers
+	// get the stop flag first (so they wake up simultaneously) then
+	// the caller harvests them. No-op if the thread was never started
+	// or has already been joined.
+	void joinIfRunning();
 	bool isRunning();
 	void setSource(SampleSource *source);
 	// Wake the fill loop immediately (e.g. after a seek cleared the
 	// buffers) instead of waiting for the next 100 ms refill tick.
 	void wake();
+	// Spin-wait until the producer is not currently inside a
+	// readSamples() call on the previous source. Use after
+	// setSource(nullptr) but BEFORE deleting the old InputFile, since
+	// setSource is now lock-free and the producer might still be
+	// finishing one last readSamples on the detached pointer. Spins
+	// briefly (sub-millisecond in the common case, capped at
+	// `maxWaitMs` for pathological cases — e.g. a 10-hour file
+	// blocking on a slow network share). Safe to call without holding
+	// any lock; never touches m_mutex so the audio path is undisturbed.
+	void waitForReadDrain(int maxWaitMs = 250);
 
 private:
 	void run();
 	void threadFunc();
-	bool singleBufferFill();
+	// Pre-snapshotted source pointer so the slow readSamples loop
+	// does not need to re-load m_source on every iteration. Caller
+	// (run()) snapshots once per outer batch.
+	bool singleBufferFill(SampleSource *src);
 	void produce(const short *samples, int count) override;
 
 	typedef std::lock_guard<std::recursive_mutex> Lock;
 
 	std::thread m_thread;
-	SampleSource *m_source;
+	// Atomic: setSource() must not block on the producer's m_mutex
+	// while a slow readSamples() is in flight. On long audio a single
+	// readSamples can take tens of ms and we want a click on the X
+	// (or a stop-slot during playback teardown) to be instant. The
+	// caller's contract is unchanged: the source must remain valid
+	// until setSource(nullptr) followed by either stop()+join or
+	// setSource(other) — i.e., the previous source can only be
+	// destroyed AFTER the producer has rotated past it.
+	std::atomic<SampleSource*> m_source;
 	std::vector<buffer_t> m_buffers;
 	std::atomic<bool> m_running;
 	std::atomic<bool> m_stop;
@@ -62,6 +89,10 @@ private:
 	// setSource (= user clicked play) wakes the fill loop instantly, so
 	// playback no longer starts up to 100 ms late.
 	std::atomic<bool> m_wake{false};
+	// "Currently inside src->readSamples()" — set immediately before
+	// the call, cleared after. waitForReadDrain() polls this so the
+	// caller can know when it is safe to delete the previous source.
+	std::atomic<bool> m_inReadSamples{false};
 	std::condition_variable_any m_cv;
 	std::recursive_mutex m_mutex;
 };

@@ -8,6 +8,7 @@
 
 
 #include <thread>
+#include <chrono>
 #include <algorithm>
 #include <cassert>
 
@@ -21,7 +22,7 @@
 // Purpose: 
 //---------------------------------------------------------------
 SampleProducerThread::SampleProducerThread() :
-	m_source(NULL),
+	m_source(nullptr),
 	m_running(false),
 	m_stop(false)
 {
@@ -57,6 +58,17 @@ void SampleProducerThread::stop(bool wait)
 
 
 //---------------------------------------------------------------
+// Purpose: join a thread previously stop(false)'d. No effect if
+// the thread was never started.
+//---------------------------------------------------------------
+void SampleProducerThread::joinIfRunning()
+{
+	if (m_thread.joinable())
+		m_thread.join();
+}
+
+
+//---------------------------------------------------------------
 // Purpose: 
 //---------------------------------------------------------------
 bool SampleProducerThread::isRunning()
@@ -70,10 +82,14 @@ bool SampleProducerThread::isRunning()
 //---------------------------------------------------------------
 void SampleProducerThread::setSource( SampleSource *source )
 {
-	{
-		Lock lock(m_mutex);
-		m_source = source;
-	}
+	// Lock-free swap: m_source is atomic. Previously this held m_mutex
+	// which blocked the GUI thread on the producer's in-flight
+	// singleBufferFill — on a 10-hour audio file a single readSamples
+	// inside that fill can take tens of ms, so clicking the X to
+	// remove the sound (or letting a sound stop mid-playback) stalled
+	// the whole UI for a visible spike. The atomic swap is instant;
+	// the producer notices on its next batch boundary.
+	m_source.store(source, std::memory_order_release);
 	wake();
 }
 
@@ -88,6 +104,27 @@ void SampleProducerThread::wake()
 	m_cv.notify_all();
 }
 
+
+//---------------------------------------------------------------
+// Purpose: spin until the producer is not inside a readSamples call.
+// See header for the contract. Polling is brief (200 us per tick) so
+// the GUI thread cost is negligible in the common case where the
+// producer is between batches or sleeping on its condvar.
+//---------------------------------------------------------------
+void SampleProducerThread::waitForReadDrain(int maxWaitMs)
+{
+	if (!m_inReadSamples.load(std::memory_order_acquire))
+		return;
+	auto start = std::chrono::steady_clock::now();
+	while (m_inReadSamples.load(std::memory_order_acquire)) {
+		auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now() - start).count();
+		if (elapsed >= maxWaitMs)
+			return;
+		std::this_thread::sleep_for(std::chrono::microseconds(200));
+	}
+}
+
 #define MIN_BUFFER_SAMPLES (48000 / 2)
 //---------------------------------------------------------------
 // Purpose: 
@@ -98,9 +135,9 @@ void SampleProducerThread::run()
 	{
 		try
 		{
-			Lock lock(m_mutex);
-			if (m_source)
-				singleBufferFill();
+			SampleSource *src = m_source.load(std::memory_order_acquire);
+			if (src)
+				singleBufferFill(src);
 		}
 		catch (...)
 		{
@@ -193,24 +230,49 @@ void SampleProducerThread::produce( const short *samples, int count )
 //---------------------------------------------------------------
 // Purpose: 
 //---------------------------------------------------------------
-bool SampleProducerThread::singleBufferFill()
+bool SampleProducerThread::singleBufferFill(SampleSource *src)
 {
-	for(const buffer_t &buffer : m_buffers)
+	// Snapshot the buffer list under a BRIEF lock — m_mutex is no
+	// longer held around the slow readSamples calls below, so addBuffer
+	// / remBuffer / setBufferEnabled from any other thread (e.g. the
+	// audio thread or GUI) never blocks behind a multi-ms decode.
+	std::vector<buffer_t> bufs;
 	{
-		if (buffer.enabled)
+		Lock lock(m_mutex);
+		bufs = m_buffers;
+	}
+	for (const buffer_t &buffer : bufs)
+	{
+		if (!buffer.enabled)
+			continue;
+		std::unique_lock<SampleBuffer::Mutex> sbl(buffer.buffer->getMutex());
+		while (buffer.buffer->avail() < MIN_BUFFER_SAMPLES)
 		{
-			std::unique_lock<SampleBuffer::Mutex> sbl(buffer.buffer->getMutex());
-			while (buffer.buffer->avail() < MIN_BUFFER_SAMPLES)
-			{
-				assert(buffer.buffer->maxSize() > MIN_BUFFER_SAMPLES && "Buffer too small");
-				sbl.unlock();
-				int samples = m_source->readSamples(this);
-				if (samples < 0) // error
-					return false;
-				if (samples == 0) // file is done
-					return true;
-				sbl.lock();
+			assert(buffer.buffer->maxSize() > MIN_BUFFER_SAMPLES && "Buffer too small");
+			sbl.unlock();
+			// Preempt: stop requested, or the caller swapped the
+			// source on us (setSource was called mid-fill). Drop the
+			// in-flight batch — readSamples on the now-stale source
+			// would be wasted work and could keep this loop running
+			// well past the stop/swap intent.
+			if (m_stop.load(std::memory_order_relaxed))
+				return true;
+			if (m_source.load(std::memory_order_acquire) != src)
+				return true;
+			m_inReadSamples.store(true, std::memory_order_release);
+			int samples;
+			try {
+				samples = src->readSamples(this);
+			} catch (...) {
+				m_inReadSamples.store(false, std::memory_order_release);
+				throw;
 			}
+			m_inReadSamples.store(false, std::memory_order_release);
+			if (samples < 0) // error
+				return false;
+			if (samples == 0) // file is done
+				return true;
+			sbl.lock();
 		}
 	}
 	return true;

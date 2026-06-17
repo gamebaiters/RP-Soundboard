@@ -159,6 +159,11 @@ private:
 	QTimer        *m_revealTimer   = nullptr;
 	QElapsedTimer  m_revealElapsed;
 	static constexpr int kRevealMs = 250;
+	// Target bin count we asked the analyser for (matches what we pass
+	// to startAnalysis). Used by paintEvent to draw a per-channel
+	// loading progress bar (binsProcessed / m_analysisBins). Keeping
+	// it here avoids exposing m_numBins from SampleVisualizerThread.
+	int            m_analysisBins  = 1024;
 
 	// Right-click crop marker preview. While the context menu is open
 	// the click position is rendered as a pulsing semi-transparent

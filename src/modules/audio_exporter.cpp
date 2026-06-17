@@ -95,7 +95,19 @@ void AudioExporter::cancelAllAndWait(int waitMsPerThread)
     }
     for (AudioExporter *e : snap) {
         if (!e) continue;
-        if (e->isRunning()) e->wait(waitMsPerThread);
+        if (!e->isRunning()) continue;
+        if (!e->wait(waitMsPerThread)) {
+            // Thread didn't honour the cooperative cancel within the
+            // budget — usually a long-audio export stuck deep in
+            // FFmpeg decode. terminate() is unsafe in general but at
+            // plugin unload the alternative is far worse: the QThread
+            // outlives this DLL, its run() resumes after FreeLibrary,
+            // and crashes (or worse: silently corrupts the process)
+            // from inside freed code. Force-terminate + short final
+            // wait so the dtor's wait does not block sb_kill.
+            e->terminate();
+            e->wait(150);
+        }
     }
 }
 

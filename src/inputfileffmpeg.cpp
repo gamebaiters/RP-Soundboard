@@ -20,6 +20,7 @@
 #include <string>
 #include <cstring>
 #include <cmath>
+#include <limits>
 #include <condition_variable>
 #include <thread>
 

@@ -12,14 +12,14 @@ constexpr float kFloorDb   = -60.0f;
 // Peak-hold marker jumps up instantly, decays slowly so the user can
 // read transient peaks after they have passed.
 constexpr float kPeakDecay = 0.93f;
-// Faster decay used the instant the meter receives (0, 0) — the
-// silent-slot signal from the wiring. User wanted the marker to
-// SLIDE smoothly all the way down to the left edge and only then
-// vanish (not snap, not stay stuck mid-fall). 0.45 hits the floor
-// in ~12 ticks @ 25 Hz = ~480 ms — visible animation, no perceived
-// lag, no audio-active peak feel cut short (real audio never sends
-// literal 0.0f on both channels).
-constexpr float kStopDecay = 0.45f;
+// Stop-slide decay rate. User reported the previous fast 0.45 value
+// looked inconsistent with the "natural" release rate the meter uses
+// during playback (the bar suddenly accelerated as soon as playback
+// ended). Matching kPeakDecay keeps the visual rhythm continuous:
+// the marker drains at the same dB/sec on stop as it does on a
+// transient release mid-playback, so the user just sees the same
+// decay curve carry through past the end of the audio.
+constexpr float kStopDecay = kPeakDecay;
 
 // Level (0..1.5 linear) -> 0..1 normalised position on a -60..0 dB scale.
 float toNorm(float v) {

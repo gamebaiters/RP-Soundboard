@@ -283,6 +283,17 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
                     sampler->clearSlotSandbox(i);
             }
         }
+        // Sync the P1..P4 buttons on the main panel so the change in
+        // the settings combo is reflected everywhere. QSignalBlocker
+        // prevents the button-click handler from re-firing the same
+        // profile switch.
+        for (int i = 0; i < 4; ++i) {
+            auto *btn = page->profileButton(i);
+            if (btn) {
+                QSignalBlocker b(btn);
+                btn->setChecked(i == idx);
+            }
+        }
     });
     QObject::connect(w, &SettingsWindow::exportProfileRequested, [w, model](int idx){
         QString p = QFileDialog::getSaveFileName(w, QObject::tr("Export profile %1").arg(idx + 1),
@@ -1035,6 +1046,19 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                                     .arg(reason, base);
             page->channels().at(slot)->waveform()->setError(msg);
         }, Qt::QueuedConnection);
+
+        // Release the per-channel "seek pending" cursor lock when the
+        // async seek worker has actually committed the new position
+        // (Sampler::seek now returns instantly; the FFmpeg scan runs
+        // on a worker thread). Until this fires the 30 Hz position
+        // poll keeps the cursor at the click target instead of
+        // reading the still-pre-seek decoder position.
+        QObject::connect(sampler, &Sampler::onSeekCommitted, page,
+                         [page](int slot){
+            if (slot < 0 || slot >= page->channels().size()) return;
+            auto *ch = page->channels().at(slot);
+            if (ch) ch->setProperty("pendingSeekActive", false);
+        }, Qt::QueuedConnection);
     }
 
     auto wire = [model, sampler](Channel *ch) {
@@ -1225,8 +1249,58 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             const auto st = sampler->getState(slot);
             if (st == Sampler::ePLAYING || st == Sampler::ePAUSED) {
                 double len = sampler->getLength(slot);
-                if (len > 0.0) sampler->seek(frac * len, slot);
-                wave->notifySeek();
+                if (len > 0.0) {
+                    // GUI-side debounce for click-spam on long audio.
+                    // Rapid back-and-forth waveform clicks each fired
+                    // an FFmpeg backward scan (300+ ms on a 10-h MP3)
+                    // serialised behind Sampler::seek → user-visible
+                    // freeze. Coalesce here so only the LATEST target
+                    // within an 80 ms window reaches Sampler::seek.
+                    // The cursor jumps immediately (setPlaybackFraction
+                    // below) so single clicks still feel snappy.
+                    //
+                    // "pendingSeekActive" property gates the 30 Hz
+                    // position poll: while a seek is pending the poll
+                    // must NOT overwrite the snapped cursor with the
+                    // current decoder position (still on the old spot
+                    // until the debounce fires) — that was the
+                    // user-reported "click backward and the cursor
+                    // freezes (= reverts to audible position)" bug.
+                    const double target = frac * len;
+                    QTimer *t = ch->findChild<QTimer*>(
+                        QStringLiteral("seekDebounceTimer"),
+                        Qt::FindDirectChildrenOnly);
+                    if (!t) {
+                        t = new QTimer(ch);
+                        t->setObjectName(QStringLiteral("seekDebounceTimer"));
+                        t->setSingleShot(true);
+                        QObject::connect(t, &QTimer::timeout,
+                            [sampler, slot, ch]{
+                            if (!sampler) return;
+                            double tgt = ch->property("pendingSeekSec")
+                                            .toDouble();
+                            sampler->seek(tgt, slot);
+                            // Lock STAYS set: Sampler::seek is now
+                            // async (returns instantly while the
+                            // backward FFmpeg scan runs on a worker).
+                            // The lock is released by the
+                            // onSeekCommitted signal connection below
+                            // once the scan actually completes — only
+                            // then is cachedPositionSec the seeked
+                            // target and the cursor safe to follow.
+                            auto *wv = ch->waveform();
+                            if (wv) wv->notifySeek();
+                        });
+                    }
+                    ch->setProperty("pendingSeekSec", target);
+                    ch->setProperty("pendingSeekActive", true);
+                    t->start(80);
+                    // Snap the visual cursor immediately so the user
+                    // sees the click registered even before the
+                    // FFmpeg seek lands. The poll-lock above prevents
+                    // it from being overwritten during the debounce.
+                    wave->setPlaybackFraction(frac);
+                }
                 return;
             }
             // Replay / idle state: clamp to crop range and just move
@@ -1294,7 +1368,6 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         bool rmExtra  = model->getResetAllRemoveExtra();
         bool rstVol   = model->getResetAllVolume();
         bool rstFx    = model->getResetAllFx();
-        bool rstFiles = model->getResetAllFiles();
         bool rstSbx   = model->getResetAllSandbox();
 
         if (rmExtra) {
@@ -1308,9 +1381,24 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             ChannelState cur = ch->state();
             if (rstVol)   { cur.volumeLocal = def.volumeLocal; cur.volumeRemote = def.volumeRemote; }
             if (rstFx)    { cur.pitch = def.pitch; cur.speed = def.speed; cur.reverb = def.reverb; cur.fxSync = def.fxSync; }
-            if (rstFiles) { cur.filename.clear(); }
+            // Reset ALWAYS clears the preloaded audio (same effect as
+            // clicking the X next to the filename). Mirror the X
+            // handler's cleanup so the waveform / filename / replay
+            // glyph all disappear instantly and per-slot context
+            // (last-played, slot->button map) drops.
+            cur.filename.clear();
             if (rstSbx)   { cur.sandbox = SandboxState(); }
+            s_pendingHardClear.insert(i);
             ch->applyState(cur);
+            auto *wave = ch->waveform();
+            if (wave) {
+                wave->setPlaying(false);
+                wave->setReplayReady(false);
+                wave->setFilename(QString());
+                wave->clearPlayback();
+            }
+            s_lastPlayedCtx.remove(i);
+            s_slotToBtnIdx.remove(i);
             if (i == 0) {
                 ch->setTitle(QObject::tr("Channel 1"));
                 ChannelStatePersistence::saveName(0, ch->title());
@@ -1695,11 +1783,29 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                     continue;
                 }
                 (*wasActive)[i] = true;
+                // Skip the cursor refresh while a debounced seek is
+                // pending for this channel: the click handler snapped
+                // the cursor to the click target; reading the live
+                // decoder position here (which still reflects the
+                // PRE-seek playhead until the debounce fires
+                // Sampler::seek) would reset the cursor backward to
+                // the audible position and make the click look
+                // ignored. The label also follows the pending target
+                // so the displayed time matches what the user is
+                // about to seek to.
+                bool seekPending = ch->property("pendingSeekActive")
+                                       .toBool();
                 double pos = sampler->getPosition(i);
                 double len = sampler->getLength(i);
                 if (len > 0.0) {
-                    ch->waveform()->setPlaybackFraction(pos / len);
-                    ch->waveform()->setPosition(pos, len);
+                    if (seekPending) {
+                        double tgt = ch->property("pendingSeekSec")
+                                         .toDouble();
+                        ch->waveform()->setPosition(tgt, len);
+                    } else {
+                        ch->waveform()->setPlaybackFraction(pos / len);
+                        ch->waveform()->setPosition(pos, len);
+                    }
                 } else if (!ch->waveform()->isReplayReady()) {
                     // No length AND not in replay-ready mode -> the slot
                     // genuinely has no sound loaded. Safe to wipe.

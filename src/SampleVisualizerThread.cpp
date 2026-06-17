@@ -49,7 +49,8 @@ void SampleVisualizerThread::SampleBufferSynced::produce(const short *samples, i
 //---------------------------------------------------------------
 double SampleVisualizerThread::fileLength() const
 {
-	uint64_t samples = m_running ? m_numSamplesTotalEst : m_numSamplesProcessed;
+	uint64_t samples = m_running.load(std::memory_order_acquire)
+		? m_numSamplesTotalEst : m_numSamplesProcessed;
 	return double(samples) / SAMPLE_RATE;
 }
 
@@ -65,6 +66,7 @@ SampleVisualizerThread::SampleVisualizerThread() :
 	m_numSamplesTotalEst(0),
 	m_numSamplesProcessedThisBin(0),
 	m_file(NULL),
+	m_pendingNumBins(0),
 	m_running(false),
 	m_newFile(false),
 	m_stop(false)
@@ -87,37 +89,47 @@ SampleVisualizerThread::~SampleVisualizerThread()
 //---------------------------------------------------------------
 void SampleVisualizerThread::startAnalysis( const char *filename, size_t numBins )
 {
-	Lock lock(m_mutex);
-
-	m_filename = filename;
-	m_numBins = numBins;
-	m_numBinsProcessed = 0;
-	m_numSamplesProcessed = 0;
-	m_numSamplesTotalEst = 0;
-	m_numSamplesProcessedThisBin = 0;
-	m_bins.clear();
-	// Pre-reserve so push_back never reallocates: the GUI reads the
-	// getBins() pointer without holding m_mutex, so a realloc during
-	// growth would hand it a dangling pointer. Generously sized to
-	// absorb estimation undershoot (VBR MP3 without Xing header etc.)
-	// without ever triggering a vector reallocation — the previous
-	// reserve was numBins*2+16 which capped at 1032 bins and crashed /
-	// produced garbage the moment the decoder spilled past that.
-	m_bins.reserve(numBins * 32 + 16);
-	m_newFile = true;
-
-	if(!m_running)
+	// Two-step: park the request as "pending" then signal the worker.
+	// The brief mutex hold here NEVER overlaps the worker's slow file
+	// I/O — the worker drops the mutex around readSamples() so the GUI
+	// thread never blocks for longer than a memcpy of the filename and
+	// a vector .clear(). Previously the worker held m_mutex through the
+	// entire 512 K-sample decode cycle (~hundreds of ms on huge files),
+	// so loading a 2nd audio mid-analysis hung the soundboard.
+	bool needSpawn = false;
 	{
-		// The worker self-terminates when its file is done (run() exits
-		// with m_running=false under m_mutex, so this check is not racy).
-		// Join the finished thread object before reusing the member.
+		Lock lock(m_mutex);
+		m_pendingFilename = filename;
+		m_pendingNumBins  = numBins;
+		// Pre-clear & reserve while we hold the mutex so the worker
+		// finds a ready buffer. The worker re-validates against
+		// m_newFile inside its own brief critical sections, so an
+		// in-flight push_back from the old file is impossible the
+		// moment m_newFile flips true (worker checks atomically before
+		// every push_back).
+		m_bins.clear();
+		m_bins.reserve(numBins * 32 + 16);
+		m_numBinsProcessed.store(0, std::memory_order_release);
+		m_newFile.store(true, std::memory_order_release);
+
+		if (!m_running.load(std::memory_order_acquire))
+		{
+			needSpawn = true;
+			m_running.store(true, std::memory_order_release);
+			m_stop.store(false, std::memory_order_release);
+		}
+	}
+	if (needSpawn)
+	{
+		// The worker self-terminates when its file is done. Join the
+		// finished thread object before reusing the member.
 		if (m_thread.joinable())
 			m_thread.join();
-		m_running = true;
-		m_stop = false;
 		std::thread t(&SampleVisualizerThread::threadFunc, this);
 		m_thread = std::move(t);
 	}
+	// Wake worker if it's sleeping between cycles.
+	m_cv.notify_all();
 }
 
 
@@ -126,27 +138,28 @@ void SampleVisualizerThread::startAnalysis( const char *filename, size_t numBins
 //---------------------------------------------------------------
 void SampleVisualizerThread::stop( bool wait /*= true*/ )
 {
-	m_stop = true;
+	m_stop.store(true, std::memory_order_release);
+	m_cv.notify_all();
 	if(wait && m_thread.joinable())
 		m_thread.join();
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 bool SampleVisualizerThread::isRunning() const
 {
-	return m_running;
+	return m_running.load(std::memory_order_acquire);
 }
 
 
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //---------------------------------------------------------------
 size_t SampleVisualizerThread::getBinsProcessed() const
 {
-	return m_numBinsProcessed;
+	return m_numBinsProcessed.load(std::memory_order_acquire);
 }
 
 
@@ -155,30 +168,121 @@ size_t SampleVisualizerThread::getBinsProcessed() const
 //---------------------------------------------------------------
 void SampleVisualizerThread::run()
 {
-	while(!m_stop)
+	while(!m_stop.load(std::memory_order_acquire))
 	{
-		m_mutex.lock();
-		if(m_newFile)
-			openNewFile();
+		// Phase 1 — brief mutex acquisition to consume any pending
+		// startAnalysis() request and snapshot the worker-owned file.
+		// Releasing the mutex BEFORE the slow decode loop is what
+		// unblocks GUI swaps mid-analysis.
+		InputFile *file = nullptr;
+		{
+			Lock lock(m_mutex);
+			if (m_newFile.load(std::memory_order_acquire))
+			{
+				// Adopt the GUI's request. openNewFile() reads
+				// m_filename / m_numBins (worker-owned snapshots) so
+				// copy from the pending fields first.
+				m_filename = m_pendingFilename;
+				m_numBins  = m_pendingNumBins;
+				m_numBinsProcessed.store(0, std::memory_order_release);
+				m_numSamplesProcessed = 0;
+				m_numSamplesTotalEst = 0;
+				m_numSamplesProcessedThisBin = 0;
+				{
+					// Drain leftover samples from the previous file.
+					// SampleBufferSynced::produce locks getMutex(); the
+					// consume side is unsynchronised so we take the same
+					// lock here to keep the read offset / vector
+					// consistent with concurrent produce calls (though
+					// the file has been closed by openNewFile below, the
+					// lock costs nothing and matches processSamples()).
+					SampleBuffer::Lock sbl(m_buffer.getMutex());
+					m_buffer.consume(nullptr, m_buffer.avail());
+				}
+				// startAnalysis() already cleared / reserved m_bins.
+				// openNewFile() handles m_file teardown.
+				openNewFile();
+				m_newFile.store(false, std::memory_order_release);
+			}
+			file = m_file;
+		}
 
+		if (!file)
+		{
+			// Idle: wait on condvar until startAnalysis() pings us or
+			// stop is requested. Self-terminate so an idle view costs
+			// no thread.
+			std::unique_lock<std::mutex> lk(m_mutex);
+			if (!m_newFile.load(std::memory_order_acquire)
+			    && !m_stop.load(std::memory_order_acquire))
+			{
+				m_running.store(false, std::memory_order_release);
+				return;
+			}
+			continue;
+		}
+
+		// Phase 2 — decode batch WITHOUT holding m_mutex. Re-check
+		// m_newFile between sub-batches so a GUI swap preempts within
+		// ~one readSamples() call (~5-50 ms depending on codec).
 		int readSamplesThisIt = 0;
 		bool justFinished = false;
-		while(m_file && readSamplesThisIt < MIN_SAMPLES_PER_ITERATION)
+		bool preempted = false;
+		while (readSamplesThisIt < MIN_SAMPLES_PER_ITERATION
+		       && !m_stop.load(std::memory_order_acquire))
 		{
-			int samples = m_file->readSamples(&m_buffer);
-			if(samples <= 0 || m_file->done())
+			// Preempt: GUI requested a new file mid-batch. Drop the
+			// in-flight decode and let the outer loop pick up the new
+			// request. The brief lock below also closes/destroys the
+			// preempted file so no leak.
+			if (m_newFile.load(std::memory_order_acquire))
 			{
-				m_file->close();
-				delete m_file;
-				m_file = NULL;
-				justFinished = true;
+				Lock lock(m_mutex);
+				if (m_file == file && m_file)
+				{
+					m_file->close();
+					delete m_file;
+					m_file = nullptr;
+				}
+				preempted = true;
+				break;
 			}
-			if(samples > 0)
+
+			int samples = file->readSamples(&m_buffer);
+
+			// Brief lock: produce bins + check if file done. Worker is
+			// the only writer to m_bins / m_file so the lock just
+			// serialises against the GUI's startAnalysis() clear.
+			Lock lock(m_mutex);
+			if (m_newFile.load(std::memory_order_acquire))
+			{
+				if (m_file == file && m_file)
+				{
+					m_file->close();
+					delete m_file;
+					m_file = nullptr;
+				}
+				preempted = true;
+				break;
+			}
+			if (samples > 0)
 			{
 				readSamplesThisIt += samples;
 				processSamples(samples);
 			}
+			if (samples <= 0 || file->done())
+			{
+				file->close();
+				delete file;
+				m_file = nullptr;
+				file = nullptr;
+				justFinished = true;
+				break;
+			}
 		}
+
+		if (preempted)
+			continue;
 
 		// EOF: normalise m_bins to exactly m_numBins. The decoder's
 		// actual sample count routinely diverges from
@@ -191,38 +295,16 @@ void SampleVisualizerThread::run()
 		//     entirely inside the drawn region.
 		//   * undershoot (estimation < actual): MORE than 1024 bins
 		//     generated → tail bins drawn past the widget's right edge
-		//     and clipped off-screen. Files with audible content then
-		//     a silent tail showed the audible part filling the entire
-		//     visible width and the silent tail completely invisible -
-		//     "I hear silence at the end but the waveform doesn't
-		//     show it".
+		//     and clipped off-screen.
 		// Resampling here keeps the GUI's hardcoded "i / 1024 * fw"
 		// drawing math correct for every file.
 		if (justFinished)
-			finalizeBins();
-
-		// Self-terminate when the file is fully processed and no new
-		// analysis was queued - an idle view must not keep a thread
-		// polling forever. m_running is flipped UNDER m_mutex so
-		// startAnalysis (which also holds m_mutex) either sees
-		// running==true and just sets m_newFile, or sees running==false
-		// and spawns a fresh thread - never neither.
-		if (!m_file && !m_newFile)
 		{
-			m_running = false;
-			m_mutex.unlock();
-			return;
+			Lock lock(m_mutex);
+			finalizeBins();
 		}
-		// Skip the inter-cycle sleep while there is still a file being
-		// analysed: decode is the slow part and the old 1 ms nap was
-		// pure waste between batches. Sleep only when m_file is gone
-		// (file just finished, queued newFile not yet wired in by
-		// openNewFile) so the next outer loop doesn't busy-spin.
-		const bool stillDecoding = (m_file != NULL);
-		m_mutex.unlock();
-		if (!stillDecoding)
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
+	m_running.store(false, std::memory_order_release);
 }
 
 
@@ -232,7 +314,7 @@ void SampleVisualizerThread::run()
 void SampleVisualizerThread::threadFunc()
 {
 	run();
-	m_running = false;
+	m_running.store(false, std::memory_order_release);
 }
 
 
@@ -241,9 +323,16 @@ void SampleVisualizerThread::threadFunc()
 //---------------------------------------------------------------
 void SampleVisualizerThread::openNewFile()
 {
-	m_newFile = false;
+	// Caller has cleared m_newFile already (after copying pending
+	// filename → m_filename); do NOT reset it here, that would race
+	// against a pending swap that arrived between the snapshot and the
+	// open() call.
 	if(m_file)
+	{
+		m_file->close();
 		delete m_file;
+		m_file = nullptr;
+	}
 	InputFileOptions options;
 	options.outputChannelLayout = InputFileOptions::MONO;
 	options.outputSampleRate = SAMPLE_RATE;
@@ -283,7 +372,13 @@ void SampleVisualizerThread::processSamples(size_t newSamples)
 			m_bins.push_back(m_min);
 			m_bins.push_back(m_max);
 			m_numSamplesProcessedThisBin = 0;
-			m_numBinsProcessed++;
+			// release-store: GUI reads getBinsProcessed() lock-free
+			// then dereferences getBins() up to that count, so the
+			// push_back writes above must be visible before the count
+			// is bumped.
+			m_numBinsProcessed.store(
+				m_numBinsProcessed.load(std::memory_order_relaxed) + 1,
+				std::memory_order_release);
 		}
 	}
 }
@@ -309,7 +404,7 @@ void SampleVisualizerThread::finalizeBins()
 	if (target == 0) return;
 	const size_t srcBins = m_bins.size() / 2;
 	if (srcBins == target) {
-		m_numBinsProcessed = target;
+		m_numBinsProcessed.store(target, std::memory_order_release);
 		return;
 	}
 
@@ -365,7 +460,7 @@ void SampleVisualizerThread::finalizeBins()
 	m_bins.resize(target * 2);
 	for (size_t i = 0; i < target * 2; ++i)
 		m_bins[i] = out[i];
-	m_numBinsProcessed = target;
+	m_numBinsProcessed.store(target, std::memory_order_release);
 }
 
 

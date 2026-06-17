@@ -1,3 +1,87 @@
+GameBaiters Soundboard v2.2.13
+==============================
+
+Stability + UX release on top of v2.2.12. Hardens long-audio playback
+end to end and removes every remaining "click freezes the soundboard"
+case the v2.2.12 benchmark uncovered.
+
+Highlights
+----------
+
+* Async waveform skip on multi-hour files. The FFmpeg backward-scan
+  (which can take 300-500 ms on a 10-hour MP3 without a Xing seek
+  index) now runs on a dedicated Sampler-owned worker thread instead
+  of the GUI thread. Sampler::seek returns instantly; the worker
+  performs the scan, then briefly takes the audio lock to flush the
+  per-slot buffers, reset the DSP chain and snap the position cache,
+  and emits a new onSeekCommitted signal so the GUI can release the
+  per-channel cursor lock. Soundboard never freezes on backward
+  cursor clicks again, even on aggressively long files.
+
+* GUI debounce + per-channel poll lock for waveform clicks. Spam
+  back-and-forth clicks within an 80 ms window collapse to ONE seek
+  with the final target. During the seek, the 30 Hz position poll
+  pins the cursor to the click target instead of overwriting it with
+  the still-pre-seek decoder position - the v2.2.12 "cursor freezes
+  / reverts while audio keeps playing" regression is gone.
+
+* TS3 close-with-audio crash + zombie-process hardening. Producer
+  threads stop in parallel now (signal all, then join all) instead of
+  sequentially per slot, so a 32-slot teardown no longer trips TS3's
+  plugin watchdog when long audio is in flight. Setting a producer's
+  source is lock-free (atomic swap) so clearing a long preloaded
+  audio no longer stalls the GUI for the duration of one decode
+  batch. A new waitForReadDrain hook is called from every site that
+  closes a detached InputFile so the producer's last in-flight
+  readSamples can never UAF the FFmpeg context. AudioExporter
+  terminate() fallback now fires when a cooperative cancel misses
+  the budget, so a stuck export can never outlive the DLL unload.
+
+* Waveform analyser non-blocking on rapid audio swap. The visualizer
+  thread no longer holds its mutex through the full ~512 K-sample
+  decode iteration; startAnalysis is mutex-light and the worker
+  preempts mid-batch on a new file. Loading a 2nd audio while the
+  previous waveform is still analysing no longer hangs the
+  soundboard, regardless of file length.
+
+* Live analysis progress bar inside the waveform itself - same
+  visual language as the paulstretch / reverse-FX overlay, percentage
+  + label feed from the analyser bin count. Replaces the silent thin
+  stripe so the user gets immediate feedback that "the waveform is
+  being built", not "the soundboard is frozen".
+
+* Channel reset now also removes the preloaded audio from every
+  channel by default. The "X next to the filename" path is invoked
+  on each slot during the reset, so the waveform, filename and
+  replay glyph all disappear instantly and the per-slot last-played
+  context map is cleared.
+
+UX
+--
+
+* P1..P4 profile buttons on the main panel stay in sync with the
+  profile combo in the settings window in both directions.
+
+* Channel meter "stop slide" decay now matches the normal release
+  decay rate so the marker drains at one continuous dB/sec when
+  audio ends.
+
+* Remove-sound X button is bigger (26x26), with a soft red tint
+  visible at rest (was transparent until hover). New tooltip
+  "Rimuovi il suono caricato da questo canale".
+
+* Channels area below the button grid is fixed at one-channel
+  height. Adding new channels scrolls the area instead of pushing
+  the rest of the interface down.
+
+Italian translations
+--------------------
+
+* Eight new SoundView overlay strings (analysing waveform,
+  applying pitch / speed / reverb, ready) plus the WaveformPlayer
+  remove-sound tooltip are now translated and bundled.
+
+============================================================
 GameBaiters Soundboard v2.2.12
 ==============================
 

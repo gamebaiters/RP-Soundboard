@@ -332,25 +332,20 @@ void MainPage::refreshTheme() {
 }
 
 void MainPage::updateChannelsAreaHeight(bool waveformVisible) {
-    // Compute height that snugly fits N channels - we use sizeHint of
-    // the host so the scroll area never leaves dead grey space below
-    // the last channel. Falls back to empirical per-channel guesses
-    // before any channel widget has had a chance to lay out.
-    const int n = m_channels.size() > 0 ? m_channels.size() : 1;
-    int hostHint = 0;
-    if (m_channelsHost) {
-        m_channelsHost->adjustSize();
-        hostHint = m_channelsHost->sizeHint().height();
-    }
+    // Fixed-height channels area: the user explicitly asked to stop
+    // the interface from growing every time a channel is added.
+    // Previous behaviour computed sizeHint per N channels (up to a
+    // hard cap of 600 / 340) so adding the 2nd / 3rd channel
+    // visibly enlarged the panel and pushed the grid downward.
+    //
+    // Now: target = ONE channel's height (with the waveform-visible
+    // toggle). Every additional channel rolls into the scroll area
+    // without changing the panel size. Floor / cap stay in place so
+    // the area remains a usable single-channel preview.
     const int perChannelFallback = waveformVisible ? 195 : 110;
-    const int channelsFallback   = n * perChannelFallback + (n > 1 ? (n - 1) * 4 : 0);
-    int target = std::max(hostHint, channelsFallback);
-    // Cap so additional channels start to scroll rather than push the
-    // button grid off-screen.
-    const int hardCap = waveformVisible ? 600 : 340;
-    target = std::min(target, hardCap);
-    const int floor   = waveformVisible ? 150 : 90;
-    target = std::max(target, floor);
+    int target = perChannelFallback;
+    const int floor = waveformVisible ? 150 : 90;
+    if (target < floor) target = floor;
     m_channelsScroll->setMinimumHeight(target);
     m_channelsScroll->setMaximumHeight(target);
 }

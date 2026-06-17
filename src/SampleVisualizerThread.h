@@ -12,6 +12,8 @@
 
 #include <thread>
 #include <mutex>
+#include <condition_variable>
+#include <atomic>
 #include <vector>
 #include <string>
 
@@ -65,20 +67,25 @@ private:
 private:
 	SampleBufferSynced m_buffer;
 	size_t m_numBins;
-	size_t m_numBinsProcessed;
+	std::atomic<size_t> m_numBinsProcessed;
 	int64_t m_numSamplesProcessed;
 	int64_t m_numSamplesTotalEst;
 	size_t m_numSamplesProcessedThisBin;
 	int m_min;
 	int m_max;
 	mutable std::mutex m_mutex;
+	std::condition_variable m_cv;
 	std::vector<int> m_bins;
 	InputFile *m_file;
 	std::thread m_thread;
+	// Filename the GUI requested; consumed by worker at next iteration.
+	std::string m_pendingFilename;
+	size_t      m_pendingNumBins;
+	// Filename + numBins currently being processed (worker-owned).
 	std::string m_filename;
-	volatile bool m_running;
-	volatile bool m_newFile;
-	volatile bool m_stop;
+	std::atomic<bool> m_running;
+	std::atomic<bool> m_newFile;
+	std::atomic<bool> m_stop;
 };
 
 

@@ -290,6 +290,66 @@ void SoundView::paintEvent(QPaintEvent *evt)
 		painter.drawText(br, Qt::AlignCenter, badge);
 	}
 
+	// Waveform-analysis progress bar. Same visual language as the
+	// paulstretch/FX overlay (paulstretch one paints below if
+	// m_loadActive is also true — they share the bottom strip but
+	// analysis takes precedence visually as it's the more impactful
+	// loading state). Driven by m_vis->getBinsProcessed() against the
+	// target m_analysisBins. Stays visible until the reveal animation
+	// kicks in so the user always sees a continuous progress narrative.
+	{
+		const bool analysing =
+			m_active && m_vis &&
+			(m_vis->isRunning() || !m_analysisReady);
+		if (analysing) {
+			const int target = m_analysisBins > 0 ? m_analysisBins : 1024;
+			int processed = static_cast<int>(m_vis->getBinsProcessed());
+			if (processed < 0) processed = 0;
+			if (processed > target) processed = target;
+			float progress = static_cast<float>(processed)
+			                 / static_cast<float>(target);
+			if (progress > 1.0f) progress = 1.0f;
+
+			painter.setRenderHint(QPainter::Antialiasing, true);
+			painter.setPen(Qt::NoPen);
+			// Slight darken so the bar reads against any background
+			// while still letting the dimmed area underneath show.
+			painter.setBrush(QColor(0, 0, 0, 55));
+			painter.drawRect(0, 0, width(), height());
+
+			int barH = 4;
+			int barY = height() - barH - 2;
+			int barW = width() - 8;
+			int barX = 4;
+
+			painter.setBrush(QColor(40, 40, 50));
+			painter.drawRoundedRect(barX, barY, barW, barH, 2, 2);
+
+			int fillW = static_cast<int>(barW * progress);
+			if (fillW > 0) {
+				Theme::Colors tc = Theme::colors();
+				QColor accent = tc.enabled
+					? Theme::derivedCached().accent
+					: QColor(0, 180, 255);
+				accent.setAlpha(220);
+				painter.setBrush(accent);
+				painter.drawRoundedRect(barX, barY, fillW, barH, 2, 2);
+			}
+
+			QFont f = font();
+			f.setPixelSize(10);
+			painter.setFont(f);
+			painter.setPen(QColor(255, 255, 255, 210));
+			QString label = (progress < 0.99f)
+				? tr("Analysing waveform... %1%").arg(
+					static_cast<int>(progress * 100))
+				: tr("Waveform ready");
+			painter.drawText(QRect(0, 0, width(), height() - barH - 4),
+			                 Qt::AlignCenter, label);
+			painter.setRenderHint(QPainter::Antialiasing, false);
+		}
+	}
+
 	// Draw paulstretch loading overlay (timer-based animation)
 	if (m_loadActive && m_loadDurationMs > 0) {
 		qint64 elapsed = m_loadElapsed.elapsed();
@@ -371,8 +431,12 @@ void SoundView::setSound( const SoundInfo &sound )
 		// anyway, but explicit reset prevents a one-frame ghost
 		// flash between setSound and setPlaying.
 		m_ghosted = false;
-		m_vis->startAnalysis(sound.filename.toUtf8(), 1024);
-		m_timer->start(100);
+		m_analysisBins = 1024;
+		m_vis->startAnalysis(sound.filename.toUtf8(), m_analysisBins);
+		// 50 ms poll — fast enough that the progress bar animates
+		// smoothly even on small files (a 3-min audio finishes in ~16
+		// outer cycles so we still want sub-second update rate).
+		m_timer->start(50);
 	}
 	else
 	{
@@ -514,17 +578,10 @@ void SoundView::drawWaves(QPainter *painter)
 		m_vis && (m_vis->isRunning() || !m_analysisReady);
 
 	if (analysing) {
-		// Subtle horizontal indicator centred vertically. Acts as a
-		// "loading" affordance without committing to any waveform
-		// shape that would later have to be re-rendered.
-		Theme::Colors tc = Theme::colors();
-		QColor base = tc.enabled ? tc.waveform : QColor(0, 180, 255);
-		int alpha = 60; // dim
-		painter->setPen(Qt::NoPen);
-		painter->setBrush(QColor(base.red(), base.green(), base.blue(),
-		                         alpha));
-		int y = height() / 2;
-		painter->drawRect(2, y - 1, width() - 4, 2);
+		// Draw nothing here — the progress bar is painted by the
+		// dedicated overlay block in paintEvent (after all other
+		// layers) so it sits on top of the dimmed background AND any
+		// existing crop / ghost decoration cleanly.
 		return;
 	}
 

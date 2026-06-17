@@ -361,7 +361,11 @@ void Sampler::reverseWorkerProc(int slot, uint64_t epoch, bool wantReverse,
 	// FFmpeg decoder context is non-trivial (codec close + format
 	// close + filter graph teardown) — keeping it out of m_mutex
 	// frees the audio thread the moment the pointer swap is done.
+	// Drain producer first: setSource(nullptr) at line ~305 is now
+	// lock-free, so the producer may still be inside one last
+	// readSamples on oldFile. UAF avoided.
 	if (oldFile) {
+		s.producerThread.waitForReadDrain();
 		oldFile->close();
 		delete oldFile;
 	}
@@ -592,6 +596,17 @@ void Sampler::shutdown()
 	// touching slot state we're about to tear down.
 	m_shuttingDown.store(true, std::memory_order_release);
 
+	// Stop the dedicated seek worker. cv.notify_all + atomic stop flag
+	// breaks out of its wait predicate; the worker exits its outer
+	// loop without committing any in-flight scan result (the recheck
+	// inside the per-Work loop honours m_shuttingDown). Join before
+	// closing input files so the worker can never race the InputFile
+	// teardown below.
+	m_seekStop.store(true, std::memory_order_release);
+	m_seekCv.notify_all();
+	if (m_seekWorker.joinable())
+		m_seekWorker.join();
+
 	// Signal every in-flight worker to cancel its decode loop, then
 	// join them OUTSIDE m_mutex. Joining inside the lock would
 	// deadlock because the worker grabs m_mutex to perform the swap.
@@ -620,14 +635,25 @@ void Sampler::shutdown()
 	// manager — the producer hung on a dead pointer, its std::thread
 	// dtor called std::terminate, and Windows kept the process around
 	// in a half-dead state long enough that the user force-killed it
-	// and TS3 popped a crash-on-exit dialog. Detach + stop is safe
-	// because producer.stop() joins the thread before returning, so
-	// by the time we close() the InputFile no other thread can touch
-	// it.
+	// and TS3 popped a crash-on-exit dialog.
+	//
+	// PARALLEL stop: previously the loop did stop(true) per slot which
+	// serialised the join — slot 0 had to finish decoding its current
+	// batch (could be hundreds of ms on a very long file) BEFORE slot
+	// 1 even got the stop signal. With 32 slots and a long audio in
+	// each, sb_kill could take multiple seconds; TS3's plugin
+	// watchdog then declared us hung and showed the crash dialog
+	// "soundboard crashed" even though we were just shutting down
+	// cleanly. Now: signal ALL producers first (atomic flag + cv
+	// notify), THEN join them all. Total stop time = max single
+	// in-flight readSamples, not sum.
 	for (int i = 0; i < MAX_SLOTS; i++) {
 		PlaybackSlot &slot = m_slots[i];
-		slot.producerThread.setSource(NULL);
-		slot.producerThread.stop();
+		slot.producerThread.setSource(NULL);  // wakes cv
+		slot.producerThread.stop(false);      // sets m_stop, NO join
+	}
+	for (int i = 0; i < MAX_SLOTS; i++) {
+		m_slots[i].producerThread.joinIfRunning();
 	}
 
 	std::lock_guard<std::mutex> Lock(m_mutex);
@@ -1219,6 +1245,17 @@ void Sampler::stopPlayback(int slot)
 			if (f || e) stopped.push_back({f, slot, e});
 		}
 	}
+	// Drain phase OUTSIDE m_mutex: stopSlotInternal calls
+	// producer.setSource(nullptr) which is now lock-free (so it does
+	// not stall the audio thread on long-audio decode). The producer
+	// may still be inside one last readSamples on the detached file —
+	// wait briefly per affected slot so the close+delete below cannot
+	// race a still-running decode (UAF in FFmpeg context teardown).
+	for (auto &st : stopped)
+	{
+		if (st.file && st.slot >= 0 && st.slot < MAX_SLOTS)
+			m_slots[st.slot].producerThread.waitForReadDrain();
+	}
 	for (auto &st : stopped)
 	{
 		if (st.file) { st.file->close(); delete st.file; }
@@ -1634,7 +1671,15 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 	// FFmpeg context, deliver the deferred stop signal, then build +
 	// open the new file. The audio thread keeps mixing the other slots
 	// undisturbed for the whole duration.
-	if (oldFile) { oldFile->close(); delete oldFile; }
+	if (oldFile) {
+		// setSource(nullptr) inside stopSlotInternal is lock-free, so
+		// drain the producer before deleting the detached file to
+		// avoid UAF if a readSamples is still in flight on it.
+		if (oldEmitSlot >= 0 && oldEmitSlot < MAX_SLOTS)
+			m_slots[oldEmitSlot].producerThread.waitForReadDrain();
+		oldFile->close();
+		delete oldFile;
+	}
 	if (oldEmitStop) emit onStopPlaying(oldEmitSlot);
 
 	InputFile *newFile = CreateInputFileFFmpeg();
@@ -1918,36 +1963,131 @@ void Sampler::setSlotCropLive(int slot, double startSec, double endSec)
 //---------------------------------------------------------------
 void Sampler::seek(double seconds, int slot)
 {
-	std::lock_guard<std::mutex> Lock(m_mutex);
-	if (slot >= 0 && slot < MAX_SLOTS)
+	if (slot < 0 || slot >= MAX_SLOTS)
+		return;
+	PlaybackSlot &s = m_slots[slot];
 	{
-		PlaybackSlot &s = m_slots[slot];
-		if (s.inputFile && s.state != eSILENT)
+		std::lock_guard<std::mutex> Lock(m_mutex);
+		if (s.state == eSILENT) return;
+		if (!s.inputFile)        return;
+		// Clamp the seek target to the crop range. Without this the
+		// user could skip back before the crop start and hear audio
+		// outside the trimmed-in region.
+		if (s.cropStart > 0.0 && seconds < s.cropStart)
+			seconds = s.cropStart;
+		if (s.cropEnd > 0.0 && seconds > s.cropEnd)
+			seconds = s.cropEnd;
+	}
+	// Lock-free atomic enqueue + wake the dedicated seek worker. The
+	// GUI thread RETURNS INSTANTLY — the slow FFmpeg backward scan
+	// (300–500 ms on a 10-hour MP3) runs entirely on the worker, so
+	// rapid waveform clicks never freeze the soundboard. Last-wins:
+	// every call overwrites pendingSeekSec; whatever value the worker
+	// reads when it next iterates is the committed target.
+	s.pendingSeekSec.store(seconds, std::memory_order_release);
+	startSeekWorker();
+	m_seekCv.notify_all();
+}
+
+
+//---------------------------------------------------------------
+// Lazy start of the seek worker thread on the first seek request.
+// Idle-spawn keeps init() flat — most sessions never call seek().
+//---------------------------------------------------------------
+void Sampler::startSeekWorker()
+{
+	bool expected = false;
+	if (!m_seekWorkerStarted.compare_exchange_strong(
+			expected, true, std::memory_order_acq_rel))
+		return;
+	m_seekWorker = std::thread(&Sampler::seekWorkerProc, this);
+}
+
+
+//---------------------------------------------------------------
+// Seek worker body. Waits on m_seekCv; when notified, scans every
+// slot for a pendingSeekSec and processes them one by one. The
+// FFmpeg seek runs OUTSIDE m_mutex (so the audio path is unblocked
+// for the full scan duration); a brief m_mutex re-lock after the
+// scan commits the buffer flush + cache update. Slot ownership of
+// the InputFile is rechecked at commit time so a stop/swap that
+// landed mid-scan is honoured (the worker silently discards its
+// post-scan work in that case — the next seek (if any) will re-do
+// it on the new file).
+//---------------------------------------------------------------
+void Sampler::seekWorkerProc()
+{
+	while (!m_seekStop.load(std::memory_order_acquire))
+	{
+		// Wait for pending work. We snapshot the per-slot atomics in
+		// a small array so the slow FFmpeg scan below runs without
+		// any held lock.
+		struct Work { int slot; double target; InputFile *file; };
+		std::vector<Work> batch;
 		{
-			// Clamp the seek target to the crop range. Without this the
-			// user could skip back before the crop start and hear audio
-			// outside the trimmed-in region.
-			if (s.cropStart > 0.0 && seconds < s.cropStart)
-				seconds = s.cropStart;
-			if (s.cropEnd > 0.0 && seconds > s.cropEnd)
-				seconds = s.cropEnd;
-			s.inputFile->seek(seconds);
-
-			SampleBuffer::Lock sblc(s.sbCapture.getMutex());
-			SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
-			s.sbCapture.clear();
-			s.sbPlayback.clear();
-
+			std::unique_lock<std::mutex> lk(m_seekMutex);
+			m_seekCv.wait(lk, [this]{
+				if (m_seekStop.load(std::memory_order_acquire))
+					return true;
+				for (int i = 0; i < MAX_SLOTS; ++i) {
+					double v = m_slots[i].pendingSeekSec.load(
+						std::memory_order_acquire);
+					if (!std::isnan(v)) return true;
+				}
+				return false;
+			});
+			if (m_seekStop.load(std::memory_order_acquire))
+				return;
+		}
+		// Collect work under m_mutex (briefly): snapshot file
+		// pointer + exchange the atomic. Multiple clicks during the
+		// scan keep overwriting pendingSeekSec; the LAST value lands
+		// here and earlier targets are silently discarded.
+		{
+			std::lock_guard<std::mutex> Lock(m_mutex);
+			for (int i = 0; i < MAX_SLOTS; ++i) {
+				double v = m_slots[i].pendingSeekSec.exchange(
+					std::numeric_limits<double>::quiet_NaN(),
+					std::memory_order_acq_rel);
+				if (std::isnan(v)) continue;
+				PlaybackSlot &s = m_slots[i];
+				if (s.state == eSILENT || !s.inputFile) continue;
+				batch.push_back({i, v, s.inputFile});
+			}
+		}
+		for (const Work &w : batch) {
+			if (m_seekStop.load(std::memory_order_acquire))
+				return;
+			// THE expensive part — runs without holding any sampler
+			// lock so the audio thread keeps mixing pre-seek samples
+			// from the existing buffer for the full scan duration.
+			w.file->seek(w.target);
+			// Re-lock briefly to commit. Skip the commit if the slot
+			// state has rotated under us (stopSlot, playSoundInSlot,
+			// reverse swap, shutdown) so we never stomp on a fresh
+			// state with the result of a now-stale scan.
+			std::lock_guard<std::mutex> Lock(m_mutex);
+			PlaybackSlot &s = m_slots[w.slot];
+			if (m_shuttingDown.load(std::memory_order_relaxed)) return;
+			if (s.state == eSILENT || s.inputFile != w.file) continue;
+			{
+				SampleBuffer::Lock sblc(s.sbCapture.getMutex());
+				SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
+				s.sbCapture.consume(NULL, s.sbCapture.avail());
+				s.sbPlayback.consume(NULL, s.sbPlayback.avail());
+			}
 			if (s.dsp) s.dsp->reset();
-			s.stretchBaseTime = seconds;
-			// Explicit seek: snap cache to target + invalidate anchor
-			// so the rate-limiter does not reject the user-requested
-			// backward jump.
-			s.cachedPositionSec.store(seconds, std::memory_order_relaxed);
+			s.stretchBaseTime = w.target;
+			s.cachedPositionSec.store(w.target,
+				std::memory_order_relaxed);
 			s.posCacheValid = false;
-			// Buffers were just cleared - kick the producer so the
-			// refill starts now instead of on its next 100 ms tick.
 			s.producerThread.wake();
+			// Notify GUI on the audio thread's queued path so the
+			// per-channel cursor lock can release. Emitting under
+			// m_mutex would deadlock any direct-connected slot; Qt's
+			// default (auto) connection is queued across threads, so
+			// this is safe — the slot fires on the GUI thread later.
+			emit onSeekCommitted(w.slot);
 		}
 	}
 }
@@ -1985,6 +2125,15 @@ void Sampler::setMultiMode(bool enabled)
 				if (f || e) stopped.push_back({f, s, e});
 			}
 		}
+	}
+	// Drain producers BEFORE closing: setSource(nullptr) inside
+	// stopSlotInternal is lock-free now, so a producer may still be
+	// in its final readSamples on a detached file. See stopPlayback
+	// for the same pattern.
+	for (auto &st : stopped)
+	{
+		if (st.file && st.slot >= 0 && st.slot < MAX_SLOTS)
+			m_slots[st.slot].producerThread.waitForReadDrain();
 	}
 	for (auto &st : stopped)
 	{

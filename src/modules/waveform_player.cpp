@@ -72,10 +72,16 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     m_clearBtn = new QPushButton(this);
     m_clearBtn->setObjectName("GBClearFileBtn");
     m_clearBtn->setIcon(IconFactory::clear());
-    m_clearBtn->setIconSize(QSize(16, 16));
+    // Larger icon + bigger button so the "remove sound" affordance
+    // reads as a real destructive action, not a tiny garnish next to
+    // the filename. Previous 20x20 with a 16 px icon disappeared into
+    // the strip; 26x26 with a 20 px icon is unmistakable. Background
+    // tint is visible AT REST (not only on hover) so the user spots
+    // the X before they have to fish for it.
+    m_clearBtn->setIconSize(QSize(20, 20));
     m_clearBtn->setFlat(true);
     m_clearBtn->setCursor(Qt::PointingHandCursor);
-    m_clearBtn->setFixedSize(20, 20);
+    m_clearBtn->setFixedSize(26, 26);
     // NoFocus: clicking the X must not steal keyboard focus from the
     // surrounding row. Without this the button took focus on press;
     // when it then hid itself a frame later (no filename + no replay
@@ -84,12 +90,24 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     // s its contents on tab-focus and visually highlighted the channel
     // name as if the user had just clicked it.
     m_clearBtn->setFocusPolicy(Qt::NoFocus);
-    m_clearBtn->setToolTip(tr("Clear this channel's sound (back to empty)"));
+    m_clearBtn->setToolTip(tr("Remove the loaded sound from this channel"));
     m_clearBtn->setStyleSheet(
-        "QPushButton#GBClearFileBtn { background: transparent; border: none;"
-        " padding: 0px; margin: 0px; }"
-        "QPushButton#GBClearFileBtn:hover { background: rgba(255,80,80,40);"
-        " border-radius: 10px; }");
+        // At-rest: soft red tint + rounded shape so the user sees the
+        // remove affordance even without hovering. Hover bumps the
+        // saturation; pressed deepens it.
+        "QPushButton#GBClearFileBtn {"
+        "  background: rgba(220, 60, 60, 70);"
+        "  border: 1px solid rgba(255, 110, 110, 130);"
+        "  border-radius: 13px;"
+        "  padding: 0px; margin: 0px;"
+        "}"
+        "QPushButton#GBClearFileBtn:hover {"
+        "  background: rgba(255, 80, 80, 150);"
+        "  border-color: rgba(255, 200, 200, 200);"
+        "}"
+        "QPushButton#GBClearFileBtn:pressed {"
+        "  background: rgba(190, 40, 40, 220);"
+        "}");
     m_clearBtn->hide();
     m_timeLabel->setText("0:00 / 0:00");
     m_timeLabel->setMinimumWidth(80);

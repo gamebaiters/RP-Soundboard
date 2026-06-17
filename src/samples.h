@@ -18,6 +18,8 @@
 
 #include <mutex>
 #include <atomic>
+#include <condition_variable>
+#include <limits>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -134,6 +136,12 @@ signals:
 	// UI shows a clear message instead of the client silently doing
 	// nothing or crashing.
 	void onPlaybackError(int slot, QString filename);
+	// Async seek finished. Emitted on the worker thread (Qt auto-
+	// connects with QueuedConnection across threads); the GUI uses it
+	// to release the per-channel "seekPending" poll lock so the
+	// cursor stops following the user's click target and resumes
+	// tracking the live decoder position.
+	void onSeekCommitted(int slot);
 
 public:
 	// Direct slot-targeted play - the new modular UI uses this to do its
@@ -238,6 +246,17 @@ private:
 		// common no-random case.
 		bool   randomActive    = false;
 
+		// Async seek queue. Sampler::seek (GUI thread) writes the
+		// latest target here and notifies the dedicated seek worker
+		// (one shared worker, sees all slots). The worker performs
+		// the slow FFmpeg backward scan OFF the GUI thread so a 10-h
+		// MP3 click never freezes the soundboard. NaN = no pending
+		// seek. Rapid spam collapses to "last target wins" because
+		// the GUI debounce upstream + this atomic both keep only the
+		// most recent value.
+		std::atomic<double> pendingSeekSec{
+			std::numeric_limits<double>::quiet_NaN()};
+
 		// Sidechain ducking. duckSource: when this slot is playing it
 		// attenuates every OTHER slot's output by duckOthersDb. duckGain:
 		// the smoothly attacked / released gain currently APPLIED to
@@ -304,6 +323,20 @@ private:
 	// ~100 ms of its cancel token flipping, so joins here are short.
 	std::mutex m_retiredMutex;
 	std::vector<std::thread> m_retiredWorkers;
+
+	// Dedicated seek worker. One std::thread shared across all slots
+	// processes pendingSeekSec values async — Sampler::seek (GUI
+	// thread) just sets the atomic + notifies; the worker does the
+	// hundreds-of-ms FFmpeg backward-scan and then briefly takes
+	// m_mutex to commit the buffer-clear + cache-update + DSP reset.
+	// Started lazily on first seek() call; joined in shutdown().
+	std::thread             m_seekWorker;
+	std::mutex              m_seekMutex;
+	std::condition_variable m_seekCv;
+	std::atomic<bool>       m_seekStop{false};
+	std::atomic<bool>       m_seekWorkerStarted{false};
+	void seekWorkerProc();
+	void startSeekWorker();
 };
 
 

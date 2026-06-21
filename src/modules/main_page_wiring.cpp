@@ -24,6 +24,7 @@
 #include "../config_qt.h"
 #include "../main.h"
 #include "../AudioUtils.h"
+#include "../ts3log.h"
 #include "hotkey_block.h"
 #include "theme.h"
 #include "icon_factory.h"
@@ -39,6 +40,7 @@
 #include <QApplication>
 #include <QButtonGroup>
 #include <QToolButton>
+#include <QSpinBox>
 #include <QRegularExpression>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -49,6 +51,12 @@
 #include <QHash>
 #include <QSet>
 #include <QVector>
+#include <QPointer>
+#include <QLabel>
+#include <QPushButton>
+#include <QFrame>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QDateTime>
 #include <cmath>
 #include <memory>
@@ -164,6 +172,17 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     auto *w = page->settingsWindow();
     w->setRows(model->getRows());
     w->setCols(model->getCols());
+    // Mirror onto the main-page spinners too — settings + main page
+    // both observe the same model, but profile-switch / import only
+    // calls this function so the main-page widgets needed a hook.
+    if (auto *rs = page->rowsSpin()) {
+        QSignalBlocker b(rs);
+        rs->setValue(model->getRows());
+    }
+    if (auto *cs = page->colsSpin()) {
+        QSignalBlocker b(cs);
+        cs->setValue(model->getCols());
+    }
     w->setEarrapeProtection(model->getEarrapeProtection());
     w->setLinkVolumes(model->getLinkVolumes());
     w->setRememberPitchSpeed(model->getRememberPitchSpeed());
@@ -171,6 +190,9 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     w->setGlobalFxEnabled(model->getGlobalFxEnabled());
     w->setHideWaveform(model->getHideWaveform());
     w->setLogsEnabled(model->getLogsEnabled());
+    w->setExtremeLogging(model->getExtremeLogging());
+    w->setRightDragLoopEnabled(model->getRightDragLoopEnabled());
+    w->setReplayModeEnabled(model->getReplayModeEnabled());
     w->setActiveProfile(model->getConfiguration());
     w->setTheme(model->getThemeEnabled(),
                 QColor(model->getThemeAccent()),
@@ -241,6 +263,15 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
     });
     QObject::connect(w, &SettingsWindow::logsEnabledChanged, [model](bool v){
         model->setLogsEnabled(v);
+    });
+    QObject::connect(w, &SettingsWindow::extremeLoggingChanged, [model](bool v){
+        model->setExtremeLogging(v);
+    });
+    QObject::connect(w, &SettingsWindow::rightDragLoopEnabledChanged, [model](bool v){
+        model->setRightDragLoopEnabled(v);
+    });
+    QObject::connect(w, &SettingsWindow::replayModeEnabledChanged, [model](bool v){
+        model->setReplayModeEnabled(v);
     });
     QObject::connect(w, &SettingsWindow::showLogViewerRequested, []{
         sb_openLogViewer();
@@ -901,6 +932,28 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             }
             if (sampler) sampler->setSlotCropLive(slot, sCur, eCur);
             ch->waveform()->setCropRange(sCur, eCur);
+            // Cursor-snap when loop is currently ON: shifting the crop
+            // edges effectively shifts the loop window. If the live
+            // cursor falls outside the new window the channel would
+            // play silently (or escape the crop overlay) until the
+            // next loop wrap; jump to the relevant edge so audio
+            // continuity is preserved. No-op when the cursor is
+            // already inside or the channel is not playing.
+            if (sampler && ch->waveform()->isLooping()) {
+                auto st = sampler->getState(slot);
+                if (st == Sampler::ePLAYING || st == Sampler::ePAUSED) {
+                    double pos = sampler->getPosition(slot);
+                    double lo = (sCur > 0.0) ? sCur : 0.0;
+                    double hi = (eCur > 0.0) ? eCur : ch->waveform()->totalLength();
+                    if (hi <= 0.0) hi = lo + 1.0;
+                    bool inside = (pos >= lo - 1e-3) && (pos <= hi + 1e-3);
+                    if (!inside) {
+                        bool reverse = ch->waveform()->isReversed();
+                        sampler->seek(reverse ? hi : lo, slot);
+                        ch->waveform()->notifySeek();
+                    }
+                }
+            }
         };
         QObject::connect(ch->waveform(), &WaveformPlayer::cropStartRequestedAt,
                          page, [applyCropEdit](double seconds){
@@ -927,6 +980,139 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         QObject::connect(ch->waveform(), &WaveformPlayer::cropClearAllRequested,
                          page, [applyCropEdit]{
             applyCropEdit([](SoundInfo &, double &s, double &e){ s = 0.0; e = -1.0; });
+        });
+        // Right-button drag on the waveform proposes a loop area. Two
+        // user-driven gates: (1) the feature itself is OFF by default
+        // and only fires when "Right-drag loop selection" is enabled
+        // in Settings; (2) even when enabled, the commit is gated by
+        // an inline confirm bubble floating ABOVE the waveform cursor
+        // — no modal dialog interrupts mouse / keyboard flow. Yes =
+        // write Start/End markers + flip Loop ON; No = bubble closes
+        // silently.
+        QObject::connect(ch->waveform(), &WaveformPlayer::loopAreaSelected,
+                         page, [applyCropEdit, ch, sampler, page, model](double sa, double sb){
+            if (!model->getRightDragLoopEnabled()) return;
+            auto fmtSec = [](double v){
+                int m  = static_cast<int>(v) / 60;
+                int s  = static_cast<int>(v) % 60;
+                int ms = static_cast<int>((v - std::floor(v)) * 1000.0);
+                return QString("%1:%2.%3")
+                    .arg(m).arg(s, 2, 10, QChar('0')).arg(ms, 3, 10, QChar('0'));
+            };
+
+            // Reuse one bubble per channel so a rapid second drag
+            // replaces the previous prompt instead of stacking.
+            QPointer<QFrame> existing =
+                ch->findChild<QFrame*>(QStringLiteral("loopConfirmBubble"),
+                                       Qt::FindDirectChildrenOnly);
+            if (existing) existing->deleteLater();
+
+            auto *bubble = new QFrame(ch);
+            bubble->setObjectName(QStringLiteral("loopConfirmBubble"));
+            bubble->setAttribute(Qt::WA_DeleteOnClose);
+            bubble->setFrameShape(QFrame::StyledPanel);
+            bubble->setStyleSheet(
+                "#loopConfirmBubble { background: rgba(20,22,26,235);"
+                " border: 1px solid rgba(120,200,120,200);"
+                " border-radius: 6px; }"
+                "#loopConfirmBubble QLabel { color: #e8f5e8; }"
+                "#loopConfirmBubble QPushButton {"
+                " background: #3c8c3c; color: white;"
+                " border: 1px solid #2a6e2a; border-radius: 3px;"
+                " padding: 3px 12px; min-width: 56px; }"
+                "#loopConfirmBubble QPushButton#noBtn {"
+                " background: #6a6a6a; border-color: #4a4a4a; }"
+                "#loopConfirmBubble QPushButton:hover { background: #4eaf4e; }"
+                "#loopConfirmBubble QPushButton#noBtn:hover { background: #888; }");
+
+            auto *lbl = new QLabel(
+                QObject::tr("Create loop area %1 → %2 (%3 s)?")
+                    .arg(fmtSec(sa)).arg(fmtSec(sb))
+                    .arg(sb - sa, 0, 'f', 2),
+                bubble);
+            lbl->setAlignment(Qt::AlignCenter);
+            auto *yes = new QPushButton(QObject::tr("Yes"), bubble);
+            auto *no  = new QPushButton(QObject::tr("No"),  bubble);
+            no->setObjectName(QStringLiteral("noBtn"));
+
+            auto *col = new QVBoxLayout(bubble);
+            col->setContentsMargins(8, 6, 8, 6);
+            col->setSpacing(4);
+            col->addWidget(lbl);
+            auto *row = new QHBoxLayout;
+            row->setSpacing(6);
+            row->addStretch(1);
+            row->addWidget(yes);
+            row->addWidget(no);
+            row->addStretch(1);
+            col->addLayout(row);
+
+            // Auto-close on no, or after 8 s of inactivity so a stray
+            // bubble doesn't sit forever if the user wanders off.
+            auto *timeout = new QTimer(bubble);
+            timeout->setSingleShot(true);
+            QObject::connect(timeout, &QTimer::timeout, bubble, &QFrame::close);
+            timeout->start(8000);
+
+            QObject::connect(no, &QPushButton::clicked, bubble, &QFrame::close);
+            QObject::connect(yes, &QPushButton::clicked, bubble,
+                             [applyCropEdit, ch, sampler, sa, sb, bubble]{
+                applyCropEdit([sa, sb](SoundInfo &, double &s, double &e){
+                    s = sa;
+                    e = sb;
+                });
+                ch->waveform()->setLooping(true);
+                int slotIdx = ch->channelId();
+                if (sampler && slotIdx >= 0) {
+                    sampler->setSlotLoop(slotIdx, true);
+                    // Cursor-snap: if the channel is currently playing
+                    // and the live cursor sits OUTSIDE the freshly
+                    // committed loop window, jump it to the appropriate
+                    // edge so the next sample heard is inside the loop.
+                    //   - Forward play  → seek to start (sa)
+                    //   - Reverse play  → seek to end (sb), the natural
+                    //     entry point of a reverse pass.
+                    // If the cursor is already inside [sa, sb] do
+                    // nothing — let the audio play out to the boundary
+                    // and the existing loop branch take it from there.
+                    auto st = sampler->getState(slotIdx);
+                    if (st == Sampler::ePLAYING || st == Sampler::ePAUSED) {
+                        double pos = sampler->getPosition(slotIdx);
+                        bool inside = (pos >= sa - 1e-3) && (pos <= sb + 1e-3);
+                        if (!inside) {
+                            bool reverse = ch->waveform()->isReversed();
+                            sampler->seek(reverse ? sb : sa, slotIdx);
+                            ch->waveform()->notifySeek();
+                        }
+                    }
+                }
+                bubble->close();
+            });
+
+            // Position: centred on the drag midpoint, ABOVE the
+            // SoundView. mapToParent puts coords in the channel's
+            // coordinate space so the bubble floats over the channel
+            // strip without leaking into other channels.
+            bubble->adjustSize();
+            auto *wave = ch->waveform();
+            QWidget *soundView = wave->findChild<QWidget*>(
+                QString(), Qt::FindChildrenRecursively);
+            QRect waveRect = wave->geometry();
+            QPoint topLeftInCh = wave->mapToParent(QPoint(0, 0));
+            int midFracPx = static_cast<int>(
+                ((sa + sb) * 0.5)
+                / qMax(0.001, ch->waveform()->totalLength())
+                * waveRect.width());
+            int x = topLeftInCh.x() + midFracPx - bubble->width() / 2;
+            int y = topLeftInCh.y() - bubble->height() - 4;
+            if (x < 4) x = 4;
+            if (x + bubble->width() > ch->width() - 4)
+                x = ch->width() - bubble->width() - 4;
+            if (y < 4) y = topLeftInCh.y() + waveRect.height() + 4;
+            bubble->move(x, y);
+            bubble->show();
+            bubble->raise();
+            (void)soundView;
         });
     };
     QObject::connect(page, &MainPage::channelAdded, page, [page, wireChannelButtons](int idx){
@@ -964,7 +1150,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             s_lastPlayedCtx[slot] = ctx;
         }, Qt::QueuedConnection);
         QObject::connect(sampler, &Sampler::onStopPlaying, page,
-                         [page, sampler](int slot){
+                         [page, sampler, model](int slot){
             if (slot < 0 || slot >= page->channels().size()) return;
             // Preview shares slot indices but doesn't own the UI.
             if (sampler && sampler->getState(slot) == Sampler::ePLAYING_PREVIEW) return;
@@ -977,6 +1163,21 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             // the synchronous cleanup done in clearRequested would be
             // overwritten right here by the soft replay-ready path.
             if (s_pendingHardClear.remove(slot)) {
+                wave->setPlaying(false);
+                wave->setReplayReady(false);
+                wave->setFilename(QString());
+                wave->clearPlayback();
+                s_lastPlayedCtx.remove(slot);
+                s_slotToBtnIdx.remove(slot);
+                return;
+            }
+
+            // Replay mode is OPTIONAL. OFF = pre-replay-mode behavior:
+            // a stop / end fully wipes the channel back to empty,
+            // identical to clicking the red X. The reload glyph never
+            // appears. PauseAllMode is also gated on this so the
+            // "Replay all" mode never engages.
+            if (model && !model->getReplayModeEnabled()) {
                 wave->setPlaying(false);
                 wave->setReplayReady(false);
                 wave->setFilename(QString());
@@ -1084,6 +1285,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         });
         QObject::connect(ch->fx(), &FxPanel::pitchChanged,
                          [model, sampler, slot, isPrimary, ch](int v){
+            extremeLog("FxPanel::pitchChanged slot=%d val=%d", slot, v);
             if (isPrimary) model->setPitchValue(v);
             if (sampler) {
                 // Match legacy ConfigQt scaling: factor = 3^(v/100).
@@ -1095,6 +1297,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         });
         QObject::connect(ch->fx(), &FxPanel::speedChanged,
                          [model, sampler, slot, isPrimary, ch](int v){
+            extremeLog("FxPanel::speedChanged slot=%d val=%d", slot, v);
             if (isPrimary) model->setSpeedValue(v);
             if (sampler) {
                 float factor = AudioUtils::sliderToPitchFactor(v);
@@ -1105,6 +1308,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         });
         QObject::connect(ch->fx(), &FxPanel::reverbChanged,
                          [model, sampler, slot, isPrimary, ch](int v){
+            extremeLog("FxPanel::reverbChanged slot=%d val=%d", slot, v);
             if (isPrimary) model->setReverbValue(v);
             if (sampler) sampler->setSlotReverbMix(slot, v / 100.0f);
             ch->waveform()->setLiveFx(ch->fx()->pitch(), ch->fx()->speed(), v);
@@ -1241,6 +1445,11 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             if (newFrac < startFrac) newFrac = startFrac;
             if (newFrac > endFrac)   newFrac = endFrac;
             wave->setPlaybackFraction(newFrac);
+            // Stopped-track time label sync: setPlaybackFraction only
+            // paints the cursor — the M:SS readout in the top-right
+            // would stay frozen on the last live position without an
+            // explicit setPosition.
+            wave->setPosition(newFrac * totalLen, totalLen);
         });
         QObject::connect(ch->waveform(), &WaveformPlayer::seekRequested,
                          [sampler, slot, ch](double frac){
@@ -1310,13 +1519,20 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             if (frac < startFrac) frac = startFrac;
             if (frac > endFrac)   frac = endFrac;
             wave->setPlaybackFraction(frac);
+            // Stopped-track time label sync — mirrors the skip handler
+            // above so the M:SS readout follows every cursor placement.
+            const double totalLen = wave->totalLength();
+            if (totalLen > 0.0)
+                wave->setPosition(frac * totalLen, totalLen);
         });
         QObject::connect(ch->waveform(), &WaveformPlayer::loopToggled,
                          [sampler, slot](bool on){
+            extremeLog("WaveformPlayer::loopToggled slot=%d on=%d", slot, on ? 1 : 0);
             if (sampler) sampler->setSlotLoop(slot, on);
         });
         QObject::connect(ch->waveform(), &WaveformPlayer::reverseToggled,
                          [sampler, slot](bool on){
+            extremeLog("WaveformPlayer::reverseToggled slot=%d on=%d", slot, on ? 1 : 0);
             if (sampler) sampler->setSlotReverse(slot, on);
         });
         QObject::connect(ch, &Channel::stateChanged,
@@ -1490,6 +1706,24 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     QObject::connect(page->settingsButton(), &QToolButton::clicked,
                      [page]{ page->settingsWindow()->show(); page->settingsWindow()->raise(); });
 
+    // Main-page rows / cols selectors: bidirectionally bound to the
+    // model. Initial values come from the model; user edits update it
+    // (which in turn fires NOTIFY_SET_ROWS / NOTIFY_SET_COLS, debounced
+    // for grid rebuild). QSignalBlocker keeps the model->spin push
+    // from re-firing the spin->model edit handler.
+    if (auto *rs = page->rowsSpin()) {
+        QSignalBlocker b(rs);
+        rs->setValue(model->getRows());
+    }
+    if (auto *cs = page->colsSpin()) {
+        QSignalBlocker b(cs);
+        cs->setValue(model->getCols());
+    }
+    QObject::connect(page->rowsSpin(), QOverload<int>::of(&QSpinBox::valueChanged),
+                     [model](int v){ model->setRows(v); });
+    QObject::connect(page->colsSpin(), QOverload<int>::of(&QSpinBox::valueChanged),
+                     [model](int v){ model->setCols(v); });
+
     QObject::connect(page->addChannelBtn(), &QPushButton::clicked,
                      page, [page]{
         // Sampler reserves the last slot for previews -> cap MAX_SLOTS-1.
@@ -1523,7 +1757,7 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     enum class PauseAllMode { Idle, Pause, Resume, Replay };
     auto modeProp = std::make_shared<int>(0);
 
-    auto computeMode = [sampler, page]() -> PauseAllMode {
+    auto computeMode = [sampler, page, model]() -> PauseAllMode {
         if (!sampler) return PauseAllMode::Idle;
         bool anyPlaying = false, anyPaused = false;
         const int n = page->channels().size();
@@ -1534,7 +1768,12 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         }
         if (anyPlaying) return PauseAllMode::Pause;
         if (anyPaused)  return PauseAllMode::Resume;
-        if (!s_lastPlayedCtx.isEmpty()) return PauseAllMode::Replay;
+        // Replay mode is OPTIONAL. When OFF, channels are wiped on
+        // stop so s_lastPlayedCtx is always empty for non-active
+        // slots — but defend against any stale entries anyway by
+        // gating the Replay branch on the model flag.
+        if (model && model->getReplayModeEnabled()
+            && !s_lastPlayedCtx.isEmpty()) return PauseAllMode::Replay;
         return PauseAllMode::Idle;
     };
     auto applyMode = [pauseBtn, modeProp](PauseAllMode m){
@@ -1874,6 +2113,12 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 page->channels().at(slot)->waveform()->setSandboxState(s);
         });
         QObject::connect(ch, &Channel::sandboxResetRequested, [sampler, model, page](int slot){
+            extremeLog("sandboxResetRequested slot=%d resetChVol=%d resetChFx=%d resetChFile=%d resetChSbx=%d",
+                       slot,
+                       model->getResetChVolume() ? 1 : 0,
+                       model->getResetChFx()     ? 1 : 0,
+                       model->getResetChFile()   ? 1 : 0,
+                       model->getResetChSandbox()? 1 : 0);
             if (sampler) sampler->clearSlotSandbox(slot);
             if (slot >= 0 && slot < page->channels().size()) {
                 auto *rch = page->channels().at(slot);
@@ -1881,7 +2126,29 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 ChannelState def;
                 if (model->getResetChVolume()) { cur.volumeLocal = def.volumeLocal; cur.volumeRemote = def.volumeRemote; }
                 if (model->getResetChFx())     { cur.pitch = def.pitch; cur.speed = def.speed; cur.reverb = def.reverb; cur.fxSync = def.fxSync; }
-                if (model->getResetChFile())    { cur.filename.clear(); }
+                // When the "Stop playback + clear loaded audio" checkbox is on
+                // the per-channel reset must mirror the X-button cleanup
+                // (filename wipe + waveform reset + replay glyph gone +
+                // slot bookkeeping cleared). Without these explicit
+                // calls the slot kept playing the old sound because
+                // applyState() only restores widget state — it does not
+                // talk to the sampler. checkbox OFF = old behaviour
+                // (filename retained, audio keeps playing).
+                if (model->getResetChFile()) {
+                    extremeLog("  -> hard wipe: stopPlayback + clear file slot=%d", slot);
+                    s_pendingHardClear.insert(slot);
+                    if (sampler) sampler->stopPlayback(slot);
+                    cur.filename.clear();
+                    auto *wave = rch->waveform();
+                    if (wave) {
+                        wave->setPlaying(false);
+                        wave->setReplayReady(false);
+                        wave->setFilename(QString());
+                        wave->clearPlayback();
+                    }
+                    s_lastPlayedCtx.remove(slot);
+                    s_slotToBtnIdx.remove(slot);
+                }
                 cur.sandbox = SandboxState();
                 rch->applyState(cur);
             }

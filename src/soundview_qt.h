@@ -73,6 +73,10 @@ signals:
 	void cropClearStartRequested();
 	void cropClearEndRequested();
 	void cropClearAllRequested();
+	// Right-button drag selected a loop area. startSec / endSec are
+	// already clamped to [0, totalLength] and ordered (start < end).
+	// Receiver sets the crop markers AND turns loop ON.
+	void loopAreaSelected(double startSec, double endSec);
 
 protected:
 	void paintEvent(QPaintEvent *evt);
@@ -182,6 +186,18 @@ private:
 	// it 60 times/second — the cursor visibly flickered between the
 	// finger and the audio position. -1.0 = inactive.
 	double         m_dragPreview = -1.0;
+
+	// Right-button drag for loop-area selection. m_rightDragging is true
+	// while the right mouse button is held down. m_rightDragStart and
+	// m_rightDragEnd are fractions (0..1). Drag ≥ kRightDragMinPx pixels
+	// converts the release into a loop-area emit; below threshold it
+	// falls through to the normal contextMenu (existing crop editor).
+	bool           m_rightDragging          = false;
+	double         m_rightDragStart         = -1.0;
+	double         m_rightDragEnd           = -1.0;
+	int            m_rightDragStartPx       = 0;
+	bool           m_suppressNextContextMenu = false;
+	static constexpr int kRightDragMinPx = 6;
 };
 
 #endif // rpsbsrc__soundview_qt_H__

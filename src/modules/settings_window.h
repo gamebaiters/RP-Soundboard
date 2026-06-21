@@ -65,6 +65,9 @@ public slots:
     void setGlobalFxEnabled(bool on);
     void setHideWaveform(bool on);
     void setLogsEnabled(bool on);
+    void setExtremeLogging(bool on);
+    void setRightDragLoopEnabled(bool on);
+    void setReplayModeEnabled(bool on);
     void setAudioSandboxEnabled(bool on);
     void setAudioMeterVisible(bool on);
     void setAudioExportEnabled(bool on);
@@ -98,6 +101,9 @@ signals:
     void globalFxEnabledChanged(bool);
     void hideWaveformChanged(bool);
     void logsEnabledChanged(bool);
+    void extremeLoggingChanged(bool);
+    void rightDragLoopEnabledChanged(bool);
+    void replayModeEnabledChanged(bool);
     // User clicked the hidden "Show real-time log" button in the
     // Logging section. Forwarded by the wiring layer to sb_openLogViewer.
     void showLogViewerRequested();
@@ -148,6 +154,9 @@ private:
     QCheckBox   *m_globalFx;
     QCheckBox   *m_hideWaveform;
     QCheckBox   *m_logsEnabled;
+    QCheckBox   *m_extremeLogging = nullptr;
+    QCheckBox   *m_rightDragLoop  = nullptr;
+    QCheckBox   *m_replayMode     = nullptr;
     // Discrete button next to the debug-log checkbox that opens the
     // in-app real-time log viewer. Intentionally low-key (small, plain
     // text label) - it's an advanced diagnostic, not a primary control.

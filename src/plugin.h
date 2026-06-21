@@ -40,6 +40,12 @@ extern int g_rpsbLogsEnabled;
  * Inverse of mute-myself. Toggled from MainPage's bottom bar. */
 extern int g_rpsbPreviewOnly;
 
+/* Extreme logging: when 1, the audio + GUI hot paths emit per-frame
+ * traces (seek targets, loop transitions, slider deltas, DSP block
+ * boundaries). Default 0 — Off has zero overhead because the EXTRA_LOG
+ * macro short-circuits before formatting. */
+extern int g_rpsbExtremeLogging;
+
 /* Required functions */
 PLUGINS_EXPORTDLL const char* ts3plugin_name();
 PLUGINS_EXPORTDLL const char* ts3plugin_version();

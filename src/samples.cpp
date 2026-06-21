@@ -138,12 +138,14 @@ void Sampler::setSlotLoop(int slot, bool on)
 {
 	if (slot < 0 || slot >= MAX_SLOTS) return;
 	std::lock_guard<std::mutex> Lock(m_mutex);
+	extremeLog("Sampler::setSlotLoop slot=%d on=%d", slot, on ? 1 : 0);
 	m_slots[slot].loop = on;
 }
 
 void Sampler::setSlotReverse(int slot, bool on)
 {
 	if (slot < 0 || slot >= MAX_SLOTS) return;
+	extremeLog("Sampler::setSlotReverse slot=%d on=%d", slot, on ? 1 : 0);
 
 	// Phase 1 — snapshot the parameters the worker needs under a
 	// micro-lock. NO heavy work (no close, no open, no FFmpeg) happens
@@ -179,8 +181,21 @@ void Sampler::setSlotReverse(int slot, bool on)
 		lastSound   = s.lastSound;
 		pitchBase   = (s.lastSlotPitchFactor > 0.01f)
 			? s.lastSlotPitchFactor : m_pitchFactor;
-		speedFactor = m_speedFactor;
-		reverbMix   = m_reverbMix;
+		// Per-slot snapshot of speed / reverb. The previous version
+		// read m_speedFactor / m_reverbMix (the GLOBAL factors), which
+		// reset to 1.0 / 0.0 the moment the user touched any other
+		// channel's FX sliders — so toggling reverse off "stole" the
+		// channel's speed and dropped it to identity even though the
+		// FxPanel slider still showed the user's chosen value. Read
+		// from the live InputFile (and the per-slot fxReverbWet field)
+		// so the new file inherits the slot's CURRENT effect chain.
+		if (s.inputFile) {
+			speedFactor = s.inputFile->getSpeedFactor();
+			if (speedFactor <= 0.0f) speedFactor = 1.0f;
+		} else {
+			speedFactor = m_speedFactor;
+		}
+		reverbMix = (s.fxReverbWet > 0.0f) ? s.fxReverbWet : m_reverbMix;
 
 		// Tell any in-flight worker to give up — it shares the OLD
 		// cancel token, will see the flag flip on its next 64-packet
@@ -588,6 +603,39 @@ void Sampler::init()
 //---------------------------------------------------------------
 // Purpose:
 //---------------------------------------------------------------
+// Bounded thread join. The cooperative cancel paths above are
+// best-effort: if a worker is stuck deep inside FFmpeg (open / seek
+// scan / decode of a malformed packet), no flag can interrupt that
+// call before it returns. Letting std::thread::join wait
+// indefinitely is what produced the zombie TS3.exe after window
+// close — the DLL unload sat behind the worker, the user force-
+// killed TS3, and Windows kept the process around as half-dead
+// (blocking the next TS3 install / update because the executable
+// stayed locked). Bound the wait; on timeout, TerminateThread the
+// worker and detach the std::thread so DLL unload can proceed.
+// TerminateThread is hostile (leaks the worker's stack + resources)
+// but the alternative is keeping the process alive forever, which
+// is worse — and we're seconds away from FreeLibrary anyway.
+static void joinThreadBounded(std::thread &t, int timeoutMs)
+{
+	if (!t.joinable()) return;
+#ifdef _WIN32
+	HANDLE h = (HANDLE)t.native_handle();
+	DWORD rc = WaitForSingleObject(h, (DWORD)timeoutMs);
+	if (rc == WAIT_OBJECT_0) {
+		t.join();
+	} else {
+		TerminateThread(h, 0);
+		t.detach();
+	}
+#else
+	// POSIX: no portable timed-join in std::thread. Best effort is to
+	// just join — the cooperative cancel flags above should make this
+	// quick on every supported platform anyway.
+	t.join();
+#endif
+}
+
 void Sampler::shutdown()
 {
 	// Flip the global shutdown flag FIRST (no lock). Any reverse
@@ -604,8 +652,7 @@ void Sampler::shutdown()
 	// teardown below.
 	m_seekStop.store(true, std::memory_order_release);
 	m_seekCv.notify_all();
-	if (m_seekWorker.joinable())
-		m_seekWorker.join();
+	joinThreadBounded(m_seekWorker, 500);
 
 	// Signal every in-flight worker to cancel its decode loop, then
 	// join them OUTSIDE m_mutex. Joining inside the lock would
@@ -615,15 +662,22 @@ void Sampler::shutdown()
 		if (slot.reverseWorkerCancel)
 			slot.reverseWorkerCancel->store(true, std::memory_order_relaxed);
 	}
+	// Bounded waits for the reverse-toggle workers. These can sit deep
+	// inside FFmpeg open()/seek() (no cancel hook there) — without a
+	// timeout, sb_kill blocks the DLL unload until each open returns,
+	// which on a long audio file is multiple seconds. Multiply by the
+	// retired-workers list and TS3 sits zombied long enough that the
+	// user closes the client, force-kills the orphan process, and
+	// Windows then blocks the next plugin install / update because
+	// the executable is still locked.
 	for (int i = 0; i < MAX_SLOTS; i++) {
 		PlaybackSlot &slot = m_slots[i];
-		if (slot.reverseWorker.joinable())
-			slot.reverseWorker.join();
+		joinThreadBounded(slot.reverseWorker, 300);
 	}
 	{
 		std::lock_guard<std::mutex> rl(m_retiredMutex);
 		for (auto &t : m_retiredWorkers)
-			if (t.joinable()) t.join();
+			joinThreadBounded(t, 200);
 		m_retiredWorkers.clear();
 	}
 
@@ -652,8 +706,14 @@ void Sampler::shutdown()
 		slot.producerThread.setSource(NULL);  // wakes cv
 		slot.producerThread.stop(false);      // sets m_stop, NO join
 	}
+	// Bounded producer joins. singleBufferFill checks m_stop between
+	// readSamples calls so the producer usually exits within one
+	// FFmpeg packet decode (~5-50 ms). Pathological cases (codec
+	// frozen on a malformed packet) are bounded at 250 ms per slot —
+	// the parallel signal above means total wait is max(slot), not
+	// sum, so 250 ms ceiling holds regardless of slot count.
 	for (int i = 0; i < MAX_SLOTS; i++) {
-		m_slots[i].producerThread.joinIfRunning();
+		m_slots[i].producerThread.joinIfRunningBounded(250);
 	}
 
 	std::lock_guard<std::mutex> Lock(m_mutex);
@@ -948,7 +1008,20 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 				// drifts because the source of truth is "how much
 				// audio was just sent out", not a decoder-internal
 				// timestamp that can be off-by-batch.
-				double sf = (double)slot.inputFile->getSpeedFactor();
+				//
+				// IMPORTANT: in streaming-reverse mode the LIVE
+				// m_speedFactor lags the audio actually being heard
+				// by one chunk worth — the chunk currently feeding
+				// the reader was decoded at the speed value set
+				// BEFORE the most recent slider tick. Reading the
+				// LIVE speed (via getSpeedFactor) made the cursor
+				// race ahead of audio during heavy drag (post-drag
+				// the drift was capped permanently by the monotonic
+				// rate limit below). getCurrentReverseChunkSpeed
+				// returns the speedAtBuild of the chunk currently
+				// being drained so descent rate matches what the
+				// user is hearing.
+				double sf = (double)slot.inputFile->getCurrentReverseChunkSpeed();
 				if (sf <= 0.0) sf = 1.0;
 				if (slot.posCacheValid) {
 					double prev = slot.cachedPositionSec.load(
@@ -1029,6 +1102,9 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 			if (canEnd)
 			{
 				if (slot.loop) {
+					extremeLog("Sampler::loopRestart slot=%d reverse=%d cropStart=%.3f cropEnd=%.3f",
+					           s, slot.channelReverse ? 1 : 0,
+					           slot.cropStart, slot.cropEnd);
 					// Per-playback random pitch jitter. Reads the LIVE
 					// SandboxState + gates on the sandbox master switch
 					// so toggling master off stops the jitter on the
@@ -1177,6 +1253,39 @@ int Sampler::fetchOutputSamples(short *samples, int count, int channels, const u
 
 		if (written > totalWritten)
 			totalWritten = written;
+
+		// Preview slots never see fetchInputSamples (it gates on ePLAYING
+		// / ePAUSED only), so the GUI position cache would never refresh
+		// for previews -> cursor frozen at 0. Refresh it here for the
+		// preview case so the ButtonAdvancedPanel preview cursor walks
+		// the waveform in lock-step with audio. Same rate-limit /
+		// monotonic guard as fetchInputSamples.
+		if (st == ePLAYING_PREVIEW && slot.inputFile) {
+			double lenSec = slot.inputFile->getLength();
+			double decoderPos = slot.inputFile->getPosition();
+			double sf = (double)slot.inputFile->getSpeedFactor();
+			if (sf <= 0.0) sf = 1.0;
+			int availSamples = 0;
+			{
+				SampleBuffer::Lock sblp(slot.sbPlayback.getMutex());
+				availSamples = slot.sbPlayback.avail();
+			}
+			double bufferedSec = availSamples / 48000.0 * sf;
+			double posSec = decoderPos - bufferedSec;
+			if (posSec < 0.0) posSec = 0.0;
+			double prev = slot.cachedPositionSec.load(std::memory_order_relaxed);
+			double accepted = posSec;
+			if (slot.posCacheValid) {
+				constexpr double kMaxPerCycle = 0.20;
+				if (accepted < prev) accepted = prev;
+				else if (accepted > prev + kMaxPerCycle)
+					accepted = prev + kMaxPerCycle;
+			} else {
+				slot.posCacheValid = true;
+			}
+			slot.cachedPositionSec.store(accepted, std::memory_order_relaxed);
+			slot.cachedLengthSec.store(lenSec, std::memory_order_relaxed);
+		}
 
 		// Check if this preview slot's file is done
 		if (st == ePLAYING_PREVIEW && slot.inputFile && slot.inputFile->done())
@@ -1330,6 +1439,7 @@ void Sampler::setSlotPitchFactor(int slot, float factor)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
 	if (slot < 0 || slot >= MAX_SLOTS) return;
+	extremeLog("Sampler::setSlotPitchFactor slot=%d factor=%.4f", slot, factor);
 	m_slots[slot].lastSlotPitchFactor = factor;
 	if (m_slots[slot].inputFile)
 		m_slots[slot].inputFile->setPitchFactor(factor);
@@ -1339,6 +1449,7 @@ void Sampler::setSlotPitchFactor(int slot, float factor)
 void Sampler::setSlotSpeedFactor(int slot, float factor)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
+	extremeLog("Sampler::setSlotSpeedFactor slot=%d factor=%.4f", slot, factor);
 	if (slot >= 0 && slot < MAX_SLOTS && m_slots[slot].inputFile)
 		m_slots[slot].inputFile->setSpeedFactor(factor);
 }
@@ -1348,6 +1459,7 @@ void Sampler::setSlotReverbMix(int slot, float mix)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
 	if (slot < 0 || slot >= MAX_SLOTS) return;
+	extremeLog("Sampler::setSlotReverbMix slot=%d mix=%.4f", slot, mix);
 	auto &s = m_slots[slot];
 	s.fxReverbWet = mix;
 	if (s.dsp) {
@@ -1985,6 +2097,8 @@ void Sampler::seek(double seconds, int slot)
 	// every call overwrites pendingSeekSec; whatever value the worker
 	// reads when it next iterates is the committed target.
 	s.pendingSeekSec.store(seconds, std::memory_order_release);
+	extremeLog("Sampler::seek slot=%d target=%.3fs cropStart=%.3f cropEnd=%.3f",
+	           slot, seconds, s.cropStart, s.cropEnd);
 	startSeekWorker();
 	m_seekCv.notify_all();
 }

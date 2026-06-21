@@ -2398,6 +2398,22 @@ Connect to a server to use the soundboard.</source>
 
 Connettiti a un server per usare la soundboard.</translation>
     </message>
+    <message>
+        <source>Number of button rows in the grid</source>
+        <translation>Numero di righe di pulsanti nella griglia</translation>
+    </message>
+    <message>
+        <source>Number of button columns in the grid</source>
+        <translation>Numero di colonne di pulsanti nella griglia</translation>
+    </message>
+    <message>
+        <source>Rows:</source>
+        <translation>Righe:</translation>
+    </message>
+    <message>
+        <source>Cols:</source>
+        <translation>Colonne:</translation>
+    </message>
 </context>
 <context>
     <name>OnboardingOverlay</name>
@@ -2657,6 +2673,18 @@ Cancella l&apos;elenco locale delle scorciatoie. Il profilo di TeamSpeak conserv
         <source>Export audio with DSP</source>
         <translation>Esporta audio con DSP</translation>
     </message>
+    <message>
+        <source>Create loop area %1 → %2 (%3 s)?</source>
+        <translation>Crea area di loop %1 → %2 (%3 s)?</translation>
+    </message>
+    <message>
+        <source>Yes</source>
+        <translation>Sì</translation>
+    </message>
+    <message>
+        <source>No</source>
+        <translation>No</translation>
+    </message>
 </context>
 <context>
     <name>ResetChannelsBtn</name>
@@ -2873,6 +2901,28 @@ Vengono disegnati solo i punti effettivamente impostati.</translation>
         <location filename="../modules/settings_window.cpp" line="97"/>
         <source>Loaded file / playback position</source>
         <translation>File caricato / posizione riprod.</translation>
+    </message>
+    <message>
+        <source>Stop playback + clear loaded audio</source>
+        <translation>Ferma riproduzione + svuota audio caricato</translation>
+    </message>
+    <message>
+        <source>Replay mode (keep file + cursor after stop / end, reload glyph to replay)</source>
+        <translation>Modalità replay (mantieni file + cursore dopo stop / fine, icona ricarica per rigiocare)</translation>
+    </message>
+    <message>
+        <source>When ON, a channel that finished or was stopped keeps its
+filename + waveform + crop markers; the play button glyph
+flips to a reload icon and one click replays from the
+parked cursor position. When OFF, finishing / stopping a
+sound fully wipes the channel back to the empty state
+(identical to clicking the red X next to the filename).</source>
+        <translation>Quando ON, un canale che ha finito o è stato fermato mantiene il
+suo file + waveform + marcatori di crop; l'icona del pulsante
+play diventa l'icona ricarica e un clic rigioca dalla
+posizione del cursore. Quando OFF, finire / fermare un suono
+ripulisce completamente il canale allo stato vuoto (identico
+al clic sulla X rossa accanto al nome del file).</translation>
     </message>
     <message>
         <location filename="../modules/settings_window.cpp" line="98"/>
@@ -3190,6 +3240,32 @@ Da OFF, viene sempre mostrata la forma d&apos;onda grezza.</translation>
         <location filename="../modules/settings_window.cpp" line="471"/>
         <source>Import / Export</source>
         <translation>Importa / Esporta</translation>
+    </message>
+    <message>
+        <source>Extreme logging (verbose, every value + calc + action)</source>
+        <translation>Logging estremo (dettagliato, ogni valore + calcolo + azione)</translation>
+    </message>
+    <message>
+        <source>Verbose tracing: every slider tick, every seek, every loop
+transition, every DSP block boundary is logged. Off has zero
+overhead. Lines are tagged with [XLOG] so they are easy to grep.</source>
+        <translation>Tracciamento dettagliato: ogni movimento di slider, ogni seek, ogni
+transizione di loop, ogni confine di blocco DSP viene loggato. Disattivato
+ha overhead zero. Le righe sono taggate [XLOG] per facilità di ricerca.</translation>
+    </message>
+    <message>
+        <source>Right-click drag on the waveform proposes a loop area</source>
+        <translation>Trascinamento col tasto destro sulla waveform propone un&apos;area di loop</translation>
+    </message>
+    <message>
+        <source>Hold the right mouse button on a waveform and drag to propose
+a loop area. A confirmation bubble appears above the cursor;
+accept it to place Start + End markers and turn Loop ON.
+Single right-clicks still open the crop context menu.</source>
+        <translation>Tieni premuto il tasto destro sulla waveform e trascina per proporre
+un&apos;area di loop. Sopra il cursore appare un riquadro di conferma;
+accettalo per piazzare i marker Inizio + Fine e attivare Loop.
+Il click destro singolo apre comunque il menu contestuale di taglio.</translation>
     </message>
 </context>
 <context>

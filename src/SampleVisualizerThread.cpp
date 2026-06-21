@@ -9,6 +9,12 @@
 
 
 #include <algorithm>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #include "inputfile.h"
 #include "SampleVisualizerThread.h"
 #include "SampleBuffer.h"
@@ -142,6 +148,33 @@ void SampleVisualizerThread::stop( bool wait /*= true*/ )
 	m_cv.notify_all();
 	if(wait && m_thread.joinable())
 		m_thread.join();
+}
+
+
+//---------------------------------------------------------------
+// Purpose: shutdown-only bounded variant. The thread checks m_stop
+// between batches but the in-flight FFmpeg readSamples can take
+// 100s of ms on a long file. Cap the wait so DLL unload is not
+// held hostage; TerminateThread is the lesser evil compared to a
+// zombie process.
+//---------------------------------------------------------------
+void SampleVisualizerThread::stopBounded(int timeoutMs)
+{
+	m_stop.store(true, std::memory_order_release);
+	m_cv.notify_all();
+	if (!m_thread.joinable()) return;
+#ifdef _WIN32
+	HANDLE h = (HANDLE)m_thread.native_handle();
+	DWORD rc = WaitForSingleObject(h, (DWORD)timeoutMs);
+	if (rc == WAIT_OBJECT_0) {
+		m_thread.join();
+	} else {
+		TerminateThread(h, 0);
+		m_thread.detach();
+	}
+#else
+	m_thread.join();
+#endif
 }
 
 

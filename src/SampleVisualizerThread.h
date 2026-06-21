@@ -36,6 +36,12 @@ public:
 	~SampleVisualizerThread();
 	void startAnalysis(const char *filename, size_t numBins);
 	void stop(bool wait = true);
+	// Shutdown-only bounded join. Signals stop + waits up to
+	// timeoutMs; force-terminates + detaches if the worker hasn't
+	// exited (e.g. stuck deep inside a long FFmpeg decode). Used by
+	// ~SoundView during sb_kill — prevents the per-channel visualiser
+	// from blocking DLL unload and leaving a zombie TS3.exe behind.
+	void stopBounded(int timeoutMs);
 	bool isRunning() const;
 	size_t getBinsProcessed() const;
 	

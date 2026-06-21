@@ -74,6 +74,7 @@ static char g_ts3ConfigPath[PATH_BUFSIZE] = {0};
  * value into this on plugin init and on every settings toggle. */
 int g_rpsbLogsEnabled = 0;
 int g_rpsbPreviewOnly = 0;
+int g_rpsbExtremeLogging = 0;
 
 const char *getTs3ConfigPath()
 {

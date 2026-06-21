@@ -46,6 +46,8 @@ public:
     class QPushButton *restoreMacroBtn()  { return m_restoreMacroBtn; }
     QToolButton       *profileButton(int i) { return (i >= 0 && i < 4) ? m_profileButtons[i] : nullptr; }
     QButtonGroup      *profileGroup()      { return m_profileGroup; }
+    class QSpinBox    *rowsSpin()         { return m_rowsSpin; }
+    class QSpinBox    *colsSpin()         { return m_colsSpin; }
 
     QVector<Channel *> channels() const   { return m_channels; }
     Channel           *channelAt(int idx) const;
@@ -112,6 +114,13 @@ private:
 
     // Macro restore
     class QPushButton  *m_restoreMacroBtn = nullptr;
+
+    // Rows / columns selectors — moved out of SettingsWindow so users
+    // can resize the grid without opening a second dialog. Two
+    // compact QSpinBoxes sit next to the Settings button on the
+    // bottom row; the wiring layer mirrors them onto ConfigModel.
+    class QSpinBox     *m_rowsSpin = nullptr;
+    class QSpinBox     *m_colsSpin = nullptr;
 
     // Preview-only checkbox: when checked, label fades smoothly
     // between two warning colours so the user always sees at a glance

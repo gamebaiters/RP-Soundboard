@@ -78,10 +78,14 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     // the strip; 26x26 with a 20 px icon is unmistakable. Background
     // tint is visible AT REST (not only on hover) so the user spots
     // the X before they have to fish for it.
-    m_clearBtn->setIconSize(QSize(20, 20));
+    // Matches the other transport buttons in height + adds breathing
+    // room around the X glyph so it lines up visually with the back/fwd
+    // buttons instead of looking pinched against the filename label.
+    m_clearBtn->setIconSize(QSize(18, 18));
     m_clearBtn->setFlat(true);
     m_clearBtn->setCursor(Qt::PointingHandCursor);
-    m_clearBtn->setFixedSize(26, 26);
+    m_clearBtn->setFixedSize(28, 28);
+    m_clearBtn->setMinimumHeight(28);
     // NoFocus: clicking the X must not steal keyboard focus from the
     // surrounding row. Without this the button took focus on press;
     // when it then hid itself a frame later (no filename + no replay
@@ -95,11 +99,18 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
         // At-rest: soft red tint + rounded shape so the user sees the
         // remove affordance even without hovering. Hover bumps the
         // saturation; pressed deepens it.
+        //
+        // Padding 3 px on all sides centres the 18 px icon inside the
+        // 28 px button consistently with the surrounding transport
+        // buttons (which inherit Qt's default 4 px padding). The
+        // earlier 0 padding made the icon kiss the border and the
+        // overall control read as "pinched" next to the filename
+        // label.
         "QPushButton#GBClearFileBtn {"
         "  background: rgba(220, 60, 60, 70);"
         "  border: 1px solid rgba(255, 110, 110, 130);"
-        "  border-radius: 13px;"
-        "  padding: 0px; margin: 0px;"
+        "  border-radius: 14px;"
+        "  padding: 3px; margin: 0px;"
         "}"
         "QPushButton#GBClearFileBtn:hover {"
         "  background: rgba(255, 80, 80, 150);"
@@ -165,6 +176,7 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     transport->addWidget(m_reverse);
     transport->addSpacing(8);
     transport->addWidget(m_clearBtn);
+    transport->addSpacing(6);   // breathing room before the filename label
     transport->addWidget(m_filenameLabel, 1);
     transport->addWidget(m_timeLabel);
     transport->addWidget(new HelpBubble(tr(
@@ -205,6 +217,8 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
             this,   &WaveformPlayer::cropClearEndRequested);
     connect(m_wave, &SoundView::cropClearAllRequested,
             this,   &WaveformPlayer::cropClearAllRequested);
+    connect(m_wave, &SoundView::loopAreaSelected,
+            this,   &WaveformPlayer::loopAreaSelected);
 }
 
 QString WaveformPlayer::filename() const  { return m_fullPath; }

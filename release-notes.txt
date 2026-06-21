@@ -1,3 +1,126 @@
+GameBaiters Soundboard v2.2.14
+==============================
+
+UX + reverse-mode + replay-mode-optional release on top of v2.2.13.
+Closes the long-standing "reverse mode acts as if audio ended after
+many speed/pitch changes" bug, makes the replay-from-cursor UX
+opt-in via a settings toggle, and ships ten focused bug fixes the
+v2.2.13 testing pass uncovered.
+
+Highlights
+----------
+
+* Replay-from-cursor mode is now OPTIONAL via Settings. New
+  checkbox "Replay mode (keep file + cursor after stop / end,
+  reload glyph to replay)" - default ON so existing users see no
+  behavior change. When OFF, finishing or stopping a sound fully
+  wipes the channel back to the empty state (identical to clicking
+  the red X next to the filename) - the pre-replay-mode behavior
+  is fully restored. The "Replay all" pause-button mode is gated
+  on the same flag so it never engages when replay is disabled.
+
+* Reverse mode + speed/pitch persistence bug fixed for real. The
+  chunk-worker's per-chunk speedAtBuild used to be captured OUTSIDE
+  the codec lock, then read AGAIN inside decodeChunkForward - a
+  slider tick between the two reads gave the chunk a wrong speed
+  label while the audio was decoded at another factor. Cursor /
+  position math then drifted in proportion to the inter-read speed
+  delta; at slow speeds (factor < 1.0) the delta was a large
+  fraction of the factor, so the natural-end check could fire
+  while the audio was still mid-file. Fixed by stamping the
+  IN-decode speed value back to the caller via an out-param so
+  speedAtBuild always matches the atempo factor actually used.
+
+* Reverse-mode codec recovery hardened end-to-end. buildFilterGraph
+  early-error paths now always free the partial graph + null the
+  buffersrc / buffersink contexts so leaked partial state can no
+  longer cascade across many heavy speed/pitch rebuilds. The
+  chunk-worker's hard-failure cap was raised 20 -> 60 retries
+  (~9 sec recovery window vs 3 sec), and on cap reach the worker
+  now THROTTLED auto-retries (1 sec wait, then retry) instead of
+  latching the slot as ended or parking indefinitely. The whole
+  cascade - long drag -> flaky codec -> dead audio - cannot
+  terminate the slot anymore.
+
+* Reverse-cursor descent rate now matches the audio actually
+  playing. fetchInputSamples reads the chunk's actual speedAtBuild
+  via a new getCurrentReverseChunkSpeed() InputFile method instead
+  of the live m_speedFactor; the cursor stays phase-locked to the
+  audible head during heavy drag, where previously the rate-limit
+  clamp locked the post-drag drift in place permanently.
+
+* TS3 zombie-process-on-close fix. Several Sampler shutdown joins
+  were unbounded - if a producer thread, reverse worker, retired
+  worker, or visualizer worker was deep inside an FFmpeg call the
+  DLL unload could block indefinitely and leave the TS3 process
+  alive after the window closed (auto-updater then refused to run).
+  Each join is now bounded: 500 ms (seek worker), 300 ms / slot
+  (reverse worker), 250 ms (producer), 200 ms (visualizer + retired
+  workers). On timeout the worker is Win32-TerminateThread'd +
+  detached so DLL unload always completes.
+
+UX bug-fix sweep
+----------------
+
+* Preview cursor no longer freezes. The position cache is now also
+  refreshed in fetchOutputSamples for ePLAYING_PREVIEW slots so
+  ButtonAdvancedPanel previews walk the waveform.
+
+* Right-click drag on the waveform proposes a loop area via an
+  INLINE confirm bubble (positioned above the cursor; Sì / No
+  buttons; 8 s auto-dismiss). The feature is OPTIONAL - new
+  "Right-click drag on the waveform proposes a loop area" checkbox
+  in Settings (default OFF). When a loop range is committed on a
+  channel that is currently playing, the cursor force-moves to
+  the loop start (forward) or end (reverse) if it sits outside
+  the new range; if already inside, playback continues to the
+  end naturally.
+
+* New "Extreme logging" debug mode (verbose every value + calc +
+  action). Tagged [XLOG] in the debug log, gated by a static
+  C-linkage flag so the audio thread pays nothing when off.
+
+* Drag tooltip on the waveform shows the hovered timestamp
+  (M:SS.mmm) in a small pill while dragging.
+
+* Channel reset button: existing "stop + clear audio" toggle
+  renamed from the unclear "Loaded file / playback position" to
+  "Stop playback + clear loaded audio". Extreme-log entry added
+  to the handler so the configured behavior can be verified from
+  the debug log. Default is still ON.
+
+* Rows / columns spin-boxes moved next to the Settings button on
+  the main page (were previously buried in the Settings window).
+  Bidirectional sync with the model + the settings window kept.
+
+* Reverse + speed regression fixed (separate from the chunk-speed
+  bug): setSlotReverse used the GLOBAL m_speedFactor / m_reverbMix
+  when re-spawning the input file, so toggling reverse OFF on a
+  channel that had a custom per-slot speed snapped it back to 1.0
+  the moment any other channel touched its FX sliders. Reads the
+  live per-slot InputFile speed and the per-slot fxReverbWet
+  instead.
+
+* Loop + reverse infinite-spin fix. Public seek() on a streaming-
+  reverse InputFile now also clears m_chunkFileEnded; the loop
+  branch in Sampler::fetchInputSamples could otherwise observe
+  done() = true for the few ms between seek call and worker reach
+  of its restart branch, re-fire the loop branch, and enter a
+  tight CPU spin.
+
+Italian translations
+--------------------
+
+* Replay mode checkbox + help bubble.
+* Stop-playback-clear-audio rename.
+* Right-drag loop checkbox + bubble strings (Sì / No, area selected,
+  start/end markers).
+* Extreme logging checkbox tooltip.
+* Rows / cols spin-box labels on the main page.
+
+Total: 623 finished, 0 unfinished.
+
+
 GameBaiters Soundboard v2.2.13
 ==============================
 

@@ -55,6 +55,9 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     , m_globalFx(new QCheckBox(tr("Enable custom FX (pitch / speed / reverb)"), this))
     , m_hideWaveform(new QCheckBox(tr("Hide waveform in channels (compact view)"), this))
     , m_logsEnabled(new QCheckBox(tr("Write debug log file"), this))
+    , m_extremeLogging(new QCheckBox(tr("Extreme logging (verbose, every value + calc + action)"), this))
+    , m_rightDragLoop(new QCheckBox(tr("Right-click drag on the waveform proposes a loop area"), this))
+    , m_replayMode(new QCheckBox(tr("Replay mode (keep file + cursor after stop / end, reload glyph to replay)"), this))
     , m_sandboxEnabled(new QCheckBox(tr("Enable audio sandbox (per-channel HRTF / EQ / reverb)"), this))
     , m_meterVisible(new QCheckBox(tr("Show audio meter on each channel"), this))
     , m_exportEnabled(new QCheckBox(tr("Show export button on each channel"), this))
@@ -96,7 +99,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     , m_cropMarkers(new QCheckBox(tr("Show crop start/end markers on the waveform"), this))
     , m_resetChVolume(new QCheckBox(tr("Volume"), this))
     , m_resetChFx(new QCheckBox(tr("Pitch / speed / reverb"), this))
-    , m_resetChFile(new QCheckBox(tr("Loaded file / playback position"), this))
+    , m_resetChFile(new QCheckBox(tr("Stop playback + clear loaded audio"), this))
     , m_resetChSandbox(new QCheckBox(tr("Audio sandbox settings"), this))
     , m_resetAllRemoveExtra(new QCheckBox(tr("Remove extra channels"), this))
     , m_resetAllVolume(new QCheckBox(tr("Volume"), this))
@@ -208,11 +211,30 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         "When ON, a sound that has a per-cell crop start and/or end point\n"
         "shows coloured markers on the waveform at those positions.\n"
         "Only the points that are actually set are drawn."), this));
+    channelsLay->addLayout(checkRow(m_rightDragLoop, tr(
+        "Hold the right mouse button on a waveform and drag to propose\n"
+        "a loop area. A confirmation bubble appears above the cursor;\n"
+        "accept it to place Start + End markers and turn Loop ON.\n"
+        "Single right-clicks still open the crop context menu."), this));
+    channelsLay->addLayout(checkRow(m_replayMode, tr(
+        "When ON, a channel that finished or was stopped keeps its\n"
+        "filename + waveform + crop markers; the play button glyph\n"
+        "flips to a reload icon and one click replays from the\n"
+        "parked cursor position. When OFF, finishing / stopping a\n"
+        "sound fully wipes the channel back to the empty state\n"
+        "(identical to clicking the red X next to the filename)."), this));
 
     // ============== Button grid section ==============
+    // Spinboxes moved to MainPage's bottom row. The QFormLayout below
+    // is built but not added to the body — the m_rows / m_cols widgets
+    // stay alive (parented to this SettingsWindow) so setRows/setCols
+    // setters keep working as a back-compat API for import / profile
+    // restore.
     auto *gridLay = new QFormLayout;
     gridLay->addRow(tr("Rows"), m_rows);
     gridLay->addRow(tr("Columns"), m_cols);
+    m_rows->hide();
+    m_cols->hide();
 
     // ============== Hotkeys section ==============
     auto *hotkeyLay = new QVBoxLayout;
@@ -233,6 +255,10 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     auto *logLay = new QVBoxLayout;
     logLay->addLayout(checkRow(m_logsEnabled, tr(
         "Writes a debug log file (rpsb_debug.log) inside your TeamSpeak config folder."), this));
+    logLay->addLayout(checkRow(m_extremeLogging, tr(
+        "Verbose tracing: every slider tick, every seek, every loop\n"
+        "transition, every DSP block boundary is logged. Off has zero\n"
+        "overhead. Lines are tagged with [XLOG] so they are easy to grep."), this));
     // Hidden-by-design real-time log viewer button. Plain link-style so
     // it does not draw a casual user's eye - this is an advanced
     // diagnostic surface. When the user enables "Write debug log file"
@@ -529,7 +555,12 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     body->addWidget(makeSection(tr("General"),                        generalLay,  this, "general_v2"));
     body->addWidget(makeSection(tr("Channels"),                       channelsLay, this, "channels_v2"));
     body->addWidget(makeSection(tr("Audio sandbox && 3D HRTF"),       sandboxLay,  this, "sandbox_v2"));
-    body->addWidget(makeSection(tr("Button grid"),                    gridLay,     this, "grid_v2"));
+    // Button-grid rows / cols selectors moved to the main soundboard
+    // window (next to the Settings button) — the spinboxes here stay
+    // wired to the model for back-compat (and to feed setRows / setCols
+    // calls during import / profile-switch) but no longer have a UI
+    // surface inside this dialog.
+    Q_UNUSED(gridLay);
     body->addWidget(makeSection(tr("Hotkeys"),                        hotkeyLay,   this, "hotkeys_v2"));
     body->addWidget(makeSection(tr("Profiles && Config I/O"),         profileLay,  this, "profiles_v2"));
     body->addWidget(makeSection(tr("Appearance"),                     themeWrapLay,this, "appearance_v2", false));
@@ -556,6 +587,9 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_globalFx,       &QCheckBox::toggled, this, &SettingsWindow::globalFxEnabledChanged);
     connect(m_hideWaveform,   &QCheckBox::toggled, this, &SettingsWindow::hideWaveformChanged);
     connect(m_logsEnabled,    &QCheckBox::toggled, this, &SettingsWindow::logsEnabledChanged);
+    connect(m_extremeLogging, &QCheckBox::toggled, this, &SettingsWindow::extremeLoggingChanged);
+    connect(m_rightDragLoop,  &QCheckBox::toggled, this, &SettingsWindow::rightDragLoopEnabledChanged);
+    connect(m_replayMode,     &QCheckBox::toggled, this, &SettingsWindow::replayModeEnabledChanged);
     connect(m_sandboxEnabled, &QCheckBox::toggled, this, &SettingsWindow::audioSandboxEnabledChanged);
     connect(m_meterVisible,   &QCheckBox::toggled, this, &SettingsWindow::audioMeterVisibleChanged);
     connect(m_exportEnabled,  &QCheckBox::toggled, this, &SettingsWindow::audioExportEnabledChanged);
@@ -640,6 +674,9 @@ void SettingsWindow::setRestoreSession(bool on)        { QSignalBlocker b(m_rest
 void SettingsWindow::setGlobalFxEnabled(bool on)       { QSignalBlocker b(m_globalFx);        m_globalFx->setChecked(on);        }
 void SettingsWindow::setHideWaveform(bool on)          { QSignalBlocker b(m_hideWaveform);    m_hideWaveform->setChecked(on);    }
 void SettingsWindow::setLogsEnabled(bool on)           { QSignalBlocker b(m_logsEnabled);     m_logsEnabled->setChecked(on);     }
+void SettingsWindow::setExtremeLogging(bool on)        { QSignalBlocker b(m_extremeLogging);  m_extremeLogging->setChecked(on);  }
+void SettingsWindow::setRightDragLoopEnabled(bool on)  { QSignalBlocker b(m_rightDragLoop);   m_rightDragLoop->setChecked(on);   }
+void SettingsWindow::setReplayModeEnabled(bool on)     { QSignalBlocker b(m_replayMode);      m_replayMode->setChecked(on);      }
 void SettingsWindow::setAudioSandboxEnabled(bool on)   { QSignalBlocker b(m_sandboxEnabled);  m_sandboxEnabled->setChecked(on);  }
 void SettingsWindow::setAudioMeterVisible(bool on)     { QSignalBlocker b(m_meterVisible);    m_meterVisible->setChecked(on);    }
 void SettingsWindow::setAudioExportEnabled(bool on)    { QSignalBlocker b(m_exportEnabled);   m_exportEnabled->setChecked(on);   }

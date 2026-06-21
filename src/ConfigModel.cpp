@@ -117,6 +117,9 @@ ConfigModel::ConfigModel()
 	m_reverbValue = 0;
 	m_multiSoundboard = false;
 	m_logsEnabled = false;
+	m_extremeLogging = false;
+	m_rightDragLoopEnabled = false;
+	m_replayModeEnabled = true;
 	m_previewOnly = false;
 	m_audioSandboxEnabled = true;
 	m_audioMeterVisible = true;
@@ -192,6 +195,10 @@ void ConfigModel::readConfig(const QString &file)
 	m_reverbValue = m_rememberPitchSpeed ? settings.value("reverb_value", 0).toInt() : 0;
 	m_multiSoundboard = settings.value("multi_soundboard", false).toBool();
 	m_logsEnabled = settings.value("logs_enabled", false).toBool();
+	m_extremeLogging = settings.value("extreme_logging", false).toBool();
+	g_rpsbExtremeLogging = m_extremeLogging ? 1 : 0;
+	m_rightDragLoopEnabled = settings.value("right_drag_loop_enabled", false).toBool();
+	m_replayModeEnabled = settings.value("replay_mode_enabled", true).toBool();
 	m_previewOnly = settings.value("preview_only", false).toBool();
 	m_audioSandboxEnabled = settings.value("audio_sandbox_enabled", true).toBool();
 	m_audioMeterVisible   = settings.value("audio_meter_visible", true).toBool();
@@ -284,6 +291,9 @@ void ConfigModel::writeConfigImmediate(const QString &file)
 	settings.setValue("reverb_value", m_reverbValue);
 	settings.setValue("multi_soundboard", m_multiSoundboard);
 	settings.setValue("logs_enabled", m_logsEnabled);
+	settings.setValue("extreme_logging", m_extremeLogging);
+	settings.setValue("right_drag_loop_enabled", m_rightDragLoopEnabled);
+	settings.setValue("replay_mode_enabled", m_replayModeEnabled);
 	settings.setValue("preview_only", m_previewOnly);
 	settings.setValue("audio_sandbox_enabled", m_audioSandboxEnabled);
 	settings.setValue("audio_meter_visible", m_audioMeterVisible);
@@ -806,6 +816,25 @@ void ConfigModel::setLogsEnabled(bool on)
 	g_rpsbLogsEnabled = on ? 1 : 0;
 	writeConfig();
 	notify(NOTIFY_SET_LOGS_ENABLED, on ? 1 : 0);
+}
+
+void ConfigModel::setExtremeLogging(bool on)
+{
+	m_extremeLogging = on;
+	g_rpsbExtremeLogging = on ? 1 : 0;
+	writeConfig();
+}
+
+void ConfigModel::setRightDragLoopEnabled(bool on)
+{
+	m_rightDragLoopEnabled = on;
+	writeConfig();
+}
+
+void ConfigModel::setReplayModeEnabled(bool on)
+{
+	m_replayModeEnabled = on;
+	writeConfig();
 }
 
 void ConfigModel::setPreviewOnly(bool on)

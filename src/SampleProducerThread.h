@@ -45,6 +45,12 @@ public:
 	// the caller harvests them. No-op if the thread was never started
 	// or has already been joined.
 	void joinIfRunning();
+	// Bounded variant: wait up to timeoutMs for the worker, then
+	// force-terminate + detach if it has not exited yet. Use ONLY
+	// during shutdown — TerminateThread leaks the worker's stack +
+	// resources, but the alternative is keeping the DLL mapped (=
+	// zombie TS3.exe blocking the next plugin install / update).
+	void joinIfRunningBounded(int timeoutMs);
 	bool isRunning();
 	void setSource(SampleSource *source);
 	// Wake the fill loop immediately (e.g. after a seek cleared the

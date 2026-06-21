@@ -27,6 +27,7 @@
 #include <QCheckBox>
 #include <QLabel>
 #include <QResizeEvent>
+#include <QSpinBox>
 #include <QCloseEvent>
 #include <QHideEvent>
 #include <QTimer>
@@ -228,6 +229,28 @@ MainPage::MainPage(QWidget *parent)
         "and positions. Channel volume/FX/sandbox settings are shared\n"
         "across all profiles."), this));
     bottom->addStretch(1);
+    // Rows / cols selectors next to Settings — used to live inside the
+    // Settings dialog but the user wanted them in arm's reach without
+    // opening another window. Same QSpinBox API the SettingsWindow
+    // copies used to expose, so the wiring + model layer is unchanged.
+    m_rowsSpin = new QSpinBox(this);
+    m_rowsSpin->setRange(1, 50);
+    m_rowsSpin->setValue(4);
+    m_rowsSpin->setMinimumHeight(28);
+    m_rowsSpin->setToolTip(tr("Number of button rows in the grid"));
+    m_colsSpin = new QSpinBox(this);
+    m_colsSpin->setRange(1, 50);
+    m_colsSpin->setValue(8);
+    m_colsSpin->setMinimumHeight(28);
+    m_colsSpin->setToolTip(tr("Number of button columns in the grid"));
+    auto *rowsLbl = new QLabel(tr("Rows:"), this);
+    auto *colsLbl = new QLabel(tr("Cols:"), this);
+    bottom->addWidget(rowsLbl);
+    bottom->addWidget(m_rowsSpin);
+    bottom->addSpacing(4);
+    bottom->addWidget(colsLbl);
+    bottom->addWidget(m_colsSpin);
+    bottom->addSpacing(8);
     bottom->addWidget(m_settingsBtn);
     bottom->addSpacing(8);
     bottom->addWidget(m_reset);

@@ -92,6 +92,8 @@ signals:
     void cropClearStartRequested();
     void cropClearEndRequested();
     void cropClearAllRequested();
+    // Forwarded from SoundView: user right-button-dragged a loop area.
+    void loopAreaSelected(double startSec, double endSec);
 
 private slots:
     void onPlayPause();

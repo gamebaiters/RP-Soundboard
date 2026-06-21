@@ -20,6 +20,26 @@ void logMessage(const char *msg, LogLevel level,  ...);
 #define logDebug(msg, ...) logMessage(msg, LogLevel_DEBUG, ##__VA_ARGS__)
 #define logCritical(msg, ...) logMessage(msg, LogLevel_CRITICAL, ##__VA_ARGS__)
 
+// Extreme-logging gate. When the user enables "Logging estremo" in
+// Settings, this fans out into the same debug pipeline as logDebug
+// (file + in-memory ring). Off = zero overhead — the printf args are
+// never evaluated. Hot-loop friendly.
+//
+// plugin.h declares this same symbol inside an extern "C" block, so
+// the extern here MUST also be C-linkage — otherwise C++ name mangling
+// disagrees with the C definition in plugin.cpp and the link breaks
+// with "unresolved external symbol".
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern int g_rpsbExtremeLogging;
+#ifdef __cplusplus
+}
+#endif
+#define extremeLog(msg, ...) do { \
+    if (g_rpsbExtremeLogging) logMessage("[XLOG] " msg, LogLevel_DEBUG, ##__VA_ARGS__); \
+} while (0)
+
 
 UINT checkError(UINT code, const char *msg, ...);
 

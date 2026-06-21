@@ -58,6 +58,15 @@ public:
 	virtual void setPitchFactor(float factor) { (void)factor; }
 	virtual void setSpeedFactor(float factor) { (void)factor; }
 	virtual float getSpeedFactor() const { return 1.0f; }
+	// In streaming-reverse mode the LIVE m_speedFactor (set by the
+	// last setSpeedFactor call) lags the audio actually being heard
+	// by one chunk worth, because the chunk currently feeding the
+	// reader was decoded with the speed value that was set BEFORE the
+	// most recent change. The Sampler position cache uses this for
+	// posSec descent so heavy speed dragging does not make the
+	// reverse cursor race ahead of or fall behind the audible head.
+	// Forward path / non-reverse files: returns getSpeedFactor().
+	virtual float getCurrentReverseChunkSpeed() const { return getSpeedFactor(); }
 	virtual void setReverbMix(float mix) { (void)mix; }
 	// Live-update the decoder's end-of-playback bound. <0 = unlimited.
 	// Lets the waveform right-click crop editor truncate the active

@@ -45,7 +45,7 @@ SoundView::SoundView( QWidget *parent /*= NULL*/ ) :
 SoundView::~SoundView()
 {
 	if (m_vis)
-		m_vis->stop(true);
+		m_vis->stopBounded(200);
 }
 
 
@@ -269,6 +269,96 @@ void SoundView::paintEvent(QPaintEvent *evt)
 		dragPen.setDashPattern({4.0, 3.0});
 		painter.setPen(dragPen);
 		painter.drawLine(dx, 0, dx, height() - 1);
+
+		// Drag tooltip — small dark pill above the cursor showing the
+		// precise time at the drag target. Format: M:SS.mmm so the user
+		// sees sub-second precision while scrubbing.
+		if (m_totalLength > 0.0) {
+			double sec = m_dragPreview * m_totalLength;
+			if (sec < 0.0) sec = 0.0;
+			if (sec > m_totalLength) sec = m_totalLength;
+			int minutes = static_cast<int>(sec) / 60;
+			int seconds = static_cast<int>(sec) % 60;
+			int millis  = static_cast<int>((sec - std::floor(sec)) * 1000.0);
+			if (millis < 0) millis = 0;
+			if (millis > 999) millis = 999;
+			QString lbl = QString("%1:%2.%3")
+				.arg(minutes)
+				.arg(seconds, 2, 10, QChar('0'))
+				.arg(millis,  3, 10, QChar('0'));
+			QFont tf = font();
+			tf.setPixelSize(10);
+			tf.setBold(true);
+			painter.setFont(tf);
+			QFontMetrics fm(tf);
+			int padX = 5, padY = 2;
+			int tw = fm.horizontalAdvance(lbl) + padX * 2;
+			int th = fm.height() + padY * 2;
+			int tx = dx - tw / 2;
+			if (tx < 0) tx = 0;
+			if (tx + tw > width()) tx = width() - tw;
+			int ty = 1;
+			if (ty + th > height() - 1) ty = height() - th - 1;
+			QRect bg(tx, ty, tw, th);
+			painter.setPen(Qt::NoPen);
+			painter.setBrush(QColor(20, 20, 20, 220));
+			painter.drawRoundedRect(bg, 3, 3);
+			painter.setPen(QColor(255, 240, 168, 250));
+			painter.drawText(bg, Qt::AlignCenter, lbl);
+		}
+		painter.setRenderHint(QPainter::Antialiasing, false);
+	}
+
+	// Right-button drag selection (loop area). Painted as a translucent
+	// accent band between the two anchors so the user previews the
+	// region. On release the wiring turns this into Start/End markers +
+	// loop ON. Kept distinct from the playback cursor preview (yellow).
+	if (m_rightDragging
+	    && m_rightDragStart >= 0.0 && m_rightDragStart <= 1.0
+	    && m_rightDragEnd   >= 0.0 && m_rightDragEnd   <= 1.0)
+	{
+		double a = std::min(m_rightDragStart, m_rightDragEnd);
+		double b = std::max(m_rightDragStart, m_rightDragEnd);
+		int ax = (int)(a * (width() - 1));
+		int bx = (int)(b * (width() - 1));
+		if (ax < cursorMinX) ax = cursorMinX;
+		if (bx > cursorMaxX) bx = cursorMaxX;
+		if (bx < ax + 1) bx = ax + 1;
+		painter.setRenderHint(QPainter::Antialiasing, true);
+		painter.setPen(Qt::NoPen);
+		painter.setBrush(QColor(0x3c, 0x8c, 0x3c, 90));
+		painter.drawRect(ax, 0, bx - ax, height());
+		// Edge bars — same green tint as the loop button.
+		painter.setBrush(QColor(0x3c, 0x8c, 0x3c, 220));
+		painter.drawRect(ax, 0, 2, height());
+		painter.drawRect(bx - 1, 0, 2, height());
+		// Duration label centered on the band.
+		if (m_totalLength > 0.0) {
+			double sa = a * m_totalLength;
+			double sb = b * m_totalLength;
+			QString lbl = QString("%1\xE2\x86\x92%2 (%3 s)")
+				.arg(sa, 0, 'f', 2)
+				.arg(sb, 0, 'f', 2)
+				.arg(sb - sa, 0, 'f', 2);
+			QFont tf = font();
+			tf.setPixelSize(10);
+			tf.setBold(true);
+			painter.setFont(tf);
+			QFontMetrics fm(tf);
+			int padX = 5, padY = 2;
+			int tw = fm.horizontalAdvance(lbl) + padX * 2;
+			int th = fm.height() + padY * 2;
+			int tx = (ax + bx) / 2 - tw / 2;
+			if (tx < 0) tx = 0;
+			if (tx + tw > width()) tx = width() - tw;
+			int ty = 1;
+			QRect bg(tx, ty, tw, th);
+			painter.setPen(Qt::NoPen);
+			painter.setBrush(QColor(20, 20, 20, 230));
+			painter.drawRoundedRect(bg, 3, 3);
+			painter.setPen(QColor(0xc8, 0xff, 0xc8, 255));
+			painter.drawText(bg, Qt::AlignCenter, lbl);
+		}
 		painter.setRenderHint(QPainter::Antialiasing, false);
 	}
 
@@ -1083,6 +1173,20 @@ void SoundView::mousePressEvent(QMouseEvent *evt)
 		m_dragPreview = frac;
 		update();
 	}
+	else if (evt->button() == Qt::RightButton && m_totalLength > 0.0)
+	{
+		// Begin right-drag for loop area selection. The actual loop
+		// emit only fires if the user moves > kRightDragMinPx before
+		// release; below threshold the contextMenu (existing crop
+		// editor) still fires through contextMenuEvent.
+		m_rightDragging  = true;
+		double frac = fractionFromMouseX(evt->x());
+		m_rightDragStart   = frac;
+		m_rightDragEnd     = frac;
+		m_rightDragStartPx = evt->x();
+		m_suppressNextContextMenu = false;
+		update();
+	}
 }
 
 
@@ -1097,6 +1201,11 @@ void SoundView::mouseMoveEvent(QMouseEvent *evt)
 		m_dragPreview = frac;
 		update();
 	}
+	if (m_rightDragging)
+	{
+		m_rightDragEnd = fractionFromMouseX(evt->x());
+		update();
+	}
 }
 
 
@@ -1105,7 +1214,7 @@ void SoundView::mouseMoveEvent(QMouseEvent *evt)
 //---------------------------------------------------------------
 void SoundView::mouseReleaseEvent(QMouseEvent *evt)
 {
-	if (m_dragging)
+	if (m_dragging && evt->button() == Qt::LeftButton)
 	{
 		m_dragging = false;
 		double frac = clampFractionToCrop(fractionFromMouseX(evt->x()));
@@ -1117,6 +1226,34 @@ void SoundView::mouseReleaseEvent(QMouseEvent *evt)
 		update();
 		emit seekRequested(frac);
 	}
+	else if (m_rightDragging && evt->button() == Qt::RightButton)
+	{
+		bool wasDrag = std::abs(evt->x() - m_rightDragStartPx) >= kRightDragMinPx;
+		double a = std::min(m_rightDragStart, m_rightDragEnd);
+		double b = std::max(m_rightDragStart, m_rightDragEnd);
+		m_rightDragging = false;
+		m_rightDragStart = -1.0;
+		m_rightDragEnd   = -1.0;
+		update();
+		if (wasDrag && m_totalLength > 0.0) {
+			double sa = a * m_totalLength;
+			double sb = b * m_totalLength;
+			if (sa < 0.0) sa = 0.0;
+			if (sb > m_totalLength) sb = m_totalLength;
+			if (sb - sa < 0.05) {
+				// Drag too narrow once mapped to seconds — fall through
+				// to context menu instead so the user gets the crop
+				// editor (right-click at this point) rather than a
+				// 50 ms loop they didn't want.
+				return;
+			}
+			// Suppress the contextMenuEvent that Qt fires AFTER
+			// release — without this the menu pops on top of the
+			// freshly placed loop range.
+			m_suppressNextContextMenu = true;
+			emit loopAreaSelected(sa, sb);
+		}
+	}
 }
 
 
@@ -1125,6 +1262,15 @@ void SoundView::mouseReleaseEvent(QMouseEvent *evt)
 // a total-length feed to map click x -> seconds.
 void SoundView::contextMenuEvent(QContextMenuEvent *evt)
 {
+	// Right-button drag committed a loop-area selection in
+	// mouseReleaseEvent. The contextMenuEvent that Qt fires AFTER the
+	// release would otherwise pop the crop-editor menu on top of the
+	// just-placed loop range — swallow it here once.
+	if (m_suppressNextContextMenu) {
+		m_suppressNextContextMenu = false;
+		evt->accept();
+		return;
+	}
 	if (m_totalLength <= 0.0) {
 		QWidget::contextMenuEvent(evt);
 		return;

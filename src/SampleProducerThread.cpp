@@ -12,6 +12,13 @@
 #include <algorithm>
 #include <cassert>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include "SampleBuffer.h"
 #include "SampleSource.h"
 #include "SampleProducerThread.h"
@@ -65,6 +72,30 @@ void SampleProducerThread::joinIfRunning()
 {
 	if (m_thread.joinable())
 		m_thread.join();
+}
+
+
+//---------------------------------------------------------------
+// Purpose: shutdown-only timed join. If the worker has not exited
+// within timeoutMs we Win32-TerminateThread + detach so the DLL
+// unload is not blocked. The cost is a leaked stack page; the
+// alternative was the user-reported zombie TS3 process.
+//---------------------------------------------------------------
+void SampleProducerThread::joinIfRunningBounded(int timeoutMs)
+{
+	if (!m_thread.joinable()) return;
+#ifdef _WIN32
+	HANDLE h = (HANDLE)m_thread.native_handle();
+	DWORD rc = WaitForSingleObject(h, (DWORD)timeoutMs);
+	if (rc == WAIT_OBJECT_0) {
+		m_thread.join();
+	} else {
+		TerminateThread(h, 0);
+		m_thread.detach();
+	}
+#else
+	m_thread.join();
+#endif
 }
 
 

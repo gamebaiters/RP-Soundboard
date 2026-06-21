@@ -179,6 +179,33 @@ public:
 	inline bool getLogsEnabled() const { return m_logsEnabled; }
 	void setLogsEnabled(bool on);
 
+	// Extreme logging: when on, the audio + GUI paths emit verbose
+	// per-frame traces (every slider tick, every seek, every loop
+	// transition, every DSP block boundary). Off = normal logging
+	// (only major events). Off has zero overhead — the macro is gated
+	// on an atomic load that the optimiser can hoist out of hot loops.
+	inline bool getExtremeLogging() const { return m_extremeLogging; }
+	void setExtremeLogging(bool on);
+
+	// Right-click drag on the waveform proposes a loop area via an
+	// inline confirm bubble. OFF (default) keeps right-click silent
+	// so users who never use the feature don't get surprised by a
+	// stray bubble while right-click-cropping. ON enables the
+	// drag-to-loop gesture (still requires user confirmation via
+	// the bubble).
+	inline bool getRightDragLoopEnabled() const { return m_rightDragLoopEnabled; }
+	void setRightDragLoopEnabled(bool on);
+
+	// Replay-from-cursor UX. ON (default): when audio finishes / is
+	// stopped, channel KEEPS its filename + waveform + cursor; the
+	// play button glyph flips to reload so a single click replays
+	// from the parked cursor position. OFF: pre-replay-mode behavior
+	// — channel is fully wiped (filename cleared, waveform reset,
+	// reload glyph absent) on stop / end, identical to clicking the
+	// red X next to the filename.
+	inline bool getReplayModeEnabled() const { return m_replayModeEnabled; }
+	void setReplayModeEnabled(bool on);
+
 	inline bool getPreviewOnly() const { return m_previewOnly; }
 	void setPreviewOnly(bool on);
 
@@ -274,6 +301,9 @@ private:
 	int m_reverbValue;
 	bool m_multiSoundboard;
 	bool m_logsEnabled;
+	bool m_extremeLogging = false;
+	bool m_rightDragLoopEnabled = false;
+	bool m_replayModeEnabled    = true;
 	bool m_previewOnly;
 	bool m_audioSandboxEnabled;
 	bool m_audioMeterVisible;

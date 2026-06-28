@@ -417,7 +417,16 @@ void ConfigModel::setSoundInfo( int itemId, const SoundInfo &info )
     if(itemId < 1000 && itemId >= numSounds())
 		sounds().resize(itemId + 1);
 	sounds()[itemId] = info;
-	writeConfig();
+	// Cell metadata changes (crop markers, loop area, color, filename,
+	// macro state) are NEVER slider-rate — they only fire on discrete
+	// user actions (right-click menu, advanced panel accept, drop,
+	// reorder). The dirty-flag deferral that buys slider perf elsewhere
+	// would only put cell edits at risk of being lost across a TS3
+	// crash / hard kill / Win+L sleep before any flush event fires.
+	// User requirement: "ogni singola volta che un marcatore, un area
+	// o altro in memoria viene creata o eliminata, deve essere
+	// immediatamente salvato". Persist now.
+	writeConfigImmediate(QString());
 	notify(NOTIFY_SET_SOUND, itemId);
 }
 

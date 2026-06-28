@@ -1062,6 +1062,27 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         QObject::connect(ch->waveform(), &WaveformPlayer::loopAreaSelected,
                          page, [applyCropEdit, ch, sampler, page, model](double sa, double sb){
             if (!model->getRightDragLoopEnabled()) return;
+            // Snapshot the cell index AT BUBBLE CREATION. If the user
+            // clicks the red X (clearRequested) while the bubble is
+            // open and THEN clicks Yes, s_slotToBtnIdx will have been
+            // wiped by the X handler, so a fresh lookup at Yes-time
+            // returns -1 and the persist is silently skipped — exact
+            // shape of the user-reported "right-drag loop area
+            // sometimes doesn't persist" regression. Capture it here
+            // and re-inject below.
+            int snapshotSlot = -1;
+            for (int i = 0; i < page->channels().size(); ++i) {
+                if (page->channels().at(i) == ch) { snapshotSlot = i; break; }
+            }
+            int snapshotBtn = (snapshotSlot >= 0)
+                ? s_slotToBtnIdx.value(snapshotSlot, -1) : -1;
+            // Fall back to s_lastPlayedCtx in case the slot just finished
+            // playing (replay-ready) and s_slotToBtnIdx was never set
+            // for it (unusual but possible during a transient state).
+            if (snapshotBtn < 0 && snapshotSlot >= 0) {
+                auto it = s_lastPlayedCtx.find(snapshotSlot);
+                if (it != s_lastPlayedCtx.end()) snapshotBtn = it->btnIdx;
+            }
             auto fmtSec = [](double v){
                 int m  = static_cast<int>(v) / 60;
                 int s  = static_cast<int>(v) % 60;
@@ -1126,8 +1147,32 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
 
             QObject::connect(no, &QPushButton::clicked, bubble, &QFrame::close);
             QObject::connect(yes, &QPushButton::clicked, bubble,
-                             [applyCropEdit, ch, sampler, sa, sb, bubble]{
-                applyCropEdit(sa, sb);
+                             [ch, sampler, model, sa, sb, bubble,
+                              snapshotSlot, snapshotBtn]{
+                // Persist crop to the snapshotted cell directly. Bypasses
+                // applyCropEdit's s_slotToBtnIdx lookup because the user
+                // may have clicked X between bubble-open and Yes-click,
+                // wiping the live mapping. Mirrors applyCropEdit's
+                // persist block 1:1.
+                if (snapshotBtn >= 0) {
+                    if (const auto *cur = model->getSoundInfo(snapshotBtn)) {
+                        SoundInfo si = *cur;
+                        si.cropEnabled     = (sa > 0.0) || (sb > 0.0);
+                        si.cropStartUnit   = 0;
+                        si.cropStartValue  = (sa > 0.0) ? int(sa * 1000.0 + 0.5) : 0;
+                        si.cropStopAfterAt = 1;
+                        si.cropStopUnit    = 0;
+                        si.cropStopValue   = (sb > 0.0) ? int(sb * 1000.0 + 0.5) : 0;
+                        extremeLog("loopBubble.Yes slot=%d btn=%d sa=%.3f sb=%.3f -> cropEn=%d sVal=%d eVal=%d",
+                                   snapshotSlot, snapshotBtn, sa, sb,
+                                   si.cropEnabled ? 1 : 0,
+                                   si.cropStartValue, si.cropStopValue);
+                        model->setSoundInfo(snapshotBtn, si);
+                    }
+                }
+                if (sampler && snapshotSlot >= 0)
+                    sampler->setSlotCropLive(snapshotSlot, sa, sb);
+                ch->waveform()->setCropRange(sa, sb);
                 ch->waveform()->setLooping(true);
                 int slotIdx = ch->channelId();
                 if (sampler && slotIdx >= 0) {
@@ -1469,6 +1514,13 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         // replay state + slot/btn bookkeeping, hides clear button.
         QObject::connect(ch->waveform(), &WaveformPlayer::clearRequested,
                          [sampler, slot, ch]{
+            // Belt-and-braces: flush any pending dirty model state
+            // BEFORE we tear down the slot mapping. setSoundInfo now
+            // writes immediately for cell-metadata edits so this is
+            // mostly a no-op, but a stray slider/volume mark-dirty
+            // that hasn't been flushed yet would otherwise be at risk
+            // if the user closes TS3 right after clicking X.
+            ConfigModel::flushPendingWrite();
             // Mark the slot for a hard clear BEFORE asking Sampler to
             // stop - the stop() call queues an onStopPlaying signal
             // that would otherwise transition the channel back into

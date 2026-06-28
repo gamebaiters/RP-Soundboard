@@ -1266,6 +1266,29 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             if (slot < 0 || slot >= page->channels().size()) return;
             // Preview shares slot indices but doesn't own the UI.
             if (sampler && sampler->getState(slot) == Sampler::ePLAYING_PREVIEW) return;
+            // STALE-STOP GUARD. onStopPlaying is queued (Qt::QueuedConnection)
+            // so the handler can fire AFTER a fresh playback has already
+            // taken the slot over (rapid sequence: pressing cell B while
+            // cell A is playing on the same slot — Sampler emits stop for
+            // the old, start for the new, and we get the queued stop after
+            // s_slotToBtnIdx[slot] has been re-bound to the new btnIdx).
+            // Wiping the live mapping here was the root cause of the
+            // user-reported "right-click crop edits silently fail to
+            // persist after switching cells" regression: the wipe killed
+            // s_slotToBtnIdx[slot] → applyCropEdit fell to btn = -1 →
+            // save was skipped.
+            //
+            // If the sampler reports the slot is actively playing or
+            // paused, a new playback owns it now — keep all state intact
+            // and just drop the stale hard-clear flag so a LATER stop
+            // doesn't mis-fire on it.
+            if (sampler) {
+                auto st = sampler->getState(slot);
+                if (st == Sampler::ePLAYING || st == Sampler::ePAUSED) {
+                    s_pendingHardClear.remove(slot);
+                    return;
+                }
+            }
             auto *wave = page->channels().at(slot)->waveform();
 
             // Hard-clear path: clearRequested marked this slot before

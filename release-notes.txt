@@ -1,3 +1,87 @@
+GameBaiters Soundboard v2.2.16
+==============================
+
+Crop-marker persistence rebuild on top of v2.2.15. Closes the
+end-to-end class of "marker edits silently revert after the
+slot is reused" bugs at every layer (signal ordering, queued
+event reordering, dirty-flag deferral, captured-lambda timing,
+mutator-API conflation). Markers, loop areas, every cell-level
+edit now persist on commit, period.
+
+Highlights
+----------
+
+* STALE-STOP GUARD — the real root cause. onStopPlaying is a
+  Qt::QueuedConnection signal, so when the user clicks cell B
+  while cell A is playing on the same slot, ordering is:
+    1. buttonTriggered runs: stopPlayback(slot) queues stop A.
+    2. buttonTriggered runs: playSoundInSlot(slot, B) queues
+       start B AND, inside Sampler, also queues a second stop
+       for the displaced A.
+    3. buttonTriggered runs: s_slotToBtnIdx[slot] = B_idx.
+    4. Event loop drains stop A handler — the replay-mode-OFF
+       branch calls s_slotToBtnIdx.remove(slot), WIPING the
+       freshly installed B_idx mapping.
+    5. start B handler reads s_slotToBtnIdx.value(slot, -1)
+       and sees -1.
+  From that moment on, every right-click crop edit on the
+  slot falls into applyCropEdit's btn-not-found branch and the
+  save is silently skipped. Reproducer (user-reported):
+    open A with markers -> change markers -> click B while A
+    still plays -> click A back -> markers reverted.
+  Fix: at onStopPlaying handler entry, check the sampler's
+  current state for the slot. If it reports ePLAYING or ePAUSED,
+  a fresh playback owns the slot now — drop any stale
+  s_pendingHardClear flag and return without touching the
+  channel state. Stop event was for the displaced sound; the
+  new sound's mapping must stay intact. Applies to the X-click
+  + immediate-other-click sequence too (same shape, different
+  trigger).
+
+* setSoundInfo now writes IMMEDIATELY. The v2.2.6 dirty-flag
+  policy was tuned for slider-rate setters (volume / pitch /
+  speed / reverb) where one disk write per gesture is fine.
+  Cell metadata (crop markers, loop area, color, filename,
+  macro state) are discrete user actions — never slider-rate —
+  so the deferral only puts them at risk of being lost across
+  a TS3 crash, hard kill, or Win+L sleep before any flush
+  event fires. All ~15 setSoundInfo callsites in config_qt.cpp,
+  main_page_wiring.cpp, and the advanced/sound-settings
+  dialogs now persist on commit. Slider perf untouched.
+
+* applyCropEdit rewritten as an EXPLICIT (newStart, newEnd)
+  function (carried over from v2.2.16-pre). The previous
+  mutator-lambda API conflated reading the current state,
+  applying the user's intent, and deciding what to save —
+  when the seed step pulled from the live slot (which gets
+  wiped to defaults the moment the slot drops to eSILENT),
+  the save step would write start=0, end=-1 back even when
+  the user had only asked to remove ONE edge. Each waveform
+  context-menu action now computes its absolute target range
+  via the new currentCrop helper (priority: stored SoundInfo
+  = disk truth; falls back to live slot only when no cell
+  mapping exists) and feeds it directly. New extremeLog line
+  at every persist site so any future regression is
+  diagnosable from a user machine without a custom build.
+
+* Right-drag loop bubble Yes handler now SNAPSHOTS the cell
+  index at bubble creation and captures it into the Yes lambda.
+  Previously the Yes click went through applyCropEdit which
+  looked s_slotToBtnIdx up fresh at click time — if the user
+  clicked the red X while the bubble was open and THEN clicked
+  Yes, the mapping was wiped and the save was silently skipped.
+  Yes handler now writes the crop directly to the snapshotted
+  cell via setSoundInfo regardless of intervening clicks.
+
+* clearRequested (red X next to filename) handler now calls
+  ConfigModel::flushPendingWrite as a belt-and-braces safety
+  net BEFORE tearing down the slot mapping. Catches any
+  unrelated pending dirty state (volume slider mid-flight,
+  link-volume toggle, etc.) that the dirty-flag policy would
+  otherwise leave at risk if the user closes TS3 immediately
+  after clicking X.
+
+==============================================================
 GameBaiters Soundboard v2.2.15
 ==============================
 

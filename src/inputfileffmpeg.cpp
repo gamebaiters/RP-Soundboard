@@ -1492,6 +1492,38 @@ void InputFileFFmpeg::chunkWorkerLoop()
 	// retry attempts when a truly broken file produces nothing back-
 	// to-back. Reset to 0 on every successful chunk push.
 	int consecutiveFail  = 0;
+	// Tracks whether THIS streaming session (since the last fullWipe
+	// seek restart) has pushed at least one chunk. Used to suppress
+	// premature natural-end fires when the filter graph is cold
+	// post-rebuild (rapid pitch / speed dragging on small audio).
+	// Without this gate, a single empty decode at chunkStart<=minF
+	// before the filter graph warmed up flipped m_chunkFileEnded=true
+	// → samples.cpp's done() returned true → loop branch seeked back
+	// to cropEnd → another cold rebuild → another empty → another
+	// natural-end fire. With loop=ON on a short file the cycle ran
+	// indefinitely; user heard the "end of reverse" portion glitching
+	// + repeating forever. Gate: natural-end fires only when audio
+	// HAS been emitted this session.
+	bool sessionEmittedChunk = false;
+	// Cursor-stuck guard. If the worker keeps decoding chunks whose
+	// startForward barely advances down (< kMinAdvanceSec per chunk)
+	// for kStuckChunks consecutive iterations, the chunk worker is in
+	// a tight retry that produces tens-of-ms slivers near a boundary
+	// (the user-reported "audio glitches + repeats last ms infinitely
+	// at end of reverse") — force-fire natural-end so the slot ends
+	// cleanly instead of dribbling micro-chunks.
+	double prevChunkStartForward = -1.0;
+	int    stuckChunkCount       = 0;
+	constexpr double kMinAdvanceSec = 0.050; // 50 ms cursor descent
+	// Lowered 8 → 2 because the user-perceived "glitch for some seconds"
+	// at end of reverse is the time it takes for kStuckChunks iterations
+	// to fire. Each iteration = filter graph rebuild + decode + queue
+	// push (~100-250 ms each), so 8 iterations of dribble ~ 1-2 s of
+	// audible glitch. 2 iterations caps glitch at ~500 ms — barely
+	// perceptible vs. seconds. Safe: descent < kMinAdvanceSec only
+	// happens at a true boundary; mid-file chunks descend by ~CHUNK_SEC
+	// each = 3 s ≫ 50 ms, so this can't misfire on regular playback.
+	constexpr int    kStuckChunks   = 2;
 	// Cap: 60 retries * ~150 ms retry budget = ~9 s of automatic
 	// retry before we PARK the worker (no longer latches done = true).
 	// Heavy pitch/speed dragging can leave the codec in a flaky state
@@ -1551,6 +1583,17 @@ void InputFileFFmpeg::chunkWorkerLoop()
 			if (fullWipe) {
 				m_chunkQueue.clear();
 				m_chunkCursorForward = m_chunkRestartTarget;
+				// Fresh session: a fullWipe seek (loop restart, user
+				// seek, reverse engage) starts a new emission cycle.
+				// Clear the gate so the cold-filter-graph guard re-
+				// engages for the first decode at the new cursor.
+				sessionEmittedChunk = false;
+				// Reset the cursor-stuck guard so a new session is
+				// judged on its own descent rate, not the previous one.
+				prevChunkStartForward = -1.0;
+				stuckChunkCount       = 0;
+				dbgLog("[revWorker] fullWipe restart cursor=%.3f minF=%.3f",
+				       m_chunkCursorForward, m_streamingMinForward);
 			} else {
 				if (m_chunkQueue.size() > 1) {
 					// Drop everything past the front. Reader holds
@@ -1637,6 +1680,8 @@ void InputFileFFmpeg::chunkWorkerLoop()
 			// returns true once the reader drains the remaining
 			// queue. Then park so a subsequent restart (loop / seek)
 			// can revive the worker.
+			dbgLog("[revWorker] path1 naturalEnd cursor=%.3f minF=%.3f session=%d",
+			       cursor, minF, sessionEmittedChunk ? 1 : 0);
 			m_chunkFileEnded.store(true, std::memory_order_release);
 			m_chunkWorkerDone.store(true, std::memory_order_release);
 			std::unique_lock<std::mutex> lk(m_chunkMutex);
@@ -1763,10 +1808,30 @@ void InputFileFFmpeg::chunkWorkerLoop()
 			++consecutiveEmpty;
 			++consecutiveFail;
 			std::unique_lock<std::mutex> lk(m_chunkMutex);
-			// chunkStart <= minF = genuinely reached file start = end
-			// of reverse playback. Park with naturalEnd (legitimate
-			// end of stream).
-			if (chunkStart <= minF) {
+			// chunkStart <= minF: could be genuine end of reverse
+			// playback OR a transient codec / filter-graph hiccup at
+			// the file-start range. Differentiate by whether THIS
+			// session has emitted any audio:
+			//   - sessionEmittedChunk = true  → reader heard real
+			//     samples this session; cursor descended to minF
+			//     legitimately = genuine natural end. Park.
+			//   - sessionEmittedChunk = false → no audio has shipped
+			//     since the last fullWipe restart; an empty decode at
+			//     this stage almost always means the filter graph is
+			//     still cold (post pitch/speed rebuild, atempo
+			//     buffering, etc). Firing natural-end here flipped
+			//     m_chunkFileEnded=true on the audio thread's first
+			//     done() check, samples.cpp's loop branch re-seeked
+			//     to cropEnd, the rebuild fired AGAIN, empty again,
+			//     natural-end fired AGAIN — short-audio + loop=ON +
+			//     rapid pitch/speed dragging spun this cycle forever
+			//     ("la parte finale si glitcha e si ripete all'infinito").
+			//     Skip the natural-end fire; retry decode at the
+			//     SAME cursor so the cold graph has a chance to warm.
+			if (chunkStart <= minF && sessionEmittedChunk) {
+				dbgLog("[revWorker] path2 emptyNaturalEnd "
+				       "chunkStart=%.3f minF=%.3f empties=%d",
+				       chunkStart, minF, consecutiveEmpty);
 				m_chunkFileEnded.store(true, std::memory_order_release);
 				m_chunkWorkerDone.store(true, std::memory_order_release);
 				m_chunkCv.notify_all();
@@ -1781,12 +1846,16 @@ void InputFileFFmpeg::chunkWorkerLoop()
 				consecutiveFail  = 0;
 				continue;
 			}
-			// Mid-file empty chunk = codec / seek hiccup. Transient,
-			// DON'T flip naturalEnd. Retry until kMaxConsecutiveFail
-			// without intervening restart (the restart branch resets
-			// the counter, so a user-driven slider drag never hits
-			// the cap). On cap reach, throttled retry (see dret < 0
-			// branch above for full rationale).
+			// Cap-driven throttled retry. Codec / filter graph likely
+			// stuck after sustained empties — back off 1 s then try
+			// again. Cursor is NOT advanced past this point because
+			// the OLD design (m_chunkCursorForward = chunkStart) walked
+			// the cursor down to minF on consecutive empties, which then
+			// tripped the cursor<=minF path-1 natural-end on the next
+			// iteration — same infinite-loop bug from a different angle.
+			// Keep cursor pinned to the requested range so a warm-up
+			// recovery still produces audio in the right input-time
+			// window.
 			if (consecutiveFail >= kMaxConsecutiveFail) {
 				m_chunkCv.wait_for(lk, std::chrono::milliseconds(1000),
 				                    [&] {
@@ -1798,7 +1867,6 @@ void InputFileFFmpeg::chunkWorkerLoop()
 				consecutiveEmpty = 0;
 				continue;
 			}
-			m_chunkCursorForward = chunkStart;
 			m_chunkCv.wait_for(lk, std::chrono::milliseconds(50), [&] {
 				return m_chunkWorkerStop.load(std::memory_order_relaxed)
 				    || m_chunkRestartPending.load(std::memory_order_relaxed);
@@ -1891,6 +1959,44 @@ void InputFileFFmpeg::chunkWorkerLoop()
 			}
 		}
 
+		// Cursor-stuck pre-check: compute descent BEFORE accepting the
+		// chunk. If the codec is dribbling micro-slivers near a
+		// boundary (AAC priming around file start, atempo cold state
+		// post pitch/speed rebuild, malformed container that won't
+		// seek past PTS 0), startForward barely moves between
+		// iterations. We DROP the just-decoded chunk, drain the queue
+		// so done() returns true on the next reader poll, latch
+		// m_chunkFileEnded + m_chunkWorkerDone, and park — same exit
+		// shape as path 1 (cursor<=minF). Previous version pushed the
+		// sliver first and only latched m_chunkFileEnded; because
+		// done() = m_chunkFileEnded && queue.empty(), the queue kept
+		// refilling and done() stayed false → samples.cpp never went
+		// eSILENT → audio dribbled micro-chunks forever
+		// ("audio glitches + repeats last tens of ms at end of reverse").
+		//
+		// TWO triggers:
+		//   1. Boundary fast-path: chunkStart == minF AND descent is
+		//      below threshold. We already asked the decoder for the
+		//      tightest possible range (down to minF), and it still
+		//      can't move us below the priming offset, so further
+		//      iterations would just repeat. Fire NOW — sub-perceptual
+		//      glitch.
+		//   2. Slow-path: kStuckChunks consecutive non-descending pushes
+		//      anywhere else (atempo cold state mid-file, etc.) — still
+		//      catches the long-tail case, ~500 ms glitch ceiling.
+		const double pushedStartFwd = chk.startForward;
+		const bool descentBelow = (prevChunkStartForward >= 0.0)
+		    && ((prevChunkStartForward - pushedStartFwd) < kMinAdvanceSec);
+		bool stuck = false;
+		if (!descentBelow) {
+			stuckChunkCount = 0;
+		} else {
+			++stuckChunkCount;
+			const bool atBoundary = (chunkStart <= m_streamingMinForward + 1e-6);
+			if (atBoundary || stuckChunkCount >= kStuckChunks) stuck = true;
+		}
+		prevChunkStartForward = pushedStartFwd;
+
 		{
 			std::lock_guard<std::mutex> lg(m_chunkMutex);
 			// Drop the chunk on the floor if a restart fired during
@@ -1899,12 +2005,39 @@ void InputFileFFmpeg::chunkWorkerLoop()
 			if (m_chunkRestartPending.load(std::memory_order_relaxed))
 				continue;
 			m_chunkQueue.push_back(std::move(chk));
-			// Advance the worker cursor to the chunk's ACTUAL lower
-			// bound so the NEXT chunk picks up exactly where this
-			// one ends — no overlap (= same audio twice = audible
-			// stutter and apparent cursor jump backward) and no gap
-			// (= missing audio between chunks).
-			m_chunkCursorForward = m_chunkQueue.back().startForward;
+			if (stuck) {
+				// Cursor pinned at a near-boundary (the codec is
+				// dribbling micro-slivers — see comment above). Keep
+				// the audio we just decoded (so the user actually
+				// HEARS the last 100-200 ms of the file in reverse,
+				// rather than losing it) but FORCE the cursor down to
+				// minF so the next iteration hits path 1
+				// (cursor<=minF) and terminates cleanly. Without this
+				// shove the chunk worker re-decodes the same boundary
+				// chunk forever and the listener hears the same
+				// fragment loop at 30-100 Hz: the user-reported "audio
+				// glitches + repeats last tens of ms at end of
+				// reverse" bug.
+				dbgLog("[revWorker] stuckCursor PINNED lastStartFwd=%.3f "
+				       "minF=%.3f — accepting chunk, snapping cursor to minF",
+				       pushedStartFwd, m_streamingMinForward);
+				m_chunkCursorForward  = m_streamingMinForward;
+				stuckChunkCount       = 0;
+				prevChunkStartForward = -1.0;
+			} else {
+				// Advance the worker cursor to the chunk's ACTUAL
+				// lower bound so the NEXT chunk picks up exactly where
+				// this one ends — no overlap (= same audio twice =
+				// audible stutter and apparent cursor jump backward)
+				// and no gap (= missing audio between chunks).
+				m_chunkCursorForward = m_chunkQueue.back().startForward;
+			}
+			// Mark this session as having shipped real audio. The
+			// natural-end gate above (chunkStart<=minF + empty)
+			// only fires once this flag is set, so a cold-filter-
+			// graph empty decode immediately after a loop seek can't
+			// be misread as end-of-stream anymore.
+			sessionEmittedChunk = true;
 			m_chunkCv.notify_one();
 		}
 	}

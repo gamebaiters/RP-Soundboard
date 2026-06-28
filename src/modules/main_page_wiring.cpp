@@ -917,18 +917,60 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             if (btn >= 0) {
                 if (auto *cur = model->getSoundInfo(btn)) si = *cur;
             }
+            // Seed sCur / eCur from the AUTHORITATIVE source:
+            //   1. live playing slot — its cropStart/cropEnd are
+            //      already in input-seconds and reflect every prior
+            //      edit applied this session.
+            //   2. otherwise the cell's stored SoundInfo —
+            //      getStartTime() honours cropEnabled (0.0 when off).
+            //      getPlayTime() returns the crop DURATION; convert
+            //      to an absolute end second so the mutator + save
+            //      below speak the same units.
+            // The previous version always seeded sCur=0.0, eCur=-1.0
+            // when the slot was eSILENT, then unconditionally wrote
+            // BOTH fields back to the model after running a one-edge
+            // mutator — wiping the untouched marker on every edit.
+            // User-reported symptom: removing one marker also wiped
+            // the other; setting a new end on a cell that already had
+            // a start reset the start to 0.
             double sCur = 0.0, eCur = -1.0;
-            if (sampler) sampler->getSlotCrop(slot, sCur, eCur);
+            bool seededFromLiveSlot = false;
+            if (sampler) {
+                double sLive = 0.0, eLive = -1.0;
+                sampler->getSlotCrop(slot, sLive, eLive);
+                if (sLive > 0.0 || eLive > 0.0) {
+                    sCur = sLive;
+                    eCur = eLive;
+                    seededFromLiveSlot = true;
+                }
+            }
+            if (!seededFromLiveSlot && btn >= 0) {
+                double sStored = si.getStartTime();
+                double dur     = si.getPlayTime();
+                sCur = sStored;
+                eCur = (dur > 0.0) ? (sStored + dur) : -1.0;
+            }
             mutate(si, sCur, eCur);
             if (btn >= 0) {
                 bool anyCrop = sCur > 0.0 || eCur > 0.0;
                 si.cropEnabled = anyCrop;
                 si.cropStartUnit  = 0;
-                si.cropStartValue = anyCrop ? int(sCur * 1000.0 + 0.5) : 0;
+                si.cropStartValue = (sCur > 0.0) ? int(sCur * 1000.0 + 0.5) : 0;
                 si.cropStopAfterAt = 1;
                 si.cropStopUnit    = 0;
                 si.cropStopValue   = (eCur > 0.0) ? int(eCur * 1000.0 + 0.5) : 0;
                 model->setSoundInfo(btn, si);
+                // Push the edit to disk immediately. Default ConfigModel
+                // policy only marks dirty + waits for the next flush
+                // event (play / disconnect / window close). A crop edit
+                // does not normally trigger any of those — the user
+                // right-clicks the waveform, sees the change, and may
+                // never re-play or close until next session restart,
+                // by which point the dirty flag was either flushed
+                // with a stale value (rare) or lost (TS3 crash, hard
+                // exit). Persisting now matches user expectation:
+                // "the markers I set should still be there next time".
+                model->writeConfigImmediate(QString());
             }
             if (sampler) sampler->setSlotCropLive(slot, sCur, eCur);
             ch->waveform()->setCropRange(sCur, eCur);

@@ -21,6 +21,7 @@
 #include <queue>
 #include <vector>
 #include <cassert>
+#include <chrono>
 #include <math.h>
 
 // ===== FILE DEBUG LOGGING =====
@@ -1092,19 +1093,71 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 		{
 			bool isStretch = slot.dsp && slot.dsp->isStretchEnabled();
 			bool canEnd = false;
+			int  captureAvail = 0;
 			{
 				SampleBuffer::Lock sbl(slot.sbCapture.getMutex());
-				canEnd = slot.sbCapture.avail() == 0;
+				captureAvail = slot.sbCapture.avail();
+				canEnd = captureAvail == 0;
 			}
 			if (isStretch && canEnd)
 				canEnd = slot.dsp->stretchCaptureDone();
 
 			if (canEnd)
 			{
+				sdbgLog("[loopBranch] slot=%d done=1 canEnd=1 loop=%d "
+				        "reverse=%d capAvail=%d",
+				        s, slot.loop ? 1 : 0,
+				        slot.audioReverse ? 1 : 0, captureAvail);
 				if (slot.loop) {
-					extremeLog("Sampler::loopRestart slot=%d reverse=%d cropStart=%.3f cropEnd=%.3f",
-					           s, slot.channelReverse ? 1 : 0,
-					           slot.cropStart, slot.cropEnd);
+					// Anti-glitch loop-rate guard. Streaming-reverse +
+					// rapid pitch / speed dragging on a short audio can
+					// leave the codec / atempo chain in a state where
+					// every fresh decode produces a chunk that covers
+					// FAR less than the requested input range. Each
+					// tiny chunk drains in a few ms, natural-end fires,
+					// loop restarts, the next decode produces another
+					// tiny chunk — the user hears the last fragment of
+					// reverse playback (= start of file in forward time)
+					// looping at 30-200 Hz, "audio si glitcha + ripete
+					// gli ultimi tot millisecondi all'infinito" bug.
+					// Detect by measuring loop-restart cadence: more
+					// than kMaxLoopsPerBurst loop fires inside a
+					// kBurstWindowMs window = sub-perceptual loop = kill
+					// the slot cleanly so the user gets silence (and a
+					// reload glyph in replay mode) instead of glitch
+					// noise. Normal loop usage of a 200 ms file at
+					// neutral speed = 5 loops / s ≪ threshold; even an
+					// extreme but legit case (100 ms file at speed=3)
+					// = 30 loops / s, also below threshold.
+					constexpr int kBurstWindowMs   = 1000;
+					constexpr int kMaxLoopsPerBurst = 35;
+					auto now = std::chrono::steady_clock::now();
+					int64_t nowMs = std::chrono::duration_cast<
+						std::chrono::milliseconds>(
+							now.time_since_epoch()).count();
+					if (slot.loopBurstStartMs == 0
+					    || nowMs - slot.loopBurstStartMs > kBurstWindowMs) {
+						slot.loopBurstStartMs = nowMs;
+						slot.loopBurstCount   = 0;
+					}
+					++slot.loopBurstCount;
+					if (slot.loopBurstCount > kMaxLoopsPerBurst) {
+						extremeLog("Sampler::loopRateLimit slot=%d "
+						           "burst=%d window=%lld ms — killing slot "
+						           "(glitch loop detected)",
+						           s, slot.loopBurstCount,
+						           (long long)(nowMs - slot.loopBurstStartMs));
+						slot.state = eSILENT;
+						slot.peakL.store(0.0f);
+						slot.peakR.store(0.0f);
+						emit onStopPlaying(s);
+						continue;
+					}
+					slot.lastLoopMonoMs = nowMs;
+					extremeLog("Sampler::loopRestart slot=%d reverse=%d cropStart=%.3f cropEnd=%.3f burst=%d/%d",
+					           s, slot.audioReverse ? 1 : 0,
+					           slot.cropStart, slot.cropEnd,
+					           slot.loopBurstCount, kMaxLoopsPerBurst);
 					// Per-playback random pitch jitter. Reads the LIVE
 					// SandboxState + gates on the sandbox master switch
 					// so toggling master off stops the jitter on the
@@ -1119,8 +1172,18 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 					// length). seek(end) drops the reverse buffer back
 					// to its index-0 position so playback restarts at
 					// the right edge of the waveform and walks left.
+					// IMPORTANT: gate on audioReverse, NOT channelReverse.
+					// A sound played reversed via the cell-level
+					// SoundInfo::reverse flag (cell context menu) has
+					// audioReverse=true but channelReverse=false; the old
+					// channelReverse check sent the loop restart to
+					// cropStart=0, which is ALREADY at minF for the
+					// reverse worker, so done() flipped back to true
+					// immediately and the slot ping-ponged between
+					// loop restart and natural-end forever — the
+					// "reverse + pitch/speed mods loop forever" bug.
 					double loopStartSec = slot.cropStart;
-					if (slot.channelReverse) {
+					if (slot.audioReverse) {
 						loopStartSec = (slot.cropEnd > 0.0)
 							? slot.cropEnd
 							: slot.inputFile->getLength();
@@ -1164,6 +1227,8 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 					slot.cachedPositionSec.store(loopStartSec, std::memory_order_relaxed);
 					slot.posCacheValid = false;
 				} else {
+					sdbgLog("[loopBranch] slot=%d -> eSILENT "
+					        "(natural end, loop off)", s);
 					slot.state = eSILENT;
 					slot.peakL.store(0.0f);
 					slot.peakR.store(0.0f);
@@ -1877,6 +1942,13 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 			// first audio-thread cache refresh snaps to the decoder
 			// position instead of being clamped against a stale value.
 			s.posCacheValid = false;
+			// Fresh playback: clear the anti-glitch loop-rate guard so
+			// the first loop boundary is timed cleanly (otherwise a
+			// previous-session high-rate burst could carry over and
+			// kill this playback before it loops once).
+			s.lastLoopMonoMs   = 0;
+			s.loopBurstCount   = 0;
+			s.loopBurstStartMs = 0;
 			s.slotDbLocal = m_globalDbSettingLocal;
 			s.slotDbRemote = m_globalDbSettingRemote;
 			double localDb = m_multiMode ? s.slotDbLocal : m_globalDbSettingLocal;

@@ -1,3 +1,96 @@
+GameBaiters Soundboard v2.2.15
+==============================
+
+Targeted bug-fix release on top of v2.2.14. Closes the "reverse mode
+loops a 30-200 Hz fragment of audio forever after rapid pitch / speed
+dragging on a short file" bug end-to-end, and fixes waveform crop
+markers losing the untouched edge on every edit.
+
+Highlights
+----------
+
+* Reverse-mode infinite glitch loop killed at the root. Two
+  cascading bugs in samples.cpp + inputfileffmpeg.cpp combined into
+  a vicious cycle that, on short audio with loop=ON, pitch/speed
+  dragged in reverse mode, would dribble the last tens of ms of
+  audio at the file-start boundary at 30-200 Hz, sometimes for
+  several seconds, then block all subsequent audio until plugin
+  reload. Fixed at three independent layers:
+
+  1. samples.cpp loop branch was checking `slot.channelReverse` to
+     decide whether to seek the loop restart to cropEnd (reverse
+     audio direction) or cropStart (forward). Sounds played reverse
+     via the cell-level SoundInfo::reverse flag (cell context menu)
+     carry audioReverse=true but channelReverse=false; the wrong
+     check sent their loop restart to cropStart=0, which is already
+     at minF for the reverse chunk worker, so done() flipped back to
+     true on the first iteration and the slot ping-ponged forever.
+     Changed to gate on slot.audioReverse so both reverse paths
+     (channel button + cell flag) loop correctly.
+
+  2. inputfileffmpeg.cpp chunk worker added a session-emitted gate
+     for the cursor<=minF + empty-decode natural-end path. A cold
+     filter graph immediately after a pitch/speed rebuild (or a
+     loop restart) can emit one empty decode at file start before
+     warming up. The old code flipped m_chunkFileEnded=true on that
+     single empty, samples.cpp's done() returned true on the first
+     audio-thread poll, loop branch re-seeked to cropEnd, the
+     rebuild fired again, empty again, and the cycle spun forever
+     with the user hearing the last fragment of audio glitching.
+     Natural-end now fires only when audio HAS been emitted this
+     session; cold-graph empties retry the same cursor instead.
+
+  3. inputfileffmpeg.cpp chunk worker now tracks cursor descent rate
+     between consecutive successful chunks. If the codec dribbles
+     micro-slivers (< 50 ms descent per chunk) either AT the
+     boundary (fast path, fires on the first sliver) or for two
+     consecutive iterations anywhere else (slow path, ~500 ms
+     ceiling), the worker accepts the current chunk so the listener
+     hears the last legitimate slice of audio, then SNAPS the
+     cursor down to minF so the next iteration cleanly hits the
+     genuine natural-end path. Replaces the previous behaviour of
+     silently re-decoding the same boundary chunk indefinitely.
+
+* samples.cpp loop-restart rate guard. Belt-and-braces second line
+  of defence against any other path that could spin a tight loop
+  cycle (codec bug, malformed container, future regression). If
+  more than 35 loop restarts fire inside a 1 s window on a slot,
+  the slot is killed cleanly and the user hears silence + sees the
+  reload glyph (in replay mode) instead of a glitch storm. Normal
+  loop usage of a 200 ms file at neutral speed = 5 loops / s; even
+  extreme legit usage (100 ms file at speed=3) = 30 loops / s,
+  both well below the threshold. The guard is reset on every fresh
+  playSoundInSlot so a previous-session burst can't carry over.
+
+* Waveform crop markers now persist correctly across every edit.
+  Two distinct bugs:
+
+  1. applyCropEdit was seeding both edges from the live playing
+     slot via Sampler::getSlotCrop, which returns the 0.0 / -1.0
+     defaults when the slot is eSILENT. Stopped slots therefore
+     ran every right-click edit against the defaults, then wrote
+     BOTH cropStartValue and cropStopValue back to the model after
+     a single-edge mutate — wiping whichever edge the user did not
+     touch. User-reported symptom: "modifying or removing a marker
+     wipes the other too, the change is only temporary anyway".
+     Fixed by preferring live-slot crop only when the slot actually
+     has one, otherwise seeding from the cell's stored SoundInfo
+     (getStartTime + getPlayTime → absolute end second).
+
+  2. The save block wrote `cropStartValue = anyCrop ? round(sCur)
+     : 0`, which dropped the start to 0 whenever the user set ONLY
+     the end (because sCur was 0 + eCur > 0 still flagged anyCrop).
+     Per-field condition split so each edge persists independently:
+     `cropStartValue = (sCur > 0) ? round(sCur) : 0`, same for end.
+
+  3. Crop edits now call writeConfigImmediate after setSoundInfo so
+     the change reaches disk on the right-click commit instead of
+     waiting for the next play / window-close / disconnect flush.
+     Matches user expectation: markers set today are still set on
+     next session restart even if no other state-changing event
+     fires in between.
+
+==============================================================
 GameBaiters Soundboard v2.2.14
 ==============================
 

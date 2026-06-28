@@ -24,6 +24,7 @@
 #include <thread>
 #include <vector>
 #include <cstring>
+#include <cstdint>
 #include <cmath>
 
 class InputFile;
@@ -192,6 +193,22 @@ private:
 		// re-applied whenever the slot's dsp is created/cleared.
 		float fxReverbWet = 0.0f;
 		bool loop = false;
+		// Anti-glitch loop-rate guard. The streaming-reverse decoder can
+		// occasionally produce a chunk that covers far less than the
+		// requested input range (codec / atempo state confused by rapid
+		// pitch / speed dragging on a short audio). Reader plays the
+		// tiny chunk, cursor descends to minF immediately, natural-end
+		// fires, samples.cpp loops back to cropEnd, the next decode
+		// produces another tiny chunk — user hears the last few ms of
+		// reverse playback looping at 30-200 Hz, "audio glitches +
+		// repeats forever" bug. If loops fire faster than the threshold
+		// (= sub-perceptual loop), suppress further loop restarts and
+		// let the slot die cleanly so the user hears silence instead of
+		// glitch noise. Monotonic ms (steady_clock) so any wall-clock
+		// adjustment can't break this.
+		int64_t lastLoopMonoMs   = 0;
+		int     loopBurstCount   = 0;
+		int64_t loopBurstStartMs = 0;
 		// Per-channel reverse-playback toggle (set from the WaveformPlayer
 		// reverse button via setSlotReverse). When ON, every new play
 		// through this slot is forced to reverse mode regardless of

@@ -906,74 +906,70 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         // Waveform right-click crop editor: persist edit back to the
         // originating cell via the slot->btn map, then live-update the
         // active playback so the marker + decoder bound + loop agree.
-        auto applyCropEdit = [page, sampler, model, ch](auto mutate) {
+        //
+        // The function is fully EXPLICIT — callers compute the desired
+        // (newStart, newEnd) absolute values themselves. The legacy
+        // mutator-lambda API was replaced because it conflated three
+        // things: (1) the *current* state (seed), (2) the user's *intent*
+        // (mutate), and (3) the *value to save* (= post-mutate state).
+        // When the seed was wrong (live slot fell out of sync, or
+        // getSlotCrop returned defaults for a stopped slot, or anything
+        // else), the resulting save-to-model wrote a CORRECT-FOR-WRONG-
+        // SEED tuple to disk, silently corrupting the persisted crop.
+        // The user-reported "remove start/end/both does not persist on
+        // re-press" was this class of bug.
+        //
+        // Now: each caller decides "I want start=X and end=Y." This
+        // function ONLY persists + propagates. No seeding, no mutating.
+        //
+        // Convention: start <= 0 = no start marker; end < 0 = no end
+        // marker. (start=0 is intentionally treated as "no start" since
+        // a crop that begins at 0 s carries no information beyond cropEnabled.)
+        auto applyCropEdit = [page, sampler, model, ch](double newStart, double newEnd) {
             int slot = -1;
             for (int i = 0; i < page->channels().size(); ++i) {
                 if (page->channels().at(i) == ch) { slot = i; break; }
             }
             if (slot < 0) return;
+            // Normalise: an out-of-order pair collapses to "no end".
+            // (Callers should already do the right thing; this is a
+            // belt-and-braces guard.)
+            if (newStart < 0.0) newStart = 0.0;
+            if (newEnd >= 0.0 && newEnd <= newStart + 0.001) newEnd = -1.0;
+
             int btn = s_slotToBtnIdx.value(slot, -1);
-            SoundInfo si;
             if (btn >= 0) {
-                if (auto *cur = model->getSoundInfo(btn)) si = *cur;
-            }
-            // Seed sCur / eCur from the AUTHORITATIVE source:
-            //   1. live playing slot — its cropStart/cropEnd are
-            //      already in input-seconds and reflect every prior
-            //      edit applied this session.
-            //   2. otherwise the cell's stored SoundInfo —
-            //      getStartTime() honours cropEnabled (0.0 when off).
-            //      getPlayTime() returns the crop DURATION; convert
-            //      to an absolute end second so the mutator + save
-            //      below speak the same units.
-            // The previous version always seeded sCur=0.0, eCur=-1.0
-            // when the slot was eSILENT, then unconditionally wrote
-            // BOTH fields back to the model after running a one-edge
-            // mutator — wiping the untouched marker on every edit.
-            // User-reported symptom: removing one marker also wiped
-            // the other; setting a new end on a cell that already had
-            // a start reset the start to 0.
-            double sCur = 0.0, eCur = -1.0;
-            bool seededFromLiveSlot = false;
-            if (sampler) {
-                double sLive = 0.0, eLive = -1.0;
-                sampler->getSlotCrop(slot, sLive, eLive);
-                if (sLive > 0.0 || eLive > 0.0) {
-                    sCur = sLive;
-                    eCur = eLive;
-                    seededFromLiveSlot = true;
+                if (auto *cur = model->getSoundInfo(btn)) {
+                    SoundInfo si = *cur;
+                    bool anyCrop = newStart > 0.0 || newEnd > 0.0;
+                    si.cropEnabled     = anyCrop;
+                    si.cropStartUnit   = 0;  // ms
+                    si.cropStartValue  = (newStart > 0.0) ? int(newStart * 1000.0 + 0.5) : 0;
+                    si.cropStopAfterAt = 1;  // "stop AT X" (absolute, not duration)
+                    si.cropStopUnit    = 0;  // ms
+                    si.cropStopValue   = (newEnd   > 0.0) ? int(newEnd   * 1000.0 + 0.5) : 0;
+                    extremeLog("cropEdit slot=%d btn=%d newS=%.3f newE=%.3f -> cropEn=%d sVal=%d eVal=%d",
+                               slot, btn, newStart, newEnd,
+                               si.cropEnabled ? 1 : 0,
+                               si.cropStartValue, si.cropStopValue);
+                    model->setSoundInfo(btn, si);
+                    // Push the edit to disk immediately. Default ConfigModel
+                    // policy only marks dirty + waits for the next flush
+                    // event (play / disconnect / window close). A crop edit
+                    // does not normally trigger any of those — the user
+                    // right-clicks the waveform, sees the change, and may
+                    // never re-play or close until next session restart,
+                    // by which point the dirty flag was either flushed
+                    // with a stale value (rare) or lost (TS3 crash, hard
+                    // exit). Persisting now matches user expectation:
+                    // "the markers I set should still be there next time".
+                    model->writeConfigImmediate(QString());
                 }
             }
-            if (!seededFromLiveSlot && btn >= 0) {
-                double sStored = si.getStartTime();
-                double dur     = si.getPlayTime();
-                sCur = sStored;
-                eCur = (dur > 0.0) ? (sStored + dur) : -1.0;
-            }
-            mutate(si, sCur, eCur);
-            if (btn >= 0) {
-                bool anyCrop = sCur > 0.0 || eCur > 0.0;
-                si.cropEnabled = anyCrop;
-                si.cropStartUnit  = 0;
-                si.cropStartValue = (sCur > 0.0) ? int(sCur * 1000.0 + 0.5) : 0;
-                si.cropStopAfterAt = 1;
-                si.cropStopUnit    = 0;
-                si.cropStopValue   = (eCur > 0.0) ? int(eCur * 1000.0 + 0.5) : 0;
-                model->setSoundInfo(btn, si);
-                // Push the edit to disk immediately. Default ConfigModel
-                // policy only marks dirty + waits for the next flush
-                // event (play / disconnect / window close). A crop edit
-                // does not normally trigger any of those — the user
-                // right-clicks the waveform, sees the change, and may
-                // never re-play or close until next session restart,
-                // by which point the dirty flag was either flushed
-                // with a stale value (rare) or lost (TS3 crash, hard
-                // exit). Persisting now matches user expectation:
-                // "the markers I set should still be there next time".
-                model->writeConfigImmediate(QString());
-            }
-            if (sampler) sampler->setSlotCropLive(slot, sCur, eCur);
-            ch->waveform()->setCropRange(sCur, eCur);
+            if (sampler) sampler->setSlotCropLive(slot, newStart, newEnd);
+            ch->waveform()->setCropRange(newStart, newEnd);
+            // Track the new range for the cursor-snap logic below.
+            const double sCur = newStart, eCur = newEnd;
             // Cursor-snap when loop is currently ON: shifting the crop
             // edges effectively shifts the loop window. If the live
             // cursor falls outside the new window the channel would
@@ -997,31 +993,63 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 }
             }
         };
+        // Helper: read the CURRENT crop range for this channel.
+        // Priority: STORED SoundInfo (disk truth) when the slot has a
+        // cell mapping, otherwise live slot. Returns absolute seconds:
+        // start = 0.0 + end = -1.0 means "no crop set".
+        //
+        // Stored SoundInfo wins over live slot because: (a) live slot
+        // is wiped to defaults when the slot is eSILENT, which would
+        // make a "remove start" on an idle channel see "0/-1" as the
+        // current state and then save "0/-1" back — wiping the
+        // untouched end too; (b) live slot can drift behind disk if
+        // a sandbox/macro path mutated the model without going through
+        // setSlotCropLive.
+        auto currentCrop = [page, sampler, model, ch](double &start, double &end) {
+            start = 0.0; end = -1.0;
+            int slot = -1;
+            for (int i = 0; i < page->channels().size(); ++i) {
+                if (page->channels().at(i) == ch) { slot = i; break; }
+            }
+            if (slot < 0) return;
+            int btn = s_slotToBtnIdx.value(slot, -1);
+            if (btn >= 0) {
+                if (const auto *cur = model->getSoundInfo(btn)) {
+                    start = cur->getStartTime();
+                    const double dur = cur->getPlayTime();
+                    end = (dur > 0.0) ? (start + dur) : -1.0;
+                    return;
+                }
+            }
+            if (sampler) sampler->getSlotCrop(slot, start, end);
+        };
         QObject::connect(ch->waveform(), &WaveformPlayer::cropStartRequestedAt,
-                         page, [applyCropEdit](double seconds){
-            applyCropEdit([seconds](SoundInfo &, double &s, double &e){
-                s = seconds;
-                if (e > 0.0 && s >= e) s = qMax(0.0, e - 0.1);
-            });
+                         page, [applyCropEdit, currentCrop](double seconds){
+            double s, e; currentCrop(s, e);
+            double newS = seconds;
+            if (e > 0.0 && newS >= e - 0.001) newS = qMax(0.0, e - 0.1);
+            applyCropEdit(newS, e);
         });
         QObject::connect(ch->waveform(), &WaveformPlayer::cropEndRequestedAt,
-                         page, [applyCropEdit](double seconds){
-            applyCropEdit([seconds](SoundInfo &, double &s, double &e){
-                e = seconds;
-                if (e <= s + 0.01) e = s + 0.1;
-            });
+                         page, [applyCropEdit, currentCrop](double seconds){
+            double s, e; currentCrop(s, e);
+            double newE = seconds;
+            if (newE <= s + 0.001) newE = s + 0.1;
+            applyCropEdit(s, newE);
         });
         QObject::connect(ch->waveform(), &WaveformPlayer::cropClearStartRequested,
-                         page, [applyCropEdit]{
-            applyCropEdit([](SoundInfo &, double &s, double &){ s = 0.0; });
+                         page, [applyCropEdit, currentCrop]{
+            double s, e; currentCrop(s, e);
+            applyCropEdit(0.0, e);
         });
         QObject::connect(ch->waveform(), &WaveformPlayer::cropClearEndRequested,
-                         page, [applyCropEdit]{
-            applyCropEdit([](SoundInfo &, double &, double &e){ e = -1.0; });
+                         page, [applyCropEdit, currentCrop]{
+            double s, e; currentCrop(s, e);
+            applyCropEdit(s, -1.0);
         });
         QObject::connect(ch->waveform(), &WaveformPlayer::cropClearAllRequested,
                          page, [applyCropEdit]{
-            applyCropEdit([](SoundInfo &, double &s, double &e){ s = 0.0; e = -1.0; });
+            applyCropEdit(0.0, -1.0);
         });
         // Right-button drag on the waveform proposes a loop area. Two
         // user-driven gates: (1) the feature itself is OFF by default
@@ -1099,10 +1127,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             QObject::connect(no, &QPushButton::clicked, bubble, &QFrame::close);
             QObject::connect(yes, &QPushButton::clicked, bubble,
                              [applyCropEdit, ch, sampler, sa, sb, bubble]{
-                applyCropEdit([sa, sb](SoundInfo &, double &s, double &e){
-                    s = sa;
-                    e = sb;
-                });
+                applyCropEdit(sa, sb);
                 ch->waveform()->setLooping(true);
                 int slotIdx = ch->channelId();
                 if (sampler && slotIdx >= 0) {

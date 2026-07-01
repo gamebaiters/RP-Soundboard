@@ -5,6 +5,7 @@
 #ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
 #endif
+#include <atomic>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -63,11 +64,23 @@ private:
     // Active preset character bias. setRoomType copies these from the
     // selected RoomPreset so the per-block computeReflections + late
     // tail can shape the sound beyond what raw absorption can express.
-    float m_presetLateFeedback = 0.55f;
-    float m_presetLateDamp     = 0.45f;
-    float m_presetLateMix      = 0.30f;
-    float m_presetTapLpHz      = 16000.0f;
-    float m_presetErDelayScale = 1.0f;
+    // Atomic so a GUI-thread setRoomType cannot tear with an audio-
+    // thread compute. plain-float reads happen to be tear-free on
+    // x86 but UB by the C++ memory model - using atomics removes
+    // the data race report and lets the audio thread see consistent
+    // preset character across the block.
+    std::atomic<float> m_presetLateFeedback{0.55f};
+    std::atomic<float> m_presetLateDamp    {0.45f};
+    std::atomic<float> m_presetLateMix     {0.30f};
+    std::atomic<float> m_presetTapLpHz     {16000.0f};
+    std::atomic<float> m_presetErDelayScale{1.0f};
+
+    // DC blocker on the Schroeder tail output. A long-feedback comb
+    // chain accumulates DC offset that biases the post-engine limiter
+    // and reduces musical headroom - the blocker removes the offset
+    // without affecting audible content.
+    float m_dcLastInL = 0.0f, m_dcLastInR = 0.0f;
+    float m_dcLastOutL = 0.0f, m_dcLastOutR = 0.0f;
 
     // IIR smoothers for interpolating room dimensions -------------------------
     IIRSmoother m_smoothWidth;

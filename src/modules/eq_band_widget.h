@@ -14,10 +14,31 @@
 // custom.
 
 #include <QSlider>
+#include <cmath>
 
+// Slider range is stored in TENTHS of a decibel so the user can dial
+// in a smooth 0.1 dB granularity: internal QSlider value in
+// [-120, 120] maps to [-12.0, +12.0] dB. All external code that used
+// to treat the value as integer dB must now divide by 10 before
+// writing to SandboxState::eqBandDb[i], and multiply by 10 before
+// pushing state back into the slider. Two static helpers below cover
+// the conversions so callers do not have to bake the factor into a
+// dozen call sites.
 class EqBandWidget : public QSlider {
     Q_OBJECT
 public:
+    static constexpr int kSliderMin = -120;   // -12.0 dB
+    static constexpr int kSliderMax =  120;   // +12.0 dB
+    static constexpr int kSliderPerDb = 10;   // one dB = ten slider ticks
+
+    static inline float sliderToDb(int v) { return static_cast<float>(v) / kSliderPerDb; }
+    static inline int   dbToSlider(float dB) {
+        int v = static_cast<int>(std::round(dB * kSliderPerDb));
+        if (v < kSliderMin) v = kSliderMin;
+        if (v > kSliderMax) v = kSliderMax;
+        return v;
+    }
+
     explicit EqBandWidget(QWidget *parent = nullptr);
 
     // 0..1 level read from the audio thread (channel peak). Drives the

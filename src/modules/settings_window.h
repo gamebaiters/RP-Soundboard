@@ -45,6 +45,12 @@ public:
     int  cols() const;
     bool adaptWaveformToFx() const;
     bool showCropMarkers() const;
+    bool multiChannelInfinity() const;
+    bool showPauseAllButton() const;
+    bool showStopAllButton() const;
+    bool verticalMeter() const;
+    bool showSkipButtons() const;
+    bool spectrogramView() const;
 
     // Reset behaviour flags
     bool resetChVolume() const;
@@ -82,6 +88,12 @@ public slots:
     void setCols(int c);
     void setAdaptWaveformToFx(bool on);
     void setShowCropMarkers(bool on);
+    void setMultiChannelInfinity(bool on);
+    void setShowPauseAllButton(bool on);
+    void setShowStopAllButton(bool on);
+    void setVerticalMeter(bool on);
+    void setShowSkipButtons(bool on);
+    void setSpectrogramView(bool on);
 
     void setResetChVolume(bool on);
     void setResetChFx(bool on);
@@ -135,6 +147,12 @@ signals:
     void resetAllHotkeysRequested();
     void adaptWaveformToFxChanged(bool);
     void showCropMarkersChanged(bool);
+    void multiChannelInfinityChanged(bool);
+    void showPauseAllButtonChanged(bool);
+    void showStopAllButtonChanged(bool);
+    void verticalMeterChanged(bool);
+    void showSkipButtonsChanged(bool);
+    void spectrogramViewChanged(bool);
 
     void resetChVolumeChanged(bool);
     void resetChFxChanged(bool);
@@ -200,6 +218,12 @@ private:
     QPushButton *m_close;
     QCheckBox   *m_adaptWaveform = nullptr;
     QCheckBox   *m_cropMarkers = nullptr;
+    QCheckBox   *m_multiChannelInfinity = nullptr;
+    QCheckBox   *m_showPauseAllButton   = nullptr;
+    QCheckBox   *m_showStopAllButton    = nullptr;
+    QCheckBox   *m_verticalMeter        = nullptr;
+    QCheckBox   *m_showSkipButtons      = nullptr;
+    QCheckBox   *m_spectrogramView      = nullptr;
 
     // Reset behaviour
     QCheckBox   *m_resetChVolume     = nullptr;

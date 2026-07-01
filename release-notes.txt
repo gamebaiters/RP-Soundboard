@@ -1,3 +1,168 @@
+GameBaiters Soundboard v2.2.17
+==============================
+
+Massive feature + audio-quality release on top of v2.2.16. Four
+new DSP modules (Noise Gate, De-esser, Transient Shaper, Dynamic
+EQ), physical Doppler on the Leia rotating modes, cross-slot
+sidechain routing for every dynamics stage, first spectrogram
+view of the channel waveform, per-channel vertical LED meter,
+multi-channel "infinity" mode that spawns temporary channels on
+demand, six new user-facing options in Settings, and one more
+round of frying fixes tightening the Leia HRTF crossfade under
+rotation. Full pipeline colour update, complete IT translation
+for every new string, persistence pass so every option survives
+the restart.
+
+Highlights
+----------
+
+* NEW DSP - Noise Gate. Full-band gate with independent attack /
+  hold / release, 3 dB hysteresis, and RANGE floor (max -80 dB).
+  Sidechain source selector: -1 = self, 0..31 = read another
+  slot's envelope via the new cross-slot sidechain bus. Classic
+  post-mic clean-up + creative gating on either the same channel
+  or a partner track.
+
+* NEW DSP - De-esser. Sibilance-band compressor. Narrow bandpass
+  biquad isolates the trigger region (default 6.5 kHz, Q=3.0);
+  envelope crossing threshold pulls the FULL signal down by up to
+  RANGE dB. Cross-slot sidechain lets the de-ess of one channel
+  react to the HF energy of another (podcast + noise-bed pair).
+
+* NEW DSP - Transient Shaper. Dual envelope follower (fast +
+  slow); the ratio isolates attack vs sustain and each is scaled
+  independently by +/-20 dB. Positive attack = punchier hits;
+  negative attack = smoothed. Positive sustain = fuller body;
+  negative sustain = tighter release.
+
+* NEW DSP - Dynamic EQ (4 bands). Each band is a peaking biquad
+  driven by an envelope on a filtered copy of the input. Static
+  gain = baseline EQ shape; Dynamic gain kicks in above threshold
+  with the given ratio (negative = downward compression on that
+  band, positive = upward expansion). Ideal for taming a nasal
+  midrange resonance only when loud, or nudging a sub-bass shelf
+  only during hot passages.
+
+* NEW SPATIAL - Doppler shift on 3D Rotate / 8D preset (Leia).
+  Physical Doppler layered on top of the orbit: as each virtual
+  ear moves toward/away from the source, the pitch bends up/down.
+  Realistic Doppler at typical RPMs is nearly inaudible, so a
+  Strength slider (0..100 %) EXAGGERATES the physical shift up
+  to ~50x. Off by default; only affects rotating Leia modes.
+
+* NEW ROUTING - cross-slot sidechain bus. Every SlotDsp publishes
+  a rolling envelope atomic; the Sampler pulls the source slot's
+  envelope right before process() and pushes it into the target
+  slot's Compressor / Gate / De-esser external-envelope inputs.
+  Any of the three stages accepts a Sidechain Source spinbox in
+  its accordion; -1 = self, 0..31 = another channel. Enables
+  ducking, keying, one-track-triggers-another workflows without
+  any plugin routing gymnastics.
+
+* NEW UI - Spectrogram-style waveform (per-channel, global
+  toggle). SoundView paints each column as a warm-to-cool
+  heatmap derived from bin magnitude - a compact energy view
+  distinct from the standard peak min/max waveform. Toggle in
+  Settings > Channels > "Render channel waveform as a
+  spectrogram-style heatmap".
+
+* NEW UI - Vertical LED visualizer. Optional replacement for the
+  default horizontal L/R meter: two thin bars side-by-side
+  running bottom-to-top, ~42 px wide, sized to the existing
+  channel row height (no channel is enlarged). Toggle in
+  Settings > Channels > "Vertical LED visualizer on channels".
+
+* NEW UI - Show/hide skip buttons per channel. Global setting to
+  hide the -10s / -5s / +5s / +10s buttons on every channel
+  (existing + newly created). Compact transport for minimalist
+  layouts.
+
+* NEW UI - Show/hide "Pause all" + "Stop all" main-toolbar
+  buttons independently. Settings > Channels > "Show 'Pause all'
+  / 'Stop all' button in the main toolbar".
+
+* NEW BEHAVIOUR - Multi-channel infinity mode. When ON, clicking
+  an audio plays it on the default channel (slot 0); every
+  additional click spawns a NEW temporary channel per audio,
+  automatically removed when playback stops. Loop / reverse
+  channels are NEVER auto-removed - they only vanish on the red
+  stop button click (or Stop All). The '+ Add channel' button is
+  hidden while this mode is on. Settings > Channels > "Multi-
+  channel infinity".
+
+* EQ UX overhaul - band sliders operate on 0.1 dB granularity
+  (range -12.0 .. +12.0 dB) so drag feels smooth instead of
+  stepping integer dB. Cursor thumb enlarged from 4 px to 9 px
+  with a centre hairline for precise readback. Vertical wheel =
+  0.5 dB per notch (Shift = 2 dB). Preset name in the combo
+  reflects the state:
+    - clean predefined = the built-in name ("Smile"),
+    - edited predefined = "Personalizzato" (click the built-in
+      name again to restore),
+    - clean custom = user's saved name,
+    - edited custom = "<name>*" (asterisk = unsaved edits).
+  Save button on a dirty custom preset prompts Overwrite / Save
+  as new... / Cancel.
+
+* LEIA fry residuals - user reported the rotation-frying was
+  still present with heavy DSP stacks pushing the input past
+  nominal levels. Two more root-cause fixes:
+    1. HRIR crossfade window bumped 15 ms -> 30 ms. Longer fade
+       flattens the per-sample crossfade envelope slope and lets
+       the pending chain settle more of its own OLA tail into
+       the output while the fade is still in progress.
+    2. Pending-chain OLA overlap now SEEDED from the active
+       overlap (previously zero-initialised). Root cause: zero
+       init meant the pending chain started with no tail while
+       active had the full previous-block tail. During the fade
+       the (active + tail) vs (pending + zero) blend added a
+       residual = full active tail scaled by (1 - alpha),
+       decaying sample-by-sample - exactly the impulse-shaped
+       artefact heard as frying when a rotation-driven IR change
+       lined up with a loud DSP-boosted signal. Seeding with the
+       previous tail is a good approximation (adjacent HRIRs are
+       smooth in the SOFA grid) and the crossfade replaces the
+       copied tail with the new IR's own tail across the window
+       instead of ADDING one tail to zero.
+
+* PIPELINE colours - four new colours slotted into the pipeline
+  visualiser so each new DSP module has its own on-block hue:
+  Noise Gate (slate), De-esser (pink), Transient Shaper (aqua),
+  Dynamic EQ (amber).
+
+* PERSISTENCE fix - every new toggle option added since v2.2.16
+  (vertical meter, skip buttons, pause/stop-all visibility, ...)
+  was pushed to the SettingsWindow at wire time BEFORE any
+  channel widgets existed, so the per-channel side of the toggle
+  never landed on session restore. channelAdded now fires a
+  push handler that applies EVERY relevant per-channel setting
+  (meter orientation, skip buttons, adaptive waveform, crop
+  markers, FX visibility, waveform visibility, meter/export
+  buttons, sandbox availability, spectrogram mode) to the fresh
+  channel widget. The setting values themselves have always been
+  round-tripped through the INI on the model side; this hooks
+  the last-mile UI reapplication.
+
+* IT translation - every new string added this cycle is
+  translated to Italian, plus a sweep of unfinished carry-overs
+  from earlier cycles that never made it into the .qm. All
+  known-user-facing surfaces speak the selected language now.
+
+Reference / carry-over
+----------------------
+
+* SandboxState schema bumped with new fields (gate*, deesser*,
+  trans*, dyneq*, doppler*, compSidechainSlot, gateSidechainSlot,
+  deesserSidechainSlot). JSON serialisation preserves backward
+  compat: unknown fields default to Off / neutral so an INI
+  written by v2.2.16 loads cleanly into 2.2.17.
+
+* DspStage enum grew from 14 to 18 (Stage_NoiseGate,
+  Stage_DeEsser, Stage_TransientShaper, Stage_DynEq appended -
+  never renumbered). Old pipelineOrderV2 arrays pad the missing
+  stages to the tail via fromJson's existing padding logic.
+
+
 GameBaiters Soundboard v2.2.16
 ==============================
 

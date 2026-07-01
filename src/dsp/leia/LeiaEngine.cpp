@@ -147,46 +147,65 @@ void LeiaEngine::processBlock(const float* stereoIn,
     // Master gain ramp spans entire block.
     m_gainRamp.apply(stereoOut, frames, 2);
 
-    // Post-engine catastrophic peak guard.
-    //
-    // Earlier this stage was a 1.0-ceiling envelope-following limiter
-    // (15 ms attack / 200 ms release). On complex (broadband, high
-    // peak) material with the 8D engine that limiter pumped the gain
-    // down for each peak, then released slowly - and as the HRIR
-    // changed with rotation the peak spectrum changed with it, so the
-    // limiter's gain modulated at the rotation rate. That AM riding
-    // the signal sounded like the "frying" the user kept reporting.
-    //
-    // SlotDsp::softLimit already provides a memoryless tanh-style
-    // bound to [-1, 1] downstream of every spatial stage, so the
-    // role of this stage shrinks to "do not let a runaway HRIR sum
-    // blow up the output above 1.4 - softLimit handles everything
-    // up to that comfortably". Ceiling 1.4 with the same envelope
-    // means the limiter is essentially asleep on normal material and
-    // only wakes up on genuinely pathological overshoot - no pumping,
-    // no rotation-rate AM artefact.
-    {
-        constexpr float kCeil = 1.4f;
-        float peak = 0.0f;
-        for (int i = 0; i < frames * 2; ++i) {
-            float a = std::fabs(stereoOut[i]);
-            if (a > peak) peak = a;
-        }
-        float targetGain = 1.0f;
-        if (peak * m_postLimGain > kCeil) targetGain = kCeil / peak;
-        const float attackCoef  = 1.0f - std::exp(-1.0f / (0.015f * m_sampleRate));
-        const float releaseCoef = 1.0f - std::exp(-1.0f / (0.200f * m_sampleRate));
-        float g = m_postLimGain;
-        for (int i = 0; i < frames; ++i) {
-            float coef = (targetGain < g) ? attackCoef : releaseCoef;
-            g += coef * (targetGain - g);
-            if (g < 0.1f) g = 0.1f;
-            if (g > 1.0f) g = 1.0f;
-            stereoOut[i * 2 + 0] *= g;
-            stereoOut[i * 2 + 1] *= g;
-        }
-        m_postLimGain = g;
+    // DC blocker on the direct + reflection sum. The mysofa HRIR set
+    // carries small residual DC that compounds when summed with the
+    // ShoeboxRoom tail (which has its own comb-loop DC accumulation).
+    // Left in place, that DC biases the memoryless soft-saturator below
+    // and shaves the negative-going bass peaks harder than the positive
+    // ones - audible as asymmetric bass distortion, i.e. the residual
+    // "frying" the user reported on sustained low content even after
+    // the earlier fixes. R = 0.997 gives -3 dB at ~23 Hz at 48 kHz,
+    // preserving every bit of musical bass content while removing the
+    // slow bias.
+    constexpr float kDcR = 0.997f;
+    for (int i = 0; i < frames; ++i) {
+        float xL = stereoOut[i * 2 + 0];
+        float xR = stereoOut[i * 2 + 1];
+        float yL = xL - m_dcLastInL + kDcR * m_dcLastOutL;
+        float yR = xR - m_dcLastInR + kDcR * m_dcLastOutR;
+        m_dcLastInL  = xL;
+        m_dcLastInR  = xR;
+        m_dcLastOutL = yL;
+        m_dcLastOutR = yR;
+        stereoOut[i * 2 + 0] = yL;
+        stereoOut[i * 2 + 1] = yR;
     }
+
+    // Post-engine MEMORYLESS soft saturation.
+    //
+    // Replaces the previous envelope-following peak limiter
+    // (attack/release). On rotating sources the HRIR-dependent peak
+    // spectrum changed with rotation; the envelope gain modulated
+    // at the rotation rate; that AM rode the signal as the audible
+    // "frying" the user kept reporting. Raising the ceiling helped
+    // but never killed it for EQ-boosted material.
+    //
+    // Memoryless tanh-style bound: depends only on the current sample,
+    // so no envelope = no AM = no rotation-rate frying, ever.
+    //
+    // Knee raised T=1.2 -> T=1.8 and softened A=0.3 -> A=0.6. The old
+    // T=1.2 was still audibly compressing hot low-freq peaks (the user
+    // reported "as if a physical limiter is inhibiting playback,
+    // especially on bass"). Bass content routinely tops 1.2 on
+    // EQ-boosted material - the compression there translated to odd-
+    // order harmonic distortion perceived as frying. T=1.8 keeps every
+    // bass peak below the knee for normal listening levels; SlotDsp's
+    // downstream softLimit (now T=0.98) handles the final clip. When
+    // the input truly exceeds 1.8 the softer A=0.6 gives a smoother
+    // curve to the asymptote at ~2.4 so any residual saturation is
+    // musical rather than harsh.
+    constexpr float kT = 1.8f;
+    constexpr float kA = 0.6f;
+    for (int i = 0; i < frames * 2; ++i) {
+        float x  = stereoOut[i];
+        float ax = std::fabs(x);
+        if (ax > kT) {
+            float over       = ax - kT;
+            float compressed = kT + kA * over / (over + kA);
+            stereoOut[i] = (x < 0.0f) ? -compressed : compressed;
+        }
+    }
+    m_postLimGain = 1.0f;   // unused now, kept for ABI / reset symmetry
 
     restoreFPU();
 }
@@ -225,6 +244,10 @@ void LeiaEngine::reset()
     }
     m_gainRamp.setTarget(1.0f, 0);
     m_postLimGain = 1.0f;
+    m_dcLastInL  = 0.0f;
+    m_dcLastInR  = 0.0f;
+    m_dcLastOutL = 0.0f;
+    m_dcLastOutR = 0.0f;
 }
 
 void LeiaEngine::setFTZDAZ()

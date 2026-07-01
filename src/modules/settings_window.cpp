@@ -97,6 +97,12 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     , m_close(new QPushButton(tr("Close"), this))
     , m_adaptWaveform(new QCheckBox(tr("Adapt waveform display to audio effects"), this))
     , m_cropMarkers(new QCheckBox(tr("Show crop start/end markers on the waveform"), this))
+    , m_multiChannelInfinity(new QCheckBox(tr("Multi-channel infinity (auto-add temp channel per click)"), this))
+    , m_showPauseAllButton  (new QCheckBox(tr("Show \"Pause all\" button in the main toolbar"), this))
+    , m_showStopAllButton   (new QCheckBox(tr("Show \"Stop all\" button in the main toolbar"), this))
+    , m_verticalMeter       (new QCheckBox(tr("Vertical LED visualizer on channels"), this))
+    , m_showSkipButtons     (new QCheckBox(tr("Show skip buttons (-10s / -5s / +5s / +10s) on channels"), this))
+    , m_spectrogramView     (new QCheckBox(tr("Render channel waveform as a spectrogram-style heatmap"), this))
     , m_resetChVolume(new QCheckBox(tr("Volume"), this))
     , m_resetChFx(new QCheckBox(tr("Pitch / speed / reverb"), this))
     , m_resetChFile(new QCheckBox(tr("Stop playback + clear loaded audio"), this))
@@ -134,6 +140,13 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     m_globalFx->setToolTip(tr(
         "Master switch for the pitch / speed / reverb effects.\n"
         "Off = the controls disappear from every channel."));
+
+    // New UI/behaviour toggle defaults
+    m_showPauseAllButton->setChecked(true);
+    m_showStopAllButton ->setChecked(true);
+    m_showSkipButtons   ->setChecked(true);
+    m_verticalMeter     ->setChecked(false);
+    m_multiChannelInfinity->setChecked(false);
 
     // Reset behaviour defaults
     m_resetChVolume->setChecked(true);
@@ -223,6 +236,30 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         "parked cursor position. When OFF, finishing / stopping a\n"
         "sound fully wipes the channel back to the empty state\n"
         "(identical to clicking the red X next to the filename)."), this));
+    channelsLay->addLayout(checkRow(m_multiChannelInfinity, tr(
+        "When ON, clicking an audio plays it on the default channel;\n"
+        "any additional click spawns a NEW temporary channel per audio,\n"
+        "which is automatically removed when playback stops.\n"
+        "Loop / reverse channels are NEVER auto-removed - they only go\n"
+        "away when the user clicks the red stop button on the channel.\n"
+        "While this mode is ON, the '+ Add channel' button is hidden."), this));
+    channelsLay->addLayout(checkRow(m_showPauseAllButton, tr(
+        "Show or hide the 'Pause all' button in the main toolbar."), this));
+    channelsLay->addLayout(checkRow(m_showStopAllButton, tr(
+        "Show or hide the 'Stop all' button in the main toolbar."), this));
+    channelsLay->addLayout(checkRow(m_verticalMeter, tr(
+        "Draw the per-channel L/R LED visualizer as a vertical pair of\n"
+        "bars instead of the default horizontal layout. The channel\n"
+        "height is NOT enlarged - the meter is compacted and the\n"
+        "elements left of the volume slider are re-anchored to close\n"
+        "the empty space that would otherwise appear."), this));
+    channelsLay->addLayout(checkRow(m_showSkipButtons, tr(
+        "Show or hide the -10s / -5s / +5s / +10s skip buttons on\n"
+        "every channel (existing channels + those created later)."), this));
+    channelsLay->addLayout(checkRow(m_spectrogramView, tr(
+        "Switch the per-channel waveform to a spectrogram-style heatmap.\n"
+        "Uses a warm/cool gradient per column derived from the audio\n"
+        "magnitude - a compact energy view."), this));
 
     // ============== Button grid section ==============
     // Spinboxes moved to MainPage's bottom row. The QFormLayout below
@@ -615,6 +652,12 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_close,  &QPushButton::clicked, this, &QDialog::accept);
     connect(m_adaptWaveform, &QCheckBox::toggled, this, &SettingsWindow::adaptWaveformToFxChanged);
     connect(m_cropMarkers,   &QCheckBox::toggled, this, &SettingsWindow::showCropMarkersChanged);
+    connect(m_multiChannelInfinity, &QCheckBox::toggled, this, &SettingsWindow::multiChannelInfinityChanged);
+    connect(m_showPauseAllButton,   &QCheckBox::toggled, this, &SettingsWindow::showPauseAllButtonChanged);
+    connect(m_showStopAllButton,    &QCheckBox::toggled, this, &SettingsWindow::showStopAllButtonChanged);
+    connect(m_verticalMeter,        &QCheckBox::toggled, this, &SettingsWindow::verticalMeterChanged);
+    connect(m_showSkipButtons,      &QCheckBox::toggled, this, &SettingsWindow::showSkipButtonsChanged);
+    connect(m_spectrogramView,      &QCheckBox::toggled, this, &SettingsWindow::spectrogramViewChanged);
 
     connect(m_resetChVolume,      &QCheckBox::toggled, this, &SettingsWindow::resetChVolumeChanged);
     connect(m_resetChFx,          &QCheckBox::toggled, this, &SettingsWindow::resetChFxChanged);
@@ -655,6 +698,12 @@ int  SettingsWindow::rows()                   const { return m_rows->value();   
 int  SettingsWindow::cols()                   const { return m_cols->value();               }
 bool SettingsWindow::adaptWaveformToFx()      const { return m_adaptWaveform->isChecked();  }
 bool SettingsWindow::showCropMarkers()        const { return m_cropMarkers->isChecked();    }
+bool SettingsWindow::multiChannelInfinity()   const { return m_multiChannelInfinity->isChecked(); }
+bool SettingsWindow::showPauseAllButton()     const { return m_showPauseAllButton->isChecked();   }
+bool SettingsWindow::showStopAllButton()      const { return m_showStopAllButton->isChecked();    }
+bool SettingsWindow::verticalMeter()          const { return m_verticalMeter->isChecked();        }
+bool SettingsWindow::showSkipButtons()        const { return m_showSkipButtons->isChecked();      }
+bool SettingsWindow::spectrogramView()        const { return m_spectrogramView->isChecked();      }
 
 bool SettingsWindow::resetChVolume()          const { return m_resetChVolume->isChecked();      }
 bool SettingsWindow::resetChFx()              const { return m_resetChFx->isChecked();          }
@@ -690,6 +739,12 @@ void SettingsWindow::setRows(int r)                    { QSignalBlocker b(m_rows
 void SettingsWindow::setCols(int c)                    { QSignalBlocker b(m_cols);           m_cols->setValue(c);              }
 void SettingsWindow::setAdaptWaveformToFx(bool on)     { QSignalBlocker b(m_adaptWaveform);  m_adaptWaveform->setChecked(on);  }
 void SettingsWindow::setShowCropMarkers(bool on)       { QSignalBlocker b(m_cropMarkers);    m_cropMarkers->setChecked(on);    }
+void SettingsWindow::setMultiChannelInfinity(bool on)  { QSignalBlocker b(m_multiChannelInfinity); m_multiChannelInfinity->setChecked(on); }
+void SettingsWindow::setShowPauseAllButton(bool on)    { QSignalBlocker b(m_showPauseAllButton);   m_showPauseAllButton->setChecked(on);   }
+void SettingsWindow::setShowStopAllButton(bool on)     { QSignalBlocker b(m_showStopAllButton);    m_showStopAllButton->setChecked(on);    }
+void SettingsWindow::setVerticalMeter(bool on)         { QSignalBlocker b(m_verticalMeter);        m_verticalMeter->setChecked(on);        }
+void SettingsWindow::setShowSkipButtons(bool on)       { QSignalBlocker b(m_showSkipButtons);      m_showSkipButtons->setChecked(on);      }
+void SettingsWindow::setSpectrogramView(bool on)       { QSignalBlocker b(m_spectrogramView);      m_spectrogramView->setChecked(on);      }
 
 void SettingsWindow::setResetChVolume(bool on)         { QSignalBlocker b(m_resetChVolume);      m_resetChVolume->setChecked(on);      }
 void SettingsWindow::setResetChFx(bool on)             { QSignalBlocker b(m_resetChFx);          m_resetChFx->setChecked(on);          }

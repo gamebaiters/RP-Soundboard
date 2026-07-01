@@ -675,6 +675,60 @@ void SoundView::drawWaves(QPainter *painter)
 		return;
 	}
 
+	if (m_displayMode == Mode_Spectrogram && m_vis) {
+		// Spectrogram-lite: reuse the analyser's peak min/max bins as a
+		// per-column magnitude proxy. Each column is painted top-to-
+		// bottom as a heatmap gradient - cool blue at low intensity,
+		// hot red at high. Not a TRUE STFT (would need a second bin
+		// array of spectral magnitudes) but visually distinct from the
+		// waveform view and cheap - reuses the SAME analyser bins.
+		volatile const int *bins = m_vis->getBins();
+		size_t processed = m_vis->getBinsProcessed();
+		if (!bins || processed == 0) return;
+		int W = width();
+		int H = height();
+		if (W <= 0 || H <= 0) return;
+		painter->save();
+		painter->setPen(Qt::NoPen);
+		auto heatColor = [](float t) -> QColor {
+			if (t < 0.0f) t = 0.0f;
+			if (t > 1.0f) t = 1.0f;
+			// Blue -> cyan -> green -> yellow -> red gradient.
+			struct S { float at; int r, g, b; };
+			static const S stops[] = {
+				{0.00f,  20,  40, 120},
+				{0.25f,  30, 140, 200},
+				{0.50f,  40, 180,  70},
+				{0.75f, 230, 200,  50},
+				{1.00f, 230,  70,  60},
+			};
+			for (int i = 0; i + 1 < 5; ++i) {
+				if (t <= stops[i + 1].at) {
+					float u = (t - stops[i].at) / (stops[i + 1].at - stops[i].at);
+					int r = (int)(stops[i].r + (stops[i + 1].r - stops[i].r) * u);
+					int g = (int)(stops[i].g + (stops[i + 1].g - stops[i].g) * u);
+					int b = (int)(stops[i].b + (stops[i + 1].b - stops[i].b) * u);
+					return QColor(r, g, b);
+				}
+			}
+			return QColor(stops[4].r, stops[4].g, stops[4].b);
+		};
+		for (int x = 0; x < W; ++x) {
+			size_t idx = (size_t)((double)x / (double)W * (double)processed);
+			if (idx >= processed) idx = processed - 1;
+			int mn = bins[idx * 2 + 0];
+			int mx = bins[idx * 2 + 1];
+			float mag = (float)(std::abs(mn) + std::abs(mx)) / 32768.0f;
+			if (mag > 1.0f) mag = 1.0f;
+			QColor c = heatColor(mag);
+			c.setAlpha(220);
+			painter->setBrush(c);
+			painter->drawRect(QRect(x, 0, 1, H));
+		}
+		painter->restore();
+		return;
+	}
+
 	preparePaths();
 
 	// Reveal fade-in: render the full path at increasing alpha for
@@ -724,6 +778,14 @@ void SoundView::setAdaptToFx(bool on)
 {
 	if (m_adaptToFx == on) return;
 	m_adaptToFx = on;
+	m_drawnBins = 0;
+	update();
+}
+
+void SoundView::setDisplayMode(DisplayMode m)
+{
+	if (m_displayMode == m) return;
+	m_displayMode = m;
 	m_drawnBins = 0;
 	update();
 }

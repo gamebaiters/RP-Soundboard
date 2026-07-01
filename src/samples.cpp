@@ -794,6 +794,25 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 		if ((int)dspTemp.size() < write * 2) dspTemp.resize(write * 2);
 		std::memcpy(dspTemp.data(), in, sizeof(short) * write * 2);
 		float pL = 0.0f, pR = 0.0f;
+		// Cross-slot sidechain: for each *SidechainSlot >= 0 pull the
+		// source's rolling envelope atomic and push into the target
+		// DSP's external-envelope inputs before process(). The DSP
+		// stages pick these up when the corresponding *SidechainSlot
+		// field is set. No-op when self-sidechain (slot == -1).
+		{
+			const SandboxState &st = slot->dsp->state();
+			auto pullEnv = [this](int src) -> float {
+				if (src < 0 || src >= MAX_SLOTS) return 0.0f;
+				SlotDsp *d = m_slots[src].dsp.get();
+				return d ? d->sidechainEnv() : 0.0f;
+			};
+			slot->dsp->m_extGateEnv.store(
+				pullEnv(st.gateSidechainSlot), std::memory_order_relaxed);
+			slot->dsp->m_extDeesserEnv.store(
+				pullEnv(st.deesserSidechainSlot), std::memory_order_relaxed);
+			slot->dsp->m_extCompEnv.store(
+				pullEnv(st.compSidechainSlot), std::memory_order_relaxed);
+		}
 		slot->dsp->process(dspTemp.data(), write, 2, pL, pR, isCapturePath);
 		(void)pL; (void)pR;
 		in = dspTemp.data();

@@ -16,6 +16,10 @@
 #include "Limiter.h"
 #include "Bitcrusher.h"
 #include "GenerationLoss.h"
+#include "DeEsser.h"
+#include "NoiseGate.h"
+#include "TransientShaper.h"
+#include "DynEq.h"
 
 
 #include <vector>
@@ -149,8 +153,21 @@ private:
         Limiter    limiter;
         Bitcrusher     bitcrusher;
         GenerationLoss genLoss;
+        DeEsser        deesser;
+        NoiseGate      gate;
+        TransientShaper trans;
+        DynEq          dyneq;
         double     rotPhase = 0.0;
         int        rotBlockCounter = 0;
+        // Doppler variable-delay-line state (per-ear, ~10 sample max).
+        // Used only when the Leia path runs and dopplerEnabled is set.
+        static constexpr int kDopplerMax = 64;
+        float      dopplerBufL[kDopplerMax] = {0};
+        float      dopplerBufR[kDopplerMax] = {0};
+        int        dopplerWrite = 0;
+        float      dopplerDelayL = 0.0f;    // fractional delay (samples)
+        float      dopplerDelayR = 0.0f;
+        float      dopplerPrevAz = 0.0f;
     };
 
     void pushSpeakerPair(PathState &p, float cx, float cy, float cz);
@@ -207,4 +224,18 @@ private:
     // before feeding the EQ analyser, so LEDs reflect "what the listener
     // hears" - shaped by EQ + every effect + slot volume + intensity.
     std::atomic<float> m_outputGain{1.0f};
+
+public:
+    // Cross-slot sidechain envelope: rolling amplitude estimate (0..~1.5,
+    // linear) updated by the audio thread in process(). Sampler reads
+    // this atomic and hands it to the DSP of OTHER slots that use this
+    // slot as a sidechain source. Lock-free.
+    std::atomic<float> m_sidechainEnv{0.0f};
+    float sidechainEnv() const { return m_sidechainEnv.load(std::memory_order_relaxed); }
+    // External sidechain envelopes pushed by the Sampler before each
+    // process(). The corresponding DSP stages read these when their
+    // state's *SidechainSlot != -1.
+    std::atomic<float> m_extCompEnv{0.0f};
+    std::atomic<float> m_extGateEnv{0.0f};
+    std::atomic<float> m_extDeesserEnv{0.0f};
 };

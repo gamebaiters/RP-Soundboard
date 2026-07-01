@@ -40,6 +40,13 @@ public:
     // touching the audio mutex.
     float bandLevel(int b) const;
 
+    // Tell the analyser whether the EQ stage itself is active in the
+    // chain. When inactive the FFT runs at a coarser hop (LEDs still
+    // animate, just less smoothly) to free audio-thread CPU - the
+    // analyser was burning ~3% even when the EQ panel is collapsed
+    // and the user gets zero visible value from the smooth update.
+    void setStageActive(bool active);
+
 private:
     void recompute(int band);
     void runFftAnalysis();
@@ -53,6 +60,7 @@ private:
     std::vector<float>  m_fftRing;   // mono samples (kFftSize entries)
     int                 m_fftWrite  = 0;
     int                 m_fftHop    = 0;
+    int                 m_fftHopInterval = 512;
     std::vector<float>  m_fftWin;    // Hann window precomputed
     std::vector<float>  m_fftFreq;   // (kFftSize + 2) floats interleaved
     std::unique_ptr<SimpleFFT> m_fft;

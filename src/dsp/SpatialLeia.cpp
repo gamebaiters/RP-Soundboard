@@ -15,6 +15,26 @@
 #include <QString>
 #include <QtGlobal>
 
+#if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__i386__)
+  #define SPATIALLEIA_X86 1
+  #include <xmmintrin.h>
+#else
+  #define SPATIALLEIA_X86 0
+#endif
+
+namespace {
+struct ScopedFtzDaz {
+#if SPATIALLEIA_X86
+    unsigned int saved;
+    ScopedFtzDaz() { saved = _mm_getcsr(); _mm_setcsr(saved | 0x8040); }
+    ~ScopedFtzDaz() { _mm_setcsr(saved); }
+#else
+    ScopedFtzDaz() {}
+    ~ScopedFtzDaz() {}
+#endif
+};
+}
+
 namespace {
 
 // The Leia HRTF dataset is shipped inside the plugin as a Qt resource
@@ -130,7 +150,11 @@ bool SpatialLeia::ensureInit(double sampleRate)
     m_outValid = false;
     m_dryPos   = 0;
     m_engage   = 0.0f;
-    m_engageInc = 1.0f / static_cast<float>(std::max(1.0, sampleRate * 0.05));
+    // Engage ramp raised from 50 ms to 120 ms so the initial dry->wet
+    // handoff is smoother on percussive / bass-heavy transients (the
+    // audible 5-10 ms jump at 50 ms was reading as a light thump the
+    // user characterised as "compressed bass start-up").
+    m_engageInc = 1.0f / static_cast<float>(std::max(1.0, sampleRate * 0.12));
 
     // Auto makeup gain so Leia's measured HRIRs play at sane loudness.
     float makeup = 1.0f;
@@ -150,6 +174,11 @@ bool SpatialLeia::ensureInit(double sampleRate)
 
 float SpatialLeia::calibrateMakeup()
 {
+    // FTZ/DAZ to keep probe out of denormal land - subnormals get
+    // microcoded to ~0 by MSVC, inflating the inRms/outRms ratio
+    // and producing a too-large makeup gain that later clips Leia.
+    ScopedFtzDaz ftz;
+
     // Direct path only, source straight ahead.
     m_engine.setReflectionEnable(false);
     m_engine.setWidth(0.0f);
@@ -195,6 +224,14 @@ float SpatialLeia::calibrateMakeup()
     if (outRms < 1e-12) return 1.0f;
 
     float makeup = static_cast<float>(inRms / outRms);
+    // Headroom factor. The post-engine memoryless saturator now sits at
+    // T=1.8 (up from 1.2), so the makeup no longer needs the aggressive
+    // 0.7 pull-down that was in place when the saturator engaged at
+    // T=1.2. 0.85x keeps ~1.4 dB of margin against the probe worst-case
+    // while giving back ~1.7 dB of overall loudness the previous factor
+    // was taking away. Under normal listening conditions the saturator
+    // stays entirely bypassed with this pairing.
+    makeup *= 0.85f;
     return clampf(makeup, 0.2f, 50.0f);
 }
 
@@ -247,6 +284,11 @@ void SpatialLeia::process(float &l, float &r)
 {
     if (!m_ready) return;   // passthrough - caller handles fallback
 
+    // FTZ/DAZ for the per-sample wet/dry crossfade path. Without this
+    // a denormal sneaks into the dry delay ring or the m_engage ramp
+    // multiplier and the audio thread spikes CPU.
+    ScopedFtzDaz ftz;
+
     // Dry delay ring: read the kBlock-old sample, then overwrite with
     // the current input. Keeps the dry path aligned with the wet path.
     float dryL = m_dryBuf[m_dryPos * 2 + 0];
@@ -268,10 +310,20 @@ void SpatialLeia::process(float &l, float &r)
     if (!m_outValid) {
         // Pre-roll: first kBlock samples have no processed output yet.
         // Stash the input and pass the (delayed) dry through so
-        // playback never starts with a gap.
+        // playback never starts with a gap. Also tick the engage ramp
+        // here - without it, the ramp sat at 0 throughout pre-roll
+        // then suddenly jumped to its first non-zero increment when the
+        // very first wet block arrived, producing a click on hot input.
+        // Ramping during pre-roll means by the time wet arrives the ramp
+        // has already covered ~5 ms of its 50 ms span, and the next
+        // crossfade is smooth.
         m_inBuf[m_inFill * 2 + 0] = l;
         m_inBuf[m_inFill * 2 + 1] = r;
         ++m_inFill;
+        if (m_engage < 1.0f) {
+            m_engage += m_engageInc;
+            if (m_engage > 1.0f) m_engage = 1.0f;
+        }
         l = dryL;
         r = dryR;
         return;

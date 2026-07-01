@@ -224,6 +224,19 @@ public:
 	inline bool getShowCropMarkers() const { return m_showCropMarkers; }
 	void setShowCropMarkers(bool on);
 
+	inline bool getMultiChannelInfinity() const { return m_multiChannelInfinity; }
+	void setMultiChannelInfinity(bool on);
+	inline bool getShowPauseAllButton() const { return m_showPauseAllButton; }
+	void setShowPauseAllButton(bool on);
+	inline bool getShowStopAllButton() const { return m_showStopAllButton; }
+	void setShowStopAllButton(bool on);
+	inline bool getVerticalMeter() const { return m_verticalMeter; }
+	void setVerticalMeter(bool on);
+	inline bool getShowSkipButtons() const { return m_showSkipButtons; }
+	void setShowSkipButtons(bool on);
+	inline bool getSpectrogramView() const { return m_spectrogramView; }
+	void setSpectrogramView(bool on);
+
 	inline bool getResetChVolume() const { return m_resetChVolume; }
 	void setResetChVolume(bool on);
 	inline bool getResetChFx() const { return m_resetChFx; }
@@ -310,6 +323,12 @@ private:
 	bool m_audioExportEnabled = false;
 	bool m_adaptWaveformToFx = false;
 	bool m_showCropMarkers   = true;
+	bool m_multiChannelInfinity = false;
+	bool m_showPauseAllButton   = true;
+	bool m_showStopAllButton    = true;
+	bool m_verticalMeter        = false;
+	bool m_showSkipButtons      = true;
+	bool m_spectrogramView      = false;
 
 	bool m_resetChVolume     = true;
 	bool m_resetChFx         = true;

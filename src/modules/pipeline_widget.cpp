@@ -23,6 +23,10 @@ const QColor kStageColors[] = {
     QColor(0x95, 0x5B, 0xA5),  // Limiter - mauve
     QColor(0xD3, 0x54, 0x00),  // Bitcrusher - burnt orange
     QColor(0x8B, 0x00, 0x00),  // GenLoss - dark red
+    QColor(0x34, 0x49, 0x5E),  // Noise Gate - slate
+    QColor(0xE8, 0x74, 0x9C),  // De-esser - pink
+    QColor(0x1A, 0xBC, 0x9C),  // Transient - aqua
+    QColor(0xF3, 0x9C, 0x12),  // Dynamic EQ - amber
 };
 }
 

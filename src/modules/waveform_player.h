@@ -37,6 +37,12 @@ public slots:
     void setSound(const SoundInfo &info);
     void setFilename(const QString &name);
     void setPosition(double seconds, double total);  // updates time label
+    // Show / hide the -10s / -5s / +5s / +10s skip buttons for this
+    // channel. Driven by the global "Show skip buttons" setting.
+    void setSkipButtonsVisible(bool on);
+    // Toggle the underlying SoundView between waveform (default) and
+    // spectrogram-style heatmap. Driven by the global setting.
+    void setSpectrogramView(bool on);
     void setPlaybackFraction(double f);              // 0..1, paints overlay
     void clearPlayback();
     void setPlaying(bool on);

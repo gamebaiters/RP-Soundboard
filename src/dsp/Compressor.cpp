@@ -17,6 +17,7 @@ void Compressor::setParams(float thresholdDb, float ratio, float attackMs, float
 
 void Compressor::processStereo(float &l, float &r) {
     float peak = std::max(std::abs(l), std::abs(r));
+    if (m_scEnv > 1e-6f) peak = m_scEnv;
     float inputDb = (peak > 1e-6f) ? AudioUtils::linearToDb(peak) : -96.0f;
 
     float coeff = (inputDb > m_envDb) ? m_attackCoeff : m_releaseCoeff;
@@ -38,4 +39,5 @@ void Compressor::processStereo(float &l, float &r) {
 
 void Compressor::reset() {
     m_envDb = -96.0f;
+    m_scEnv = 0.0f;
 }

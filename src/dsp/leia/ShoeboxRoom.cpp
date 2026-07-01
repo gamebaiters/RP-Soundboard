@@ -113,11 +113,19 @@ void ShoeboxRoom::setRoomType(int type)
     if (type < 0 || type >= kNumPresets) return;
     const RoomPreset &p = kPresets[type];
     std::memcpy(m_absorption, p.absorption, sizeof(m_absorption));
-    m_presetLateFeedback = p.lateFeedback;
-    m_presetLateDamp     = p.lateDamp;
-    m_presetLateMix      = p.lateMix;
-    m_presetTapLpHz      = p.tapLpHz;
-    m_presetErDelayScale = p.erDelayScale;
+    // Clamp aggressive Cathedral-class feedback. 0.92 + signal already
+    // EQ-boosted into the Spatial input could drive the comb network
+    // to converge above unity, which then fed the post-engine limiter
+    // continuously and produced rotation-rate AM = frying. 0.88 keeps
+    // the perceived decay tail close to the original while bounding
+    // the loop gain comfortably below the limiter wakeup point.
+    float feedbackClamped = p.lateFeedback;
+    if (feedbackClamped > 0.88f) feedbackClamped = 0.88f;
+    m_presetLateFeedback.store(feedbackClamped,    std::memory_order_relaxed);
+    m_presetLateDamp    .store(p.lateDamp,         std::memory_order_relaxed);
+    m_presetLateMix     .store(p.lateMix,          std::memory_order_relaxed);
+    m_presetTapLpHz     .store(p.tapLpHz,          std::memory_order_relaxed);
+    m_presetErDelayScale.store(p.erDelayScale,     std::memory_order_relaxed);
 }
 
 void ShoeboxRoom::setEnabled(bool on) { m_enabled = on; }
@@ -223,10 +231,15 @@ void ShoeboxRoom::process(float* leftIO, float* rightIO, int frames,
     // 0.92 produced an inaudible tail. Drying the input lets each
     // preset show its actual character (Underwater LP-heavy mud,
     // Cathedral long wash, Outdoor stays silent because lateLevel=0).
+    //
+    // 0.5x input attenuation: combined with the feedback clamp in
+    // setRoomType this puts the loop gain comfortably below the post-
+    // engine limiter wakeup ceiling even when the upstream chain
+    // (EQ + Saturator + Compressor) has already pushed peaks toward 1.0.
     float lateMix = m_lateLevel * m_reflLevel;
     if (lateMix > 1e-6f) {
         for (int i = 0; i < frames; ++i) {
-            float dryMono = (leftIO[i] + rightIO[i]) * 0.5f;
+            float dryMono = (leftIO[i] + rightIO[i]) * 0.5f * 0.5f;
             float inL = dryMono;
             float inR = dryMono;
             float combOutL = 0.0f, combOutR = 0.0f;
@@ -269,6 +282,21 @@ void ShoeboxRoom::process(float* leftIO, float* rightIO, int frames,
                 ap.idx++;
             }
 
+            // DC blocker: y[n] = x[n] - x[n-1] + R*y[n-1]. R = 0.995
+            // gives -3dB at ~38 Hz at 48 kHz - kills the slow DC
+            // accumulation in the comb loops without touching musical
+            // content. Stops Cathedral / Concrete preset from biasing
+            // the post-engine limiter into permanent compression.
+            constexpr float kR = 0.995f;
+            float xL = yL;
+            float xR = yR;
+            yL = xL - m_dcLastInL + kR * m_dcLastOutL;
+            yR = xR - m_dcLastInR + kR * m_dcLastOutR;
+            m_dcLastInL  = xL;
+            m_dcLastInR  = xR;
+            m_dcLastOutL = yL;
+            m_dcLastOutR = yR;
+
             m_leftScratch [i] += yL * lateMix;
             m_rightScratch[i] += yR * lateMix;
         }
@@ -283,6 +311,14 @@ void ShoeboxRoom::process(float* leftIO, float* rightIO, int frames,
 
 void ShoeboxRoom::computeReflections(float srcAz, float srcEl)
 {
+    // Snapshot preset atomics ONCE per block so every wall + every
+    // comb sees the same value even if GUI fires setRoomType mid-call.
+    const float erDelayScale = m_presetErDelayScale.load(std::memory_order_relaxed);
+    const float tapLpHz      = m_presetTapLpHz    .load(std::memory_order_relaxed);
+    const float lateFeedback = m_presetLateFeedback.load(std::memory_order_relaxed);
+    const float lateDamp     = m_presetLateDamp   .load(std::memory_order_relaxed);
+    const float lateMix      = m_presetLateMix    .load(std::memory_order_relaxed);
+
     for (int w = 0; w < kNumWalls; ++w) {
         float az = 0.0f, el = 0.0f, dist = 0.0f;
         computeImageSource(w, srcAz, srcEl, az, el, dist);
@@ -291,7 +327,7 @@ void ShoeboxRoom::computeReflections(float srcAz, float srcEl)
         m_taps[w].elevationDeg = el;
 
         static constexpr float kSpeedOfSound = 343.0f;
-        float delaySamplesF = (dist * m_presetErDelayScale) / kSpeedOfSound * m_sampleRate;
+        float delaySamplesF = (dist * erDelayScale) / kSpeedOfSound * m_sampleRate;
 
         float maxDelay = static_cast<float>(m_taps[w].buffer.capacity - m_blockSize - 2);
         if (maxDelay < 0.0f) maxDelay = 0.0f;
@@ -305,7 +341,7 @@ void ShoeboxRoom::computeReflections(float srcAz, float srcEl)
         // Frequency-dependent damping. Per-preset tapLpHz scales the
         // per-wall absorption curve - Bathroom keeps 18 kHz, Underwater
         // forces a hard 600 Hz LP no matter the surface absorption.
-        float cutoffHz = 200.0f + (1.0f - absCoef) * (m_presetTapLpHz - 200.0f);
+        float cutoffHz = 200.0f + (1.0f - absCoef) * (tapLpHz - 200.0f);
         if (cutoffHz < 100.0f)  cutoffHz = 100.0f;
         if (cutoffHz > 18000.0f) cutoffHz = 18000.0f;
         float a = std::exp(-2.0f * static_cast<float>(M_PI) * cutoffHz / m_sampleRate);
@@ -316,12 +352,13 @@ void ShoeboxRoom::computeReflections(float srcAz, float srcEl)
 
     // Late-tail character is driven by the active preset, not derived
     // from absorption alone. Outdoor explicitly sends 0 wet so it stays
-    // dry. Underwater has heavy damping. Cathedral feedback near 0.92.
+    // dry. Underwater has heavy damping. Cathedral feedback near 0.92
+    // (already clamped to 0.88 in setRoomType).
     for (int c = 0; c < kNumCombs; ++c) {
-        m_combs[c].feedback = m_presetLateFeedback;
-        m_combs[c].damp     = m_presetLateDamp;
+        m_combs[c].feedback = lateFeedback;
+        m_combs[c].damp     = lateDamp;
     }
-    m_lateLevel = m_presetLateMix;
+    m_lateLevel = lateMix;
 }
 
 void ShoeboxRoom::computeImageSource(int   wallIdx,
@@ -379,6 +416,8 @@ void ShoeboxRoom::reset()
         m_taps[w].prevDelaySamples = -1.0f;
         m_taps[w].lpStateL = 0.0f;
         m_taps[w].lpStateR = 0.0f;
+        m_taps[w].prevGainL = 0.0f;
+        m_taps[w].prevGainR = 0.0f;
     }
     // Drain the Schroeder network so a stop/resume does not start the
     // next playback with a tail from the previous source.
@@ -394,4 +433,13 @@ void ShoeboxRoom::reset()
         std::fill(m_allpass[a].bufR.begin(), m_allpass[a].bufR.end(), 0.0f);
         m_allpass[a].idx = 0;
     }
+    // DC-blocker state.
+    m_dcLastInL  = 0.0f;
+    m_dcLastInR  = 0.0f;
+    m_dcLastOutL = 0.0f;
+    m_dcLastOutR = 0.0f;
+    // m_lateLevel / m_reflLevel are intentionally NOT zeroed here -
+    // they get re-applied by setRoomType + setReflectionLevel on the
+    // next applyState() call, and zeroing them between would create
+    // a brief silent-reflection window on slot reuse.
 }

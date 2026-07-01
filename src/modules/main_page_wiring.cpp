@@ -206,6 +206,22 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     w->setDisableHotkeys(!model->getHotkeysEnabled());
     w->setAdaptWaveformToFx(model->getAdaptWaveformToFx());
     w->setShowCropMarkers(model->getShowCropMarkers());
+    w->setMultiChannelInfinity(model->getMultiChannelInfinity());
+    w->setShowPauseAllButton  (model->getShowPauseAllButton());
+    w->setShowStopAllButton   (model->getShowStopAllButton());
+    w->setVerticalMeter       (model->getVerticalMeter());
+    w->setShowSkipButtons     (model->getShowSkipButtons());
+    w->setSpectrogramView     (model->getSpectrogramView());
+    // Push initial toolbar / channel visibility so the page reflects
+    // saved settings right after wiring (no need for user to re-toggle).
+    if (page->pauseAllBtn())   page->pauseAllBtn()->setVisible(model->getShowPauseAllButton());
+    if (page->stopAllBtn())    page->stopAllBtn ()->setVisible(model->getShowStopAllButton());
+    if (page->addChannelBtn()) page->addChannelBtn()->setVisible(!model->getMultiChannelInfinity());
+    for (auto *ch : page->channels()) {
+        ch->setMeterVertical(model->getVerticalMeter());
+        ch->setSkipButtonsVisible(model->getShowSkipButtons());
+        ch->waveform()->setSpectrogramView(model->getSpectrogramView());
+    }
     w->setResetChVolume(model->getResetChVolume());
     w->setResetChFx(model->getResetChFx());
     w->setResetChFile(model->getResetChFile());
@@ -528,6 +544,32 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         model->setShowCropMarkers(v);
         for (auto *ch : page->channels()) ch->waveform()->setShowCropMarkers(v);
     });
+    QObject::connect(w, &SettingsWindow::multiChannelInfinityChanged, [model, page](bool v){
+        model->setMultiChannelInfinity(v);
+        // "+ Add channel" disappears when infinity mode is on - a
+        // manual add is redundant, temp channels spawn automatically.
+        if (page->addChannelBtn()) page->addChannelBtn()->setVisible(!v);
+    });
+    QObject::connect(w, &SettingsWindow::showPauseAllButtonChanged, [model, page](bool v){
+        model->setShowPauseAllButton(v);
+        if (page->pauseAllBtn()) page->pauseAllBtn()->setVisible(v);
+    });
+    QObject::connect(w, &SettingsWindow::showStopAllButtonChanged, [model, page](bool v){
+        model->setShowStopAllButton(v);
+        if (page->stopAllBtn()) page->stopAllBtn()->setVisible(v);
+    });
+    QObject::connect(w, &SettingsWindow::verticalMeterChanged, [model, page](bool v){
+        model->setVerticalMeter(v);
+        for (auto *ch : page->channels()) ch->setMeterVertical(v);
+    });
+    QObject::connect(w, &SettingsWindow::showSkipButtonsChanged, [model, page](bool v){
+        model->setShowSkipButtons(v);
+        for (auto *ch : page->channels()) ch->setSkipButtonsVisible(v);
+    });
+    QObject::connect(w, &SettingsWindow::spectrogramViewChanged, [model, page](bool v){
+        model->setSpectrogramView(v);
+        for (auto *ch : page->channels()) ch->waveform()->setSpectrogramView(v);
+    });
     QObject::connect(w, &SettingsWindow::resetChVolumeChanged, [model](bool v){ model->setResetChVolume(v); });
     QObject::connect(w, &SettingsWindow::resetChFxChanged, [model](bool v){ model->setResetChFx(v); });
     QObject::connect(w, &SettingsWindow::resetChFileChanged, [model](bool v){ model->setResetChFile(v); });
@@ -557,17 +599,50 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
         int prevSlot = sampler->findSlotByState(Sampler::ePLAYING_PREVIEW);
         if (prevSlot >= 0) sampler->stopPlayback(prevSlot);
 
-        // Slot pick: silent channel first, else round-robin oldest.
-        const int n = page->channels().size();
-        if (n <= 0) return;
-        static int s_rr = 0;
+        // Slot pick.
+        //
+        // Multi-channel infinity mode: if slot 0 is silent, play there
+        // (that is the "default" channel every subsequent click bounces
+        // off of). Otherwise spawn a fresh TEMPORARY channel and play in
+        // it. Auto-created channels get an "infinityAuto" property so
+        // onStopPlaying can remove them once playback ends (unless the
+        // user has loop / reverse on, in which case removal is deferred
+        // until an explicit stop button click).
+        //
+        // Standard mode: silent channel first, else round-robin oldest.
+        const int n0 = page->channels().size();
+        if (n0 <= 0) return;
         int slot = -1;
-        for (int i = 0; i < n; ++i) {
-            int s = i;
-            if (sampler->getState(s) == Sampler::eSILENT) { slot = s; break; }
+        const bool infinity = model && model->getMultiChannelInfinity();
+        if (infinity) {
+            if (sampler->getState(0) == Sampler::eSILENT) {
+                slot = 0;
+            } else {
+                Channel *newCh = page->addChannel();
+                slot = page->channels().size() - 1;
+                if (newCh) {
+                    newCh->setProperty("infinityAuto", true);
+                    // Push global UI toggles onto the fresh widget so it
+                    // matches the rest of the row (skip buttons, meter
+                    // orientation, waveform visibility, etc.). Without
+                    // this the newly-spawned channel would render with
+                    // hardcoded defaults regardless of the user's saved
+                    // settings.
+                    newCh->setSkipButtonsVisible(model->getShowSkipButtons());
+                    newCh->setMeterVertical(model->getVerticalMeter());
+                }
+            }
+        } else {
+            static int s_rr = 0;
+            for (int i = 0; i < n0; ++i) {
+                int s = i;
+                if (sampler->getState(s) == Sampler::eSILENT) { slot = s; break; }
+            }
+            if (slot < 0) { slot = s_rr % n0; }
+            s_rr = (slot + 1) % n0;
         }
-        if (slot < 0) { slot = s_rr % n; }
-        s_rr = (slot + 1) % n;
+        const int n = page->channels().size();
+        (void)n;
 
         // Push the channel's current slider values into the sampler slot
         // so the slot starts with the visible levels (instead of stale
@@ -1266,6 +1341,34 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             if (slot < 0 || slot >= page->channels().size()) return;
             // Preview shares slot indices but doesn't own the UI.
             if (sampler && sampler->getState(slot) == Sampler::ePLAYING_PREVIEW) return;
+            // Multi-channel infinity: auto-remove the channel widget on
+            // stop for slots that were spawned by the infinity path.
+            // A LOOP or REVERSE channel is not auto-removed unless the
+            // user explicitly hit the red stop button (which set
+            // infinityPendingRemove BEFORE stopPlayback). Any other
+            // path (natural end, stop-all, cleared) removes.
+            //
+            // Deferred via singleShot(0) so this handler finishes ALL
+            // its state cleanup (wave paint, replay flag, s_slotToBtnIdx)
+            // before we start shifting channel indices under it.
+            auto infinityCheck = [page](int checkSlot){
+                auto *ch = page->channelAt(checkSlot);
+                if (!ch) return;
+                if (!ch->property("infinityAuto").toBool()) return;
+                const bool loopOrReverse = ch->waveform()->isLooping()
+                                        || ch->waveform()->isReversed();
+                const bool pending = ch->property("infinityPendingRemove").toBool();
+                if (loopOrReverse && !pending) {
+                    // Deferred stop (natural end of loop cycle, etc.);
+                    // keep the channel alive until the user clicks red
+                    // stop. Clear any stale pending flag defensively.
+                    ch->setProperty("infinityPendingRemove", false);
+                    return;
+                }
+                ch->setProperty("infinityAuto", false);
+                ch->setProperty("infinityPendingRemove", false);
+                QTimer::singleShot(0, page, [ch]{ ch->requestRemove(); });
+            };
             // STALE-STOP GUARD. onStopPlaying is queued (Qt::QueuedConnection)
             // so the handler can fire AFTER a fresh playback has already
             // taken the slot over (rapid sequence: pressing cell B while
@@ -1304,6 +1407,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 wave->clearPlayback();
                 s_lastPlayedCtx.remove(slot);
                 s_slotToBtnIdx.remove(slot);
+                infinityCheck(slot);
                 return;
             }
 
@@ -1319,6 +1423,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 wave->clearPlayback();
                 s_lastPlayedCtx.remove(slot);
                 s_slotToBtnIdx.remove(slot);
+                infinityCheck(slot);
                 return;
             }
 
@@ -1342,6 +1447,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             // the cell, and the replay handler reads it back. It is
             // cleared on clearRequested (red X), removeChannelRequested,
             // or when a fresh playback overwrites it.
+            infinityCheck(slot);
         }, Qt::QueuedConnection);
         QObject::connect(sampler, &Sampler::onPausePlaying, page,
                          [page](int slot){
@@ -1453,7 +1559,17 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             if (isPrimary) model->setSyncPitchSpeed(s);
         });
         QObject::connect(ch->waveform(), &WaveformPlayer::stopClicked,
-                         [sampler, slot]{ if (sampler) sampler->stopPlayback(slot); });
+                         [sampler, slot, ch]{
+            // Infinity mode uses the "infinityPendingRemove" property as
+            // the "user asked for the RED-STOP-BUTTON death" flag. Set
+            // it BEFORE stopPlayback so the queued onStopPlaying handler
+            // sees the intent even when loop / reverse is on (those
+            // would otherwise keep the auto channel alive on any other
+            // stop path).
+            if (ch->property("infinityAuto").toBool())
+                ch->setProperty("infinityPendingRemove", true);
+            if (sampler) sampler->stopPlayback(slot);
+        });
         QObject::connect(ch->waveform(), &WaveformPlayer::playClicked,
                          [sampler, slot]{ if (sampler) sampler->unpausePlayback(slot); });
         QObject::connect(ch->waveform(), &WaveformPlayer::pauseClicked,
@@ -1798,6 +1914,27 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     QObject::connect(page, &MainPage::channelAdded, page, [page](int idx){
         if (auto *ch = page->channelAt(idx)) ch->refreshTheme();
     });
+    // Per-channel UI settings propagate onto every channel that is added
+    // AFTER the wire step (session restore + all subsequent user adds).
+    // Without this, verticalMeter / showSkipButtons live only inside the
+    // SettingsWindow widget - never applied to the actual channel row -
+    // so the user saw "the settings did not survive the restart" (the
+    // model + widget round-trip worked, only the visible propagation
+    // was skipped).
+    QObject::connect(page, &MainPage::channelAdded, page, [page, model](int idx){
+        if (auto *ch = page->channelAt(idx)) {
+            ch->setMeterVertical(model->getVerticalMeter());
+            ch->setSkipButtonsVisible(model->getShowSkipButtons());
+            ch->waveform()->setAdaptToFx(model->getAdaptWaveformToFx());
+            ch->waveform()->setShowCropMarkers(model->getShowCropMarkers());
+            ch->waveform()->setSpectrogramView(model->getSpectrogramView());
+            ch->setFxVisible(model->getGlobalFxEnabled());
+            ch->setWaveformVisible(!model->getHideWaveform());
+            ch->setMeterVisible(model->getAudioMeterVisible());
+            ch->setExportVisible(model->getAudioExportEnabled());
+            ch->setSandboxFeatureEnabled(model->getAudioSandboxEnabled());
+        }
+    });
 
     // Persistence is now ALWAYS on so per-channel link / sync / sandbox
     // state survives a restart. The restoreSession switch only governs
@@ -2026,7 +2163,14 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     pauseAllTimer->start();
 
     QObject::connect(page->stopAllBtn(), &QPushButton::clicked,
-                     pauseBtn, [sampler, refreshPauseAll]{
+                     pauseBtn, [sampler, page, refreshPauseAll]{
+        // Stop All acts as a global red-stop click for every infinity
+        // auto channel: mark them all pendingRemove so onStopPlaying
+        // auto-removes them even if loop / reverse is on.
+        for (auto *ch : page->channels()) {
+            if (ch && ch->property("infinityAuto").toBool())
+                ch->setProperty("infinityPendingRemove", true);
+        }
         if (sampler) sampler->stopPlayback(-1);
         refreshPauseAll();
     });

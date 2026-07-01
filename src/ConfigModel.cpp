@@ -126,6 +126,12 @@ ConfigModel::ConfigModel()
 	m_audioExportEnabled = false;
 	m_adaptWaveformToFx = false;
 	m_showCropMarkers = true;
+	m_multiChannelInfinity = false;
+	m_showPauseAllButton = true;
+	m_showStopAllButton = true;
+	m_verticalMeter = false;
+	m_showSkipButtons = true;
+	m_spectrogramView = false;
 
 	m_resetChVolume = true;
 	m_resetChFx = true;
@@ -205,6 +211,12 @@ void ConfigModel::readConfig(const QString &file)
 	m_audioExportEnabled  = settings.value("audio_export_enabled", false).toBool();
 	m_adaptWaveformToFx   = settings.value("adapt_waveform_to_fx", false).toBool();
 	m_showCropMarkers     = settings.value("show_crop_markers", true).toBool();
+	m_multiChannelInfinity= settings.value("multi_channel_infinity", false).toBool();
+	m_showPauseAllButton  = settings.value("show_pause_all_button", true).toBool();
+	m_showStopAllButton   = settings.value("show_stop_all_button",  true).toBool();
+	m_verticalMeter       = settings.value("vertical_meter",        false).toBool();
+	m_showSkipButtons     = settings.value("show_skip_buttons",     true).toBool();
+	m_spectrogramView     = settings.value("spectrogram_view",      false).toBool();
 	m_resetChVolume       = settings.value("reset_ch_volume", true).toBool();
 	m_resetChFx           = settings.value("reset_ch_fx", true).toBool();
 	m_resetChFile         = settings.value("reset_ch_file", true).toBool();
@@ -300,6 +312,12 @@ void ConfigModel::writeConfigImmediate(const QString &file)
 	settings.setValue("audio_export_enabled", m_audioExportEnabled);
 	settings.setValue("adapt_waveform_to_fx", m_adaptWaveformToFx);
 	settings.setValue("show_crop_markers", m_showCropMarkers);
+	settings.setValue("multi_channel_infinity", m_multiChannelInfinity);
+	settings.setValue("show_pause_all_button", m_showPauseAllButton);
+	settings.setValue("show_stop_all_button",  m_showStopAllButton);
+	settings.setValue("vertical_meter",        m_verticalMeter);
+	settings.setValue("show_skip_buttons",     m_showSkipButtons);
+	settings.setValue("spectrogram_view",      m_spectrogramView);
 	settings.setValue("reset_ch_volume", m_resetChVolume);
 	settings.setValue("reset_ch_fx", m_resetChFx);
 	settings.setValue("reset_ch_file", m_resetChFile);
@@ -887,6 +905,13 @@ void ConfigModel::setShowCropMarkers(bool on)
 	m_showCropMarkers = on;
 	writeConfig();
 }
+
+void ConfigModel::setMultiChannelInfinity(bool on) { m_multiChannelInfinity = on; writeConfig(); }
+void ConfigModel::setShowPauseAllButton(bool on)   { m_showPauseAllButton   = on; writeConfig(); }
+void ConfigModel::setShowStopAllButton(bool on)    { m_showStopAllButton    = on; writeConfig(); }
+void ConfigModel::setVerticalMeter(bool on)        { m_verticalMeter        = on; writeConfig(); }
+void ConfigModel::setShowSkipButtons(bool on)      { m_showSkipButtons      = on; writeConfig(); }
+void ConfigModel::setSpectrogramView(bool on)      { m_spectrogramView      = on; writeConfig(); }
 
 void ConfigModel::setResetChVolume(bool on) { m_resetChVolume = on; writeConfig(); }
 void ConfigModel::setResetChFx(bool on) { m_resetChFx = on; writeConfig(); }

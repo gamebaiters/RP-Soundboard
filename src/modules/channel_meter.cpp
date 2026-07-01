@@ -40,6 +40,31 @@ ChannelMeter::ChannelMeter(QWidget *parent) : QWidget(parent)
     setAttribute(Qt::WA_OpaquePaintEvent, true);
 }
 
+QSize ChannelMeter::sizeHint() const {
+    return (m_orient == Horizontal) ? QSize(220, 28) : QSize(42, 72);
+}
+
+QSize ChannelMeter::minimumSizeHint() const {
+    return (m_orient == Horizontal) ? QSize(120, 24) : QSize(36, 48);
+}
+
+void ChannelMeter::setOrientation(Orientation o) {
+    if (o == m_orient) return;
+    m_orient = o;
+    // Push a fresh sizeHint through Qt's layout system - the surrounding
+    // Channel row swaps horizontal-heavy for vertical-narrow footprint,
+    // so parent layouts must recompute or the meter's old cell size
+    // sticks around and either clips the new orientation or leaves an
+    // empty gap.
+    if (o == Horizontal) {
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
+    } else {
+        setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+    }
+    updateGeometry();
+    update();
+}
+
 void ChannelMeter::setPeak(float l, float r)
 {
     if (l < 0.0f) l = 0.0f;
@@ -86,20 +111,9 @@ void ChannelMeter::paintEvent(QPaintEvent *)
     p.setRenderHint(QPainter::Antialiasing, true);
     const QRect bg = rect();
 
-    // Widget is opaque so EVERY pixel must be painted. The 4 corner
-    // regions outside the rounded panel must blend perfectly into
-    // the parent Channel widget (whose m_frame paints
-    // Theme::Derived::surface as its background — see channel.cpp).
-    //
-    // Old version: hardcoded #333437 which matched neither the
-    // default surface (#3a3a3a) nor any themed surface — user saw
-    // 4 visible "wrong-colour" corner spikes at the meter boundary.
-    //
-    // Fix: ALWAYS pull Theme::derivedCached().surface, regardless
-    // of whether the user enabled the custom theme — derivedCached
-    // returns the correct default surface when no custom theme is
-    // set, so this is bit-for-bit identical to what the channel
-    // frame draws behind us.
+    // Widget is opaque so EVERY pixel must be painted. Fill the 4
+    // corners with the themed channel surface so the rounded panel
+    // sits cleanly on the parent Channel widget's background.
     p.fillRect(bg, Theme::derivedCached().surface);
 
     // Rounded recessed LED panel.
@@ -111,6 +125,16 @@ void ChannelMeter::paintEvent(QPaintEvent *)
     p.setBrush(Qt::NoBrush);
     p.drawRoundedRect(QRectF(bg).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
 
+    if (m_orient == Horizontal) {
+        paintHorizontal(p);
+    } else {
+        paintVertical(p);
+    }
+}
+
+void ChannelMeter::paintHorizontal(QPainter &p)
+{
+    const QRect bg = rect();
     const int padL = 13;   // room for the L / R label
     const int padR = 6;
     int barW = bg.width() - padL - padR;
@@ -225,4 +249,106 @@ void ChannelMeter::paintEvent(QPaintEvent *)
 
     drawRow(top,                m_l, m_peakHoldL, 'L');
     drawRow(top + barH + gapY,  m_r, m_peakHoldR, 'R');
+}
+
+void ChannelMeter::paintVertical(QPainter &p)
+{
+    const QRect bg = rect();
+
+    // Vertical layout: two thin bars filling bottom -> top, tiny L / R
+    // caption at the top of each. Same colour zones + peak-hold semantics
+    // as the horizontal path, only the axes are swapped. Keeps the whole
+    // widget inside the channel row's existing height so switching to
+    // vertical never enlarges the channel.
+    const int padTop = 12;   // room for the L / R caption
+    const int padBot = 4;
+    int barH = bg.height() - padTop - padBot;
+    if (barH < 8) return;
+
+    int barW = std::max(6, (bg.width() - 10) / 2);
+    const int gapX = 4;
+    int total = barW * 2 + gapX;
+    int left = (bg.width() - total) / 2;
+    if (left < 2) left = 2;
+    int barTop = padTop;
+
+    auto buildGrad = [](int y0, int y1, int alpha) {
+        QLinearGradient g(0, y1, 0, y0);   // colour rises with level
+        QColor cyan (0x3f, 0xb0, 0xe0, alpha);
+        QColor green(0x49, 0xc0, 0x55, alpha);
+        QColor amber(0xe0, 0xa0, 0x22, alpha);
+        QColor red  (0xe2, 0x4b, 0x4b, alpha);
+        g.setColorAt(0.00, cyan);
+        g.setColorAt(0.54, cyan);
+        g.setColorAt(0.60, green);
+        g.setColorAt(0.76, green);
+        g.setColorAt(0.80, amber);
+        g.setColorAt(0.88, amber);
+        g.setColorAt(0.92, red);
+        g.setColorAt(1.00, red);
+        return g;
+    };
+
+    QFont lf = p.font();
+    lf.setPixelSize(9);
+    p.setFont(lf);
+
+    auto drawCol = [&](int x, float v, float hold, char label) {
+        p.setPen(QColor(0x9a, 0x9a, 0x9a));
+        p.drawText(QRect(x, 1, barW, padTop - 2),
+                   Qt::AlignHCenter | Qt::AlignVCenter, QString(QChar(label)));
+
+        QRectF track(x, barTop, barW, barH);
+        const qreal r = std::min<qreal>(barW * 0.45, 2.5);
+
+        // Dim track: faint full-height gradient.
+        p.setPen(Qt::NoPen);
+        p.setBrush(buildGrad(barTop, barTop + barH, 38));
+        p.drawRoundedRect(track, r, r);
+
+        // Live level fill.
+        float norm   = toNorm(v);
+        float fillH  = norm * static_cast<float>(barH);
+        int   fillHi = static_cast<int>(std::round(fillH));
+        if (fillHi > 0) {
+            p.save();
+            QPainterPath clip;
+            clip.addRoundedRect(track, r, r);
+            p.setClipPath(clip);
+            p.setBrush(buildGrad(barTop, barTop + barH, 255));
+            p.drawRect(QRectF(x, barTop + (barH - fillHi), barW, fillHi));
+            p.restore();
+        }
+
+        // Tick marks at zone boundaries (~-12 / -6 / -3 dB).
+        p.setPen(QColor(0xff, 0xff, 0xff, 36));
+        const float tickFracs[] = {0.55f, 0.78f, 0.90f};
+        for (float tf : tickFracs) {
+            int ty = barTop + barH - static_cast<int>(std::round(tf * barH));
+            p.drawLine(x + 1, ty, x + barW - 1, ty);
+        }
+
+        // Peak-hold marker.
+        if (hold > 1e-4f) {
+            float peakNorm = toNorm(hold);
+            int peakY = barTop + barH - static_cast<int>(std::round(peakNorm * barH));
+            if (peakY >= barTop && peakY <= barTop + barH) {
+                QColor pc = (peakNorm >= 0.90f) ? QColor(0xff, 0xc8, 0xc8)
+                          : QColor(0xff, 0xff, 0xff);
+                qreal mh = 2.6;
+                QRectF markerRect(
+                    static_cast<qreal>(x) + 0.5,
+                    static_cast<qreal>(peakY) - mh * 0.5,
+                    static_cast<qreal>(barW) - 1.0,
+                    mh);
+                qreal mr = std::min<qreal>(mh * 0.5, barW * 0.35);
+                p.setPen(Qt::NoPen);
+                p.setBrush(pc);
+                p.drawRoundedRect(markerRect, mr, mr);
+            }
+        }
+    };
+
+    drawCol(left,                    m_l, m_peakHoldL, 'L');
+    drawCol(left + barW + gapX,      m_r, m_peakHoldR, 'R');
 }

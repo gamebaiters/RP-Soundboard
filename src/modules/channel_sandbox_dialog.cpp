@@ -162,7 +162,20 @@ void ChannelSandboxDialog::refreshTitle()
 void ChannelSandboxDialog::setState(const SandboxState &s)
 {
     m_state = s;
+    // The incoming state is a snapshot from disk / another channel /
+    // paste - the preset that originated it is not tracked, so drop
+    // any live preset attribution. The combo shows the placeholder;
+    // the slider values themselves are pushed by pushStateToWidgets().
+    m_eqPresetType          = EqPresetType::None;
+    m_eqPresetPredefinedIdx = -1;
+    m_eqPresetCustomName.clear();
+    m_eqPresetDirty         = false;
+    if (m_eqPresetBox) {
+        QSignalBlocker bl(m_eqPresetBox);
+        m_eqPresetBox->setCurrentIndex(0);
+    }
     pushStateToWidgets();
+    refreshEqPresetComboText();
     applyModeVisibility();
 }
 
@@ -433,6 +446,24 @@ void ChannelSandboxDialog::buildUi()
             "Amount of room reflection blended in. 0 = pure direct,\n"
             "higher = a wider, more enveloping space."));
         l->addWidget(row);
+
+        // Doppler toggle - only meaningful in 3D Rotate / 8D preset modes.
+        m_dopplerEnable = new QCheckBox(tr("Doppler shift (rotating modes)"), m_leiaGroup);
+        m_dopplerEnable->setToolTip(tr(
+            "Adds a physical Doppler shift on top of the 3D rotation:\n"
+            "as each virtual ear moves toward or away from the source,\n"
+            "the pitch bends up or down. Realistic Doppler at typical\n"
+            "RPMs is nearly inaudible; strength EXAGGERATES the effect\n"
+            "up to ~50x physical for a stylised 8D flavour. Off by\n"
+            "default - has no effect in Manual or L/R Pan modes."));
+        l->addWidget(m_dopplerEnable);
+        {
+            QSlider *ds = nullptr; QLabel *dl = nullptr;
+            auto *dr = buildSliderRow(m_leiaGroup, tr("Doppler strength"),
+                                      0, 100, 50, "%", ds, dl);
+            m_dopplerStrength = ds; m_dopplerStrengthLabel = dl;
+            l->addWidget(dr);
+        }
     }
     spatialCol->addWidget(m_leiaGroup, 1);
 
@@ -467,18 +498,35 @@ void ChannelSandboxDialog::buildUi()
     auto applyShape = [this](const float *shape){
         m_loading = true;
         for (int b = 0; b < 16 && b < m_eqSliders.size(); ++b) {
-            int v = (int)std::round(shape[b]);
-            if (v < -12) v = -12;
-            if (v >  12) v =  12;
-            m_state.eqBandDb[b] = (float)v;
-            if (m_eqSliders[b]) m_eqSliders[b]->setValue(v);
+            float dB = shape[b];
+            if (dB < -12.0f) dB = -12.0f;
+            if (dB >  12.0f) dB =  12.0f;
+            m_state.eqBandDb[b] = dB;
+            if (m_eqSliders[b])
+                m_eqSliders[b]->setValue(EqBandWidget::dbToSlider(dB));
+            if (b < m_eqLabels.size() && m_eqLabels[b])
+                m_eqLabels[b]->setText(QString::number(dB, 'f', 1));
         }
         m_loading = false;
         pushChange();
     };
     eqHeader->addSpacing(6);
     m_eqPresetBox = new QComboBox(eqBox);
-    m_eqPresetBox->setMinimumContentsLength(10);
+    m_eqPresetBox->setMinimumContentsLength(14);
+    // Editable + read-only lineEdit so the combo's displayed text can
+    // be overridden without touching the underlying item list. The
+    // dropdown still shows the real preset names for selection; the
+    // FIELD text is a view string driven by refreshEqPresetComboText()
+    // (Personalizzato / <name>* / preset name / "(select preset)").
+    // Setting InsertPolicy::NoInsert stops any typed value from being
+    // added as an item, which is redundant here since the lineEdit is
+    // read-only, but belt-and-braces cheap.
+    m_eqPresetBox->setEditable(true);
+    m_eqPresetBox->setInsertPolicy(QComboBox::NoInsert);
+    if (m_eqPresetBox->lineEdit()) {
+        m_eqPresetBox->lineEdit()->setReadOnly(true);
+        m_eqPresetBox->lineEdit()->setFocusPolicy(Qt::NoFocus);
+    }
     auto *eqPresetSaveBtn   = new QPushButton(tr("Save..."), eqBox);
     auto *eqPresetDeleteBtn = new QPushButton(tr("Delete"),  eqBox);
     eqPresetSaveBtn->setMaximumWidth(64);
@@ -509,13 +557,26 @@ void ChannelSandboxDialog::buildUi()
     };
     updateDeleteEnabled();
 
-    connect(m_eqPresetBox, qOverload<int>(&QComboBox::currentIndexChanged),
+    // QComboBox::activated fires on every user-driven pick including
+    // re-selecting the CURRENT item - the requirement being "clicking
+    // the already-shown predefined preset name restores it after edits
+    // marked it Personalizzato". currentIndexChanged suppresses same-
+    // index picks and would leave the user stuck.
+    connect(m_eqPresetBox, qOverload<int>(&QComboBox::activated),
             this, [this, applyShape, updateDeleteEnabled](int idx){
         QVariant tag = m_eqPresetBox->itemData(idx);
         if (tag.isValid()) {
             int t = tag.toInt();
-            if (t >= 0 && t < kEqBuiltInCount) {
+            if (t == -1) {
+                // "(select preset)" placeholder: no state change here
+                // beyond clearing any dirty predefined selection back
+                // to the built-in that WAS chosen. Nothing to load.
+            } else if (t >= 0 && t < kEqBuiltInCount) {
                 applyShape(kEqBuiltIn[t].v);
+                m_eqPresetType         = EqPresetType::Predefined;
+                m_eqPresetPredefinedIdx = t;
+                m_eqPresetCustomName.clear();
+                m_eqPresetDirty        = false;
             } else if (t >= 1000) {
                 QString name = m_eqPresetBox->itemText(idx);
                 const auto presets = PresetManager::loadEqPresets();
@@ -526,47 +587,102 @@ void ChannelSandboxDialog::buildUi()
                         for (int i = 0; i < 16 && i < parts.size(); ++i)
                             buf[i] = parts[i].toFloat();
                         applyShape(buf);
+                        m_eqPresetType         = EqPresetType::Custom;
+                        m_eqPresetPredefinedIdx = -1;
+                        m_eqPresetCustomName    = name;
+                        m_eqPresetDirty        = false;
                         break;
                     }
                 }
             }
         }
+        refreshEqPresetComboText();
         updateDeleteEnabled();
     });
 
     connect(eqPresetSaveBtn, &QPushButton::clicked, this,
-            [this, refreshEqCombo]{
-        bool ok = false;
-        QString name = QInputDialog::getText(this, tr("Save EQ preset"),
-            tr("Preset name:"), QLineEdit::Normal, QString(), &ok);
-        if (!ok || name.trimmed().isEmpty()) return;
-        name = name.trimmed();
-        // Refuse a name that collides with a built-in - those are
-        // immutable. The user can always pick a different name.
-        for (int i = 0; i < kEqBuiltInCount; ++i) {
-            if (name.compare(QString::fromLatin1(kEqBuiltIn[i].name),
-                              Qt::CaseInsensitive) == 0) {
+            [this, refreshEqCombo, updateDeleteEnabled]{
+        auto isBuiltInName = [](const QString &n) {
+            for (int i = 0; i < kEqBuiltInCount; ++i)
+                if (n.compare(QString::fromLatin1(kEqBuiltIn[i].name),
+                              Qt::CaseInsensitive) == 0) return true;
+            return false;
+        };
+        auto serialise = [this]() {
+            QString data;
+            for (int i = 0; i < 16; ++i)
+                data += "#" + QString::number(m_state.eqBandDb[i], 'f', 2);
+            return data;
+        };
+        auto selectByName = [this](const QString &name) {
+            for (int i = 0; i < m_eqPresetBox->count(); ++i) {
+                if (m_eqPresetBox->itemText(i) == name) {
+                    QSignalBlocker bl(m_eqPresetBox);
+                    m_eqPresetBox->setCurrentIndex(i);
+                    break;
+                }
+            }
+        };
+        auto askAndCreate = [&](const QString &defaultName) {
+            bool ok = false;
+            QString name = QInputDialog::getText(this, tr("Save EQ preset"),
+                tr("Preset name:"), QLineEdit::Normal, defaultName, &ok);
+            if (!ok || name.trimmed().isEmpty()) return;
+            name = name.trimmed();
+            if (isBuiltInName(name)) {
                 QMessageBox::warning(this, tr("Save EQ preset"),
                     tr("\"%1\" is a built-in preset; pick another name.").arg(name));
                 return;
             }
-        }
-        QString data;
-        for (int i = 0; i < 16; ++i)
-            data += "#" + QString::number(m_state.eqBandDb[i]);
-        PresetManager::saveEqPreset(name, data);
-        refreshEqCombo();
-        for (int i = 0; i < m_eqPresetBox->count(); ++i) {
-            if (m_eqPresetBox->itemText(i) == name) {
-                QSignalBlocker bl(m_eqPresetBox);
-                m_eqPresetBox->setCurrentIndex(i);
-                break;
+            PresetManager::saveEqPreset(name, serialise());
+            refreshEqCombo();
+            selectByName(name);
+            m_eqPresetType          = EqPresetType::Custom;
+            m_eqPresetPredefinedIdx = -1;
+            m_eqPresetCustomName    = name;
+            m_eqPresetDirty         = false;
+            refreshEqPresetComboText();
+            updateDeleteEnabled();
+        };
+
+        // Custom preset that has been edited: offer to overwrite the
+        // current preset OR save the edits under a new name.
+        if (m_eqPresetType == EqPresetType::Custom &&
+            !m_eqPresetCustomName.isEmpty() && m_eqPresetDirty) {
+            QMessageBox box(this);
+            box.setWindowTitle(tr("Save EQ preset"));
+            box.setText(tr("Preset \"%1\" has unsaved edits.").arg(
+                m_eqPresetCustomName));
+            box.setInformativeText(tr(
+                "Overwrite the existing preset, or save the current shape\n"
+                "as a new preset?"));
+            QPushButton *overwriteBtn = box.addButton(tr("Overwrite"),
+                                                     QMessageBox::AcceptRole);
+            QPushButton *newBtn       = box.addButton(tr("Save as new..."),
+                                                     QMessageBox::ActionRole);
+            QPushButton *cancelBtn    = box.addButton(QMessageBox::Cancel);
+            box.setDefaultButton(overwriteBtn);
+            box.exec();
+            QAbstractButton *clicked = box.clickedButton();
+            if (clicked == overwriteBtn) {
+                PresetManager::saveEqPreset(m_eqPresetCustomName, serialise());
+                m_eqPresetDirty = false;
+                refreshEqPresetComboText();
+            } else if (clicked == newBtn) {
+                askAndCreate(m_eqPresetCustomName + tr(" (copy)"));
+            } else {
+                (void)cancelBtn;
             }
+            return;
         }
+
+        // Otherwise (nothing selected / predefined active / custom
+        // clean): always create a new preset.
+        askAndCreate(QString());
     });
 
     connect(eqPresetDeleteBtn, &QPushButton::clicked, this,
-            [this, refreshEqCombo]{
+            [this, refreshEqCombo, updateDeleteEnabled]{
         int idx = m_eqPresetBox->currentIndex();
         QVariant tag = m_eqPresetBox->itemData(idx);
         if (!tag.isValid() || tag.toInt() < 1000) return;
@@ -577,6 +693,14 @@ void ChannelSandboxDialog::buildUi()
         if (choice != QMessageBox::Yes) return;
         PresetManager::deleteEqPreset(name);
         refreshEqCombo();
+        if (m_eqPresetType == EqPresetType::Custom &&
+            m_eqPresetCustomName == name) {
+            m_eqPresetType         = EqPresetType::None;
+            m_eqPresetCustomName.clear();
+            m_eqPresetDirty        = false;
+            refreshEqPresetComboText();
+        }
+        updateDeleteEnabled();
     });
     eqHeader->addStretch(1);
     eqOuter->addLayout(eqHeader);
@@ -607,9 +731,11 @@ void ChannelSandboxDialog::buildUi()
         eqLay->addWidget(val,  2, i, Qt::AlignHCenter);
 
         connect(s, &QSlider::valueChanged, this, [this, i, val](int v){
-            val->setText(QString::number(v));
+            float dB = EqBandWidget::sliderToDb(v);
+            val->setText(QString::number(dB, 'f', 1));
             if (m_loading) return;
-            m_state.eqBandDb[i] = static_cast<float>(v);
+            m_state.eqBandDb[i] = dB;
+            onEqBandUserEdited();
             pushChange();
         });
     }
@@ -1118,6 +1244,208 @@ void ChannelSandboxDialog::buildUi()
     }
     dspScrollLay->addWidget(duckSection);
 
+    auto makeSidechainSpin = [](QWidget *parent) -> QSpinBox * {
+        auto *sb = new QSpinBox(parent);
+        sb->setRange(-1, 31);
+        sb->setValue(-1);
+        sb->setSpecialValueText(tr("self"));
+        sb->setToolTip(tr(
+            "Sidechain source channel index (0..31). -1 = self envelope\n"
+            "(default: this channel's own input drives the stage).\n"
+            "Set to another slot to have that slot's envelope trigger\n"
+            "this stage instead - classic cross-channel sidechaining."));
+        return sb;
+    };
+
+    // ---- Noise Gate ----
+    auto *gateSection = new ExpandableSection(tr("Noise Gate"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *hdr = new QHBoxLayout;
+        m_gateEnable = new QCheckBox(tr("Enable Noise Gate"));
+        m_gateEnable->setToolTip(tr(
+            "Full-band gate with attack / hold / release. Below threshold\n"
+            "the gain drops toward the RANGE floor; above threshold it\n"
+            "opens back up. 3 dB hysteresis prevents chatter around the\n"
+            "trigger point. Optional cross-slot sidechain: pick another\n"
+            "channel index to have its envelope drive the gate here."));
+        hdr->addWidget(m_gateEnable);
+        hdr->addStretch(1);
+        lay->addLayout(hdr);
+        QSlider *s = nullptr; QLabel *lbl = nullptr;
+        auto *r1 = buildSliderRow(nullptr, tr("Threshold"), -800, 0, -400, "", s, lbl);
+        m_gateThresh = s; m_gateThreshLabel = lbl; m_gateThreshLabel->setText("-40.0 dB");
+        lay->addWidget(r1);
+        auto *r2 = buildSliderRow(nullptr, tr("Range"), -800, 0, -600, "", s, lbl);
+        m_gateRange = s; m_gateRangeLabel = lbl; m_gateRangeLabel->setText("-60.0 dB");
+        lay->addWidget(r2);
+        auto *r3 = buildSliderRow(nullptr, tr("Attack"), 1, 500, 20, "", s, lbl);
+        m_gateAttack = s; m_gateAttackLabel = lbl; m_gateAttackLabel->setText("2.0 ms");
+        lay->addWidget(r3);
+        auto *r4 = buildSliderRow(nullptr, tr("Hold"), 0, 500, 20, " ms", s, lbl);
+        m_gateHold = s; m_gateHoldLabel = lbl;
+        lay->addWidget(r4);
+        auto *r5 = buildSliderRow(nullptr, tr("Release"), 1, 2000, 150, " ms", s, lbl);
+        m_gateRelease = s; m_gateReleaseLabel = lbl;
+        lay->addWidget(r5);
+        auto *scRow = new QHBoxLayout;
+        scRow->addWidget(new QLabel(tr("Sidechain source:")));
+        m_gateSidechainSlot = makeSidechainSpin(nullptr);
+        scRow->addWidget(m_gateSidechainSlot);
+        scRow->addStretch(1);
+        lay->addLayout(scRow);
+        gateSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(gateSection);
+
+    // ---- De-esser ----
+    auto *deessSection = new ExpandableSection(tr("De-esser"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *hdr = new QHBoxLayout;
+        m_deEssEnable = new QCheckBox(tr("Enable De-esser"));
+        m_deEssEnable->setToolTip(tr(
+            "Sibilance-band compressor. A bandpass isolates the sibilance\n"
+            "region; when its envelope exceeds threshold the FULL signal\n"
+            "is pulled down by up to RANGE dB. Sidechain source lets the\n"
+            "de-esser react to another channel's HF energy."));
+        hdr->addWidget(m_deEssEnable);
+        hdr->addStretch(1);
+        lay->addLayout(hdr);
+        QSlider *s = nullptr; QLabel *lbl = nullptr;
+        auto *r1 = buildSliderRow(nullptr, tr("Freq"), 1000, 12000, 6500, " Hz", s, lbl);
+        m_deEssFreq = s; m_deEssFreqLabel = lbl;
+        lay->addWidget(r1);
+        auto *r2 = buildSliderRow(nullptr, tr("Q"), 5, 120, 30, "", s, lbl);
+        m_deEssQ = s; m_deEssQLabel = lbl; m_deEssQLabel->setText("3.0");
+        lay->addWidget(r2);
+        auto *r3 = buildSliderRow(nullptr, tr("Threshold"), -600, 0, -300, "", s, lbl);
+        m_deEssThresh = s; m_deEssThreshLabel = lbl; m_deEssThreshLabel->setText("-30.0 dB");
+        lay->addWidget(r3);
+        auto *r4 = buildSliderRow(nullptr, tr("Range"), -300, 0, -100, "", s, lbl);
+        m_deEssRange = s; m_deEssRangeLabel = lbl; m_deEssRangeLabel->setText("-10.0 dB");
+        lay->addWidget(r4);
+        auto *r5 = buildSliderRow(nullptr, tr("Attack"), 1, 200, 30, "", s, lbl);
+        m_deEssAttack = s; m_deEssAttackLabel = lbl; m_deEssAttackLabel->setText("3.0 ms");
+        lay->addWidget(r5);
+        auto *r6 = buildSliderRow(nullptr, tr("Release"), 5, 500, 80, " ms", s, lbl);
+        m_deEssRelease = s; m_deEssReleaseLabel = lbl;
+        lay->addWidget(r6);
+        auto *scRow = new QHBoxLayout;
+        scRow->addWidget(new QLabel(tr("Sidechain source:")));
+        m_deEssSidechainSlot = makeSidechainSpin(nullptr);
+        scRow->addWidget(m_deEssSidechainSlot);
+        scRow->addStretch(1);
+        lay->addLayout(scRow);
+        deessSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(deessSection);
+
+    // ---- Transient shaper ----
+    auto *transSection = new ExpandableSection(tr("Transient Shaper"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *hdr = new QHBoxLayout;
+        m_transEnable = new QCheckBox(tr("Enable Transient Shaper"));
+        m_transEnable->setToolTip(tr(
+            "Fast + slow envelope followers isolate ATTACK vs SUSTAIN.\n"
+            "Positive attack = punchier transients. Negative attack =\n"
+            "smoothed. Positive sustain = fuller body. Negative sustain =\n"
+            "tighter release. Symmetric +/-20 dB range."));
+        hdr->addWidget(m_transEnable);
+        hdr->addStretch(1);
+        lay->addLayout(hdr);
+        QSlider *s = nullptr; QLabel *lbl = nullptr;
+        auto *r1 = buildSliderRow(nullptr, tr("Attack"), -200, 200, 0, "", s, lbl);
+        m_transAttack = s; m_transAttackLabel = lbl; m_transAttackLabel->setText("0.0 dB");
+        lay->addWidget(r1);
+        auto *r2 = buildSliderRow(nullptr, tr("Sustain"), -200, 200, 0, "", s, lbl);
+        m_transSustain = s; m_transSustainLabel = lbl; m_transSustainLabel->setText("0.0 dB");
+        lay->addWidget(r2);
+        transSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(transSection);
+
+    // ---- Dynamic EQ (4 bands) ----
+    auto *dynEqSection = new ExpandableSection(tr("Dynamic EQ"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *hdr = new QHBoxLayout;
+        m_dynEqEnable = new QCheckBox(tr("Enable Dynamic EQ"));
+        m_dynEqEnable->setToolTip(tr(
+            "4 independent peaking bands whose gain is driven by an\n"
+            "envelope of that band's content. Static gain = baseline\n"
+            "EQ; Dynamic gain kicks in above threshold with the given\n"
+            "ratio (negative dynamic = downward compression; positive =\n"
+            "upward expansion). Tame a nasal midrange only when loud,\n"
+            "or nudge a subtle bass shelf only during hot passages."));
+        hdr->addWidget(m_dynEqEnable);
+        hdr->addStretch(1);
+        lay->addLayout(hdr);
+        static const int kDefFreqs[4]     = { 120, 600, 3000, 8000 };
+        static const int kDefQ_x10[4]     = {  10,  12,   14,   14 };
+        for (int b = 0; b < 4; ++b) {
+            auto *box = new QGroupBox(tr("Band %1").arg(b + 1));
+            auto *bl = new QVBoxLayout(box);
+            auto *bh = new QHBoxLayout;
+            m_dynEqBand[b].enable = new QCheckBox(tr("Enable"));
+            bh->addWidget(m_dynEqBand[b].enable);
+            bh->addStretch(1);
+            bl->addLayout(bh);
+            QSlider *s = nullptr; QLabel *lbl = nullptr;
+            auto *r1 = buildSliderRow(nullptr, tr("Freq"),
+                                      20, 16000, kDefFreqs[b], " Hz", s, lbl);
+            m_dynEqBand[b].freq = s; m_dynEqBand[b].freqLabel = lbl;
+            bl->addWidget(r1);
+            auto *r2 = buildSliderRow(nullptr, tr("Q"),
+                                      5, 100, kDefQ_x10[b], "", s, lbl);
+            m_dynEqBand[b].q = s; m_dynEqBand[b].qLabel = lbl;
+            bl->addWidget(r2);
+            auto *r3 = buildSliderRow(nullptr, tr("Static gain"),
+                                      -120, 120, 0, "", s, lbl);
+            m_dynEqBand[b].sGain = s; m_dynEqBand[b].sGainLabel = lbl;
+            m_dynEqBand[b].sGainLabel->setText("0.0 dB");
+            bl->addWidget(r3);
+            auto *r4 = buildSliderRow(nullptr, tr("Threshold"),
+                                      -600, 0, -300, "", s, lbl);
+            m_dynEqBand[b].thresh = s; m_dynEqBand[b].threshLabel = lbl;
+            m_dynEqBand[b].threshLabel->setText("-30.0 dB");
+            bl->addWidget(r4);
+            auto *r5 = buildSliderRow(nullptr, tr("Ratio"),
+                                      10, 200, 20, "", s, lbl);
+            m_dynEqBand[b].ratio = s; m_dynEqBand[b].ratioLabel = lbl;
+            m_dynEqBand[b].ratioLabel->setText("2.0:1");
+            bl->addWidget(r5);
+            auto *r6 = buildSliderRow(nullptr, tr("Dynamic gain"),
+                                      -120, 120, -60, "", s, lbl);
+            m_dynEqBand[b].dGain = s; m_dynEqBand[b].dGainLabel = lbl;
+            m_dynEqBand[b].dGainLabel->setText("-6.0 dB");
+            bl->addWidget(r6);
+            lay->addWidget(box);
+        }
+        dynEqSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(dynEqSection);
+
+    // ---- Compressor sidechain source ----
+    // Small standalone accordion for the Compressor's cross-slot
+    // sidechain source. Kept separate from the main Compressor panel
+    // (built earlier and self-contained). Setting it here is functionally
+    // identical to inlining inside the Compressor accordion.
+    auto *compScSection = new ExpandableSection(tr("Compressor sidechain"),
+                                                160, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *scRow = new QHBoxLayout;
+        scRow->addWidget(new QLabel(tr("Source channel:")));
+        m_compSidechainSlot = makeSidechainSpin(nullptr);
+        scRow->addWidget(m_compSidechainSlot);
+        scRow->addStretch(1);
+        lay->addLayout(scRow);
+        compScSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(compScSection);
+
     // Map each DspStage to its accordion panel. EQ, Spatial and Reverb
     // stay nullptr - their controls live in the left column.
     m_stageSection[SandboxState::Stage_Paulstretch] = stretchSection;
@@ -1131,6 +1459,10 @@ void ChannelSandboxDialog::buildUi()
     m_stageSection[SandboxState::Stage_Limiter]     = limiterSection;
     m_stageSection[SandboxState::Stage_Bitcrusher]  = bitcrushSection;
     m_stageSection[SandboxState::Stage_GenLoss]     = genLossSection;
+    m_stageSection[SandboxState::Stage_NoiseGate]        = gateSection;
+    m_stageSection[SandboxState::Stage_DeEsser]          = deessSection;
+    m_stageSection[SandboxState::Stage_TransientShaper]  = transSection;
+    m_stageSection[SandboxState::Stage_DynEq]            = dynEqSection;
 
     // Remember which DSP panels the user left open/closed so re-opening
     // the sandbox does not force them to re-collapse everything.
@@ -1723,6 +2055,156 @@ void ChannelSandboxDialog::buildUi()
             pushChange();
         });
 
+    // ---- Noise Gate wiring ----
+    if (m_gateEnable) connect(m_gateEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.gateEnabled = on; pushChange();
+    });
+    if (m_gateThresh) connect(m_gateThresh, &QSlider::valueChanged, this, [this](int v){
+        m_state.gateThresholdDb = v / 10.0f;
+        m_gateThreshLabel->setText(QString::number(m_state.gateThresholdDb, 'f', 1) + " dB");
+        pushChange();
+    });
+    if (m_gateRange) connect(m_gateRange, &QSlider::valueChanged, this, [this](int v){
+        m_state.gateRangeDb = v / 10.0f;
+        m_gateRangeLabel->setText(QString::number(m_state.gateRangeDb, 'f', 1) + " dB");
+        pushChange();
+    });
+    if (m_gateAttack) connect(m_gateAttack, &QSlider::valueChanged, this, [this](int v){
+        m_state.gateAttackMs = v / 10.0f;
+        m_gateAttackLabel->setText(QString::number(m_state.gateAttackMs, 'f', 1) + " ms");
+        pushChange();
+    });
+    if (m_gateHold) connect(m_gateHold, &QSlider::valueChanged, this, [this](int v){
+        m_state.gateHoldMs = static_cast<float>(v);
+        m_gateHoldLabel->setText(QString::number(v) + " ms");
+        pushChange();
+    });
+    if (m_gateRelease) connect(m_gateRelease, &QSlider::valueChanged, this, [this](int v){
+        m_state.gateReleaseMs = static_cast<float>(v);
+        m_gateReleaseLabel->setText(QString::number(v) + " ms");
+        pushChange();
+    });
+    if (m_gateSidechainSlot) connect(m_gateSidechainSlot,
+        qOverload<int>(&QSpinBox::valueChanged), this, [this](int v){
+        m_state.gateSidechainSlot = v; pushChange();
+    });
+
+    // ---- De-esser wiring ----
+    if (m_deEssEnable) connect(m_deEssEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.deesserEnabled = on; pushChange();
+    });
+    if (m_deEssFreq) connect(m_deEssFreq, &QSlider::valueChanged, this, [this](int v){
+        m_state.deesserFreqHz = static_cast<float>(v);
+        m_deEssFreqLabel->setText(QString::number(v) + " Hz");
+        pushChange();
+    });
+    if (m_deEssQ) connect(m_deEssQ, &QSlider::valueChanged, this, [this](int v){
+        m_state.deesserQ = v / 10.0f;
+        m_deEssQLabel->setText(QString::number(m_state.deesserQ, 'f', 1));
+        pushChange();
+    });
+    if (m_deEssThresh) connect(m_deEssThresh, &QSlider::valueChanged, this, [this](int v){
+        m_state.deesserThresholdDb = v / 10.0f;
+        m_deEssThreshLabel->setText(QString::number(m_state.deesserThresholdDb, 'f', 1) + " dB");
+        pushChange();
+    });
+    if (m_deEssRange) connect(m_deEssRange, &QSlider::valueChanged, this, [this](int v){
+        m_state.deesserRangeDb = v / 10.0f;
+        m_deEssRangeLabel->setText(QString::number(m_state.deesserRangeDb, 'f', 1) + " dB");
+        pushChange();
+    });
+    if (m_deEssAttack) connect(m_deEssAttack, &QSlider::valueChanged, this, [this](int v){
+        m_state.deesserAttackMs = v / 10.0f;
+        m_deEssAttackLabel->setText(QString::number(m_state.deesserAttackMs, 'f', 1) + " ms");
+        pushChange();
+    });
+    if (m_deEssRelease) connect(m_deEssRelease, &QSlider::valueChanged, this, [this](int v){
+        m_state.deesserReleaseMs = static_cast<float>(v);
+        m_deEssReleaseLabel->setText(QString::number(v) + " ms");
+        pushChange();
+    });
+    if (m_deEssSidechainSlot) connect(m_deEssSidechainSlot,
+        qOverload<int>(&QSpinBox::valueChanged), this, [this](int v){
+        m_state.deesserSidechainSlot = v; pushChange();
+    });
+
+    // ---- Transient shaper wiring ----
+    if (m_transEnable) connect(m_transEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.transEnabled = on; pushChange();
+    });
+    if (m_transAttack) connect(m_transAttack, &QSlider::valueChanged, this, [this](int v){
+        m_state.transAttackDb = v / 10.0f;
+        m_transAttackLabel->setText(QString::number(m_state.transAttackDb, 'f', 1) + " dB");
+        pushChange();
+    });
+    if (m_transSustain) connect(m_transSustain, &QSlider::valueChanged, this, [this](int v){
+        m_state.transSustainDb = v / 10.0f;
+        m_transSustainLabel->setText(QString::number(m_state.transSustainDb, 'f', 1) + " dB");
+        pushChange();
+    });
+
+    // ---- Dynamic EQ wiring ----
+    if (m_dynEqEnable) connect(m_dynEqEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.dyneqEnabled = on; pushChange();
+    });
+    for (int b = 0; b < 4; ++b) {
+        auto &ui = m_dynEqBand[b];
+        if (ui.enable) connect(ui.enable, &QCheckBox::toggled, this, [this, b](bool on){
+            m_state.dyneqBands[b].enabled = on; pushChange();
+        });
+        if (ui.freq) connect(ui.freq, &QSlider::valueChanged, this, [this, b](int v){
+            m_state.dyneqBands[b].freq = static_cast<float>(v);
+            m_dynEqBand[b].freqLabel->setText(QString::number(v) + " Hz");
+            pushChange();
+        });
+        if (ui.q) connect(ui.q, &QSlider::valueChanged, this, [this, b](int v){
+            m_state.dyneqBands[b].q = v / 10.0f;
+            m_dynEqBand[b].qLabel->setText(QString::number(m_state.dyneqBands[b].q, 'f', 1));
+            pushChange();
+        });
+        if (ui.sGain) connect(ui.sGain, &QSlider::valueChanged, this, [this, b](int v){
+            m_state.dyneqBands[b].staticGainDb = v / 10.0f;
+            m_dynEqBand[b].sGainLabel->setText(
+                QString::number(m_state.dyneqBands[b].staticGainDb, 'f', 1) + " dB");
+            pushChange();
+        });
+        if (ui.thresh) connect(ui.thresh, &QSlider::valueChanged, this, [this, b](int v){
+            m_state.dyneqBands[b].thresholdDb = v / 10.0f;
+            m_dynEqBand[b].threshLabel->setText(
+                QString::number(m_state.dyneqBands[b].thresholdDb, 'f', 1) + " dB");
+            pushChange();
+        });
+        if (ui.ratio) connect(ui.ratio, &QSlider::valueChanged, this, [this, b](int v){
+            m_state.dyneqBands[b].ratio = v / 10.0f;
+            m_dynEqBand[b].ratioLabel->setText(
+                QString::number(m_state.dyneqBands[b].ratio, 'f', 1) + ":1");
+            pushChange();
+        });
+        if (ui.dGain) connect(ui.dGain, &QSlider::valueChanged, this, [this, b](int v){
+            m_state.dyneqBands[b].dynamicDb = v / 10.0f;
+            m_dynEqBand[b].dGainLabel->setText(
+                QString::number(m_state.dyneqBands[b].dynamicDb, 'f', 1) + " dB");
+            pushChange();
+        });
+    }
+
+    // ---- Compressor sidechain wiring ----
+    if (m_compSidechainSlot) connect(m_compSidechainSlot,
+        qOverload<int>(&QSpinBox::valueChanged), this, [this](int v){
+        m_state.compSidechainSlot = v; pushChange();
+    });
+
+    // ---- Doppler wiring ----
+    if (m_dopplerEnable) connect(m_dopplerEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.dopplerEnabled = on; pushChange();
+    });
+    if (m_dopplerStrength) connect(m_dopplerStrength, &QSlider::valueChanged, this, [this](int v){
+        m_state.dopplerStrength = static_cast<float>(v);
+        if (m_dopplerStrengthLabel)
+            m_dopplerStrengthLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+
     connect(m_genLossEnable, &QCheckBox::toggled, this, [this](bool on){
         m_state.genLossEnabled = on; pushChange();
     });
@@ -1901,8 +2383,9 @@ void ChannelSandboxDialog::pushStateToWidgets()
     m_stretchWinLabel->setText(QString::number(m_stretchWin->value()) + " ms");
     m_eqEnable->setChecked(m_state.eqEnabled);
     for (int i = 0; i < 16 && i < m_eqSliders.size(); ++i) {
-        m_eqSliders[i]->setValue(static_cast<int>(m_state.eqBandDb[i]));
-        m_eqLabels[i]->setText(QString::number(static_cast<int>(m_state.eqBandDb[i])));
+        float dB = m_state.eqBandDb[i];
+        m_eqSliders[i]->setValue(EqBandWidget::dbToSlider(dB));
+        m_eqLabels[i]->setText(QString::number(dB, 'f', 1));
     }
     // New effects
     if (m_compEnable) m_compEnable->setChecked(m_state.compEnabled);
@@ -1979,6 +2462,75 @@ void ChannelSandboxDialog::pushStateToWidgets()
     if (m_genLossGens) {
         m_genLossGens->setValue(m_state.genLossGenerations);
         m_genLossGensLabel->setText(genLossDesc(m_state.genLossGenerations));
+    }
+
+    // ---- Noise Gate ----
+    if (m_gateEnable)  m_gateEnable->setChecked(m_state.gateEnabled);
+    if (m_gateThresh) { m_gateThresh->setValue(static_cast<int>(m_state.gateThresholdDb * 10.0f));
+        m_gateThreshLabel->setText(QString::number(m_state.gateThresholdDb, 'f', 1) + " dB"); }
+    if (m_gateRange)  { m_gateRange->setValue(static_cast<int>(m_state.gateRangeDb * 10.0f));
+        m_gateRangeLabel->setText(QString::number(m_state.gateRangeDb, 'f', 1) + " dB"); }
+    if (m_gateAttack) { m_gateAttack->setValue(static_cast<int>(m_state.gateAttackMs * 10.0f));
+        m_gateAttackLabel->setText(QString::number(m_state.gateAttackMs, 'f', 1) + " ms"); }
+    if (m_gateHold)   { m_gateHold->setValue(static_cast<int>(m_state.gateHoldMs));
+        m_gateHoldLabel->setText(QString::number(static_cast<int>(m_state.gateHoldMs)) + " ms"); }
+    if (m_gateRelease){ m_gateRelease->setValue(static_cast<int>(m_state.gateReleaseMs));
+        m_gateReleaseLabel->setText(QString::number(static_cast<int>(m_state.gateReleaseMs)) + " ms"); }
+    if (m_gateSidechainSlot) m_gateSidechainSlot->setValue(m_state.gateSidechainSlot);
+
+    // ---- De-esser ----
+    if (m_deEssEnable) m_deEssEnable->setChecked(m_state.deesserEnabled);
+    if (m_deEssFreq) { m_deEssFreq->setValue(static_cast<int>(m_state.deesserFreqHz));
+        m_deEssFreqLabel->setText(QString::number(static_cast<int>(m_state.deesserFreqHz)) + " Hz"); }
+    if (m_deEssQ) { m_deEssQ->setValue(static_cast<int>(m_state.deesserQ * 10.0f));
+        m_deEssQLabel->setText(QString::number(m_state.deesserQ, 'f', 1)); }
+    if (m_deEssThresh) { m_deEssThresh->setValue(static_cast<int>(m_state.deesserThresholdDb * 10.0f));
+        m_deEssThreshLabel->setText(QString::number(m_state.deesserThresholdDb, 'f', 1) + " dB"); }
+    if (m_deEssRange) { m_deEssRange->setValue(static_cast<int>(m_state.deesserRangeDb * 10.0f));
+        m_deEssRangeLabel->setText(QString::number(m_state.deesserRangeDb, 'f', 1) + " dB"); }
+    if (m_deEssAttack) { m_deEssAttack->setValue(static_cast<int>(m_state.deesserAttackMs * 10.0f));
+        m_deEssAttackLabel->setText(QString::number(m_state.deesserAttackMs, 'f', 1) + " ms"); }
+    if (m_deEssRelease) { m_deEssRelease->setValue(static_cast<int>(m_state.deesserReleaseMs));
+        m_deEssReleaseLabel->setText(QString::number(static_cast<int>(m_state.deesserReleaseMs)) + " ms"); }
+    if (m_deEssSidechainSlot) m_deEssSidechainSlot->setValue(m_state.deesserSidechainSlot);
+
+    // ---- Transient shaper ----
+    if (m_transEnable)  m_transEnable->setChecked(m_state.transEnabled);
+    if (m_transAttack) { m_transAttack->setValue(static_cast<int>(m_state.transAttackDb * 10.0f));
+        m_transAttackLabel->setText(QString::number(m_state.transAttackDb, 'f', 1) + " dB"); }
+    if (m_transSustain){ m_transSustain->setValue(static_cast<int>(m_state.transSustainDb * 10.0f));
+        m_transSustainLabel->setText(QString::number(m_state.transSustainDb, 'f', 1) + " dB"); }
+
+    // ---- Dynamic EQ ----
+    if (m_dynEqEnable) m_dynEqEnable->setChecked(m_state.dyneqEnabled);
+    for (int b = 0; b < 4; ++b) {
+        auto &ui = m_dynEqBand[b];
+        const auto &bs = m_state.dyneqBands[b];
+        if (ui.enable) ui.enable->setChecked(bs.enabled);
+        if (ui.freq)   { ui.freq->setValue(static_cast<int>(bs.freq));
+            ui.freqLabel->setText(QString::number(static_cast<int>(bs.freq)) + " Hz"); }
+        if (ui.q)      { ui.q->setValue(static_cast<int>(bs.q * 10.0f));
+            ui.qLabel->setText(QString::number(bs.q, 'f', 1)); }
+        if (ui.sGain)  { ui.sGain->setValue(static_cast<int>(bs.staticGainDb * 10.0f));
+            ui.sGainLabel->setText(QString::number(bs.staticGainDb, 'f', 1) + " dB"); }
+        if (ui.thresh) { ui.thresh->setValue(static_cast<int>(bs.thresholdDb * 10.0f));
+            ui.threshLabel->setText(QString::number(bs.thresholdDb, 'f', 1) + " dB"); }
+        if (ui.ratio)  { ui.ratio->setValue(static_cast<int>(bs.ratio * 10.0f));
+            ui.ratioLabel->setText(QString::number(bs.ratio, 'f', 1) + ":1"); }
+        if (ui.dGain)  { ui.dGain->setValue(static_cast<int>(bs.dynamicDb * 10.0f));
+            ui.dGainLabel->setText(QString::number(bs.dynamicDb, 'f', 1) + " dB"); }
+    }
+
+    // Compressor sidechain source
+    if (m_compSidechainSlot) m_compSidechainSlot->setValue(m_state.compSidechainSlot);
+
+    // Doppler
+    if (m_dopplerEnable) m_dopplerEnable->setChecked(m_state.dopplerEnabled);
+    if (m_dopplerStrength) {
+        m_dopplerStrength->setValue(static_cast<int>(m_state.dopplerStrength));
+        if (m_dopplerStrengthLabel)
+            m_dopplerStrengthLabel->setText(
+                QString::number(static_cast<int>(m_state.dopplerStrength)) + "%");
     }
 
     if (m_bitcrushPreset) { QSignalBlocker blk(m_bitcrushPreset); m_bitcrushPreset->setCurrentIndex(0); }
@@ -2114,34 +2666,92 @@ void ChannelSandboxDialog::onModeChanged(int idx)
 
 void ChannelSandboxDialog::load8DPreset()
 {
-    // Classic YouTube 8D recipe: orbit a single tighter source around
-    // the head with the head-sway cue on. Reverb stays out of the
-    // sandbox - the existing FxPanel reverb covers that role.
+    // HiFi 8D recipe. The classic "YouTube 8D remix" recipe was tuned
+    // to sound convincing on low-bitrate stream content and prioritised
+    // the orbit cue over source fidelity. The user wants the OPPOSITE
+    // - full HiFi transparency on any source through 8D. Preset now
+    // biases every knob toward the cleanest signal path:
+    //   - slightly wider virtual speaker spread (was 0 deg -> 6 deg).
+    //     Width 0 collapsed both virtual speakers to the same point,
+    //     making bass content perfectly correlated -> 6 dB buildup in
+    //     the summed HRIR sum -> chronic clipping into softLimit on
+    //     low-freq peaks. 6 deg keeps the "narrow tight source" 8D
+    //     cue while decorrelating just enough LF to avoid pileup.
+    //   - Sandbox reverbWet reduced 0.12 -> 0.04. The Leia engine's own
+    //     image-source reflections already supply the "out of head"
+    //     room cue; a second Freeverb layer on top muddled the tail
+    //     and read as reverb-induced compression on bass.
+    //   - spatialMix 0.85 -> 0.92. The 15% dry bleed the previous
+    //     recipe added combined with the kBlock (~5.3 ms) wet latency
+    //     to produce a shallow comb around 94 Hz. 8% dry keeps the
+    //     stereo character without the audible LF comb.
+    //   - leiaClarity 100 -> 92. Full direct-path + full reflections
+    //     drove the post-engine memoryless saturator; pulling clarity
+    //     back a touch relaxes the sum and lets the room speak.
+    //   - leiaWidth 45 -> 55. Slightly wider reflection field so the
+    //     source rotation lives inside a believable space rather than
+    //     glued to the direct-path arc.
     m_state.enabled        = true;
     m_state.rotateRpm      = 10.0f;
     m_state.rotateRadiusM  = 2.0f;
     m_state.rotateCcw      = false;
     m_state.elev           = 0.0f;
     m_state.headSway       = true;
-    m_state.stereoWidthDeg = 0.0f;
-    // Reverb wet 12% mirrors audio_sandbox standalone's 8D preset.
-    // Without this, the rotating source stays "in the head" - the
-    // listener hears the orbit but not the room. Adding the ambience
-    // is what closes the gap to the standalone reference.
-    m_state.reverbWet      = 0.12f;
-    // Spatial mix slightly under 100 keeps original stereo content
-    // bleeding through, again matching standalone behaviour.
-    m_state.spatialMix     = 0.85f;
+    m_state.stereoWidthDeg = 6.0f;
+    m_state.reverbWet      = 0.04f;
+    m_state.spatialMix     = 0.92f;
 
-    // Leia-engine 8D recipe: image-source reflections give the orbit a
-    // believable room so the preset sounds right whichever engine the
-    // user has selected. The engine choice itself is left untouched.
     m_state.leiaReflEnable = true;
     m_state.leiaRoomType   = 1;       // Studio
     m_state.leiaRoomSize   = 14.0f;
     m_state.leiaReflLevel  = -4.0f;
-    m_state.leiaClarity    = 100.0f;
-    m_state.leiaWidth      = 45.0f;
+    m_state.leiaClarity    = 92.0f;
+    m_state.leiaWidth      = 55.0f;
+}
+
+void ChannelSandboxDialog::onEqBandUserEdited()
+{
+    // A slider move flips the EQ preset state to "dirty". For a
+    // Predefined preset the label swaps to "Personalizzato" so the user
+    // knows the chosen built-in has been modified. For a Custom preset
+    // the label appends an asterisk so the user knows Save will offer
+    // to overwrite / save-as-new. For None (no preset chosen yet) the
+    // label stays hidden - there is nothing to invalidate.
+    if (m_eqPresetType == EqPresetType::None) return;
+    if (m_eqPresetDirty) return;
+    m_eqPresetDirty = true;
+    refreshEqPresetComboText();
+}
+
+void ChannelSandboxDialog::refreshEqPresetComboText()
+{
+    // The combo is editable + read-only; setEditText overrides the
+    // displayed field text without touching the underlying item list.
+    // The dropdown still shows real preset names for selection - this
+    // only changes the FIELD.
+    if (!m_eqPresetBox || !m_eqPresetBox->lineEdit()) return;
+    QString display;
+    switch (m_eqPresetType) {
+    case EqPresetType::None:
+        display = tr("(select preset)");
+        break;
+    case EqPresetType::Predefined:
+        if (m_eqPresetDirty) {
+            display = tr("Personalizzato");
+        } else if (m_eqPresetPredefinedIdx >= 0 &&
+                    m_eqPresetPredefinedIdx < kEqBuiltInCount) {
+            display = QString::fromLatin1(
+                kEqBuiltIn[m_eqPresetPredefinedIdx].name);
+        } else {
+            display = tr("(select preset)");
+        }
+        break;
+    case EqPresetType::Custom:
+        display = m_eqPresetCustomName;
+        if (m_eqPresetDirty) display += QStringLiteral("*");
+        break;
+    }
+    m_eqPresetBox->setEditText(display);
 }
 
 void ChannelSandboxDialog::onPanChanged(int v) {
@@ -2262,6 +2872,17 @@ void ChannelSandboxDialog::onPasteEq()
     }
     for (int i = 0; i < 16; ++i)
         m_state.eqBandDb[i] = parts[i].toFloat();
+    // Pasted shape has no known origin - drop any predefined/custom
+    // tracking so the status label goes back to blank.
+    m_eqPresetType         = EqPresetType::None;
+    m_eqPresetPredefinedIdx = -1;
+    m_eqPresetCustomName.clear();
+    m_eqPresetDirty        = false;
+    if (m_eqPresetBox) {
+        QSignalBlocker bl(m_eqPresetBox);
+        m_eqPresetBox->setCurrentIndex(0);
+    }
+    refreshEqPresetComboText();
     pushStateToWidgets();
     pushChange();
 }

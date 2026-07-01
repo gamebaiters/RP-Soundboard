@@ -256,6 +256,50 @@ private:
     class QSlider   *m_duckAmount     = nullptr;
     class QLabel    *m_duckAmountLabel = nullptr;
 
+    // Noise Gate
+    QCheckBox *m_gateEnable  = nullptr;
+    QSlider   *m_gateThresh  = nullptr; QLabel *m_gateThreshLabel = nullptr;
+    QSlider   *m_gateRange   = nullptr; QLabel *m_gateRangeLabel  = nullptr;
+    QSlider   *m_gateAttack  = nullptr; QLabel *m_gateAttackLabel = nullptr;
+    QSlider   *m_gateHold    = nullptr; QLabel *m_gateHoldLabel   = nullptr;
+    QSlider   *m_gateRelease = nullptr; QLabel *m_gateReleaseLabel= nullptr;
+    class QSpinBox *m_gateSidechainSlot = nullptr;
+
+    // De-esser
+    QCheckBox *m_deEssEnable = nullptr;
+    QSlider   *m_deEssFreq   = nullptr; QLabel *m_deEssFreqLabel  = nullptr;
+    QSlider   *m_deEssQ      = nullptr; QLabel *m_deEssQLabel     = nullptr;
+    QSlider   *m_deEssThresh = nullptr; QLabel *m_deEssThreshLabel= nullptr;
+    QSlider   *m_deEssRange  = nullptr; QLabel *m_deEssRangeLabel = nullptr;
+    QSlider   *m_deEssAttack = nullptr; QLabel *m_deEssAttackLabel= nullptr;
+    QSlider   *m_deEssRelease= nullptr; QLabel *m_deEssReleaseLabel = nullptr;
+    class QSpinBox *m_deEssSidechainSlot = nullptr;
+
+    // Transient shaper
+    QCheckBox *m_transEnable   = nullptr;
+    QSlider   *m_transAttack   = nullptr; QLabel *m_transAttackLabel  = nullptr;
+    QSlider   *m_transSustain  = nullptr; QLabel *m_transSustainLabel = nullptr;
+
+    // Dynamic EQ (4 bands)
+    QCheckBox *m_dynEqEnable = nullptr;
+    struct DynEqBandUi {
+        QCheckBox *enable  = nullptr;
+        QSlider   *freq    = nullptr; QLabel *freqLabel   = nullptr;
+        QSlider   *q       = nullptr; QLabel *qLabel      = nullptr;
+        QSlider   *sGain   = nullptr; QLabel *sGainLabel  = nullptr;
+        QSlider   *thresh  = nullptr; QLabel *threshLabel = nullptr;
+        QSlider   *ratio   = nullptr; QLabel *ratioLabel  = nullptr;
+        QSlider   *dGain   = nullptr; QLabel *dGainLabel  = nullptr;
+    };
+    DynEqBandUi m_dynEqBand[4];
+
+    // Compressor sidechain source (added alongside the existing Comp UI).
+    class QSpinBox *m_compSidechainSlot = nullptr;
+
+    // Doppler toggle (Leia group)
+    QCheckBox *m_dopplerEnable   = nullptr;
+    QSlider   *m_dopplerStrength = nullptr; QLabel *m_dopplerStrengthLabel = nullptr;
+
 
     // Generation Loss
     QCheckBox   *m_genLossEnable = nullptr;
@@ -297,4 +341,29 @@ private:
     // Preset manager combos
     QComboBox *m_eqPresetBox      = nullptr;
     QComboBox *m_sandboxPresetBox = nullptr;
+
+    // EQ preset state machine.
+    //
+    // Track how the user got to the current EQ shape so the combo's
+    // own displayed text can communicate:
+    //   - Predefined + clean: name of the built-in preset ("Smile").
+    //   - Predefined + edited: literal "Personalizzato" (user knows any
+    //     change to a built-in produces a personalised shape - clicking
+    //     the same built-in name in the combo restores it).
+    //   - Custom + clean: name of the user-saved preset.
+    //   - Custom + edited: "<name>*" (asterisk = unsaved edits, Save
+    //     button prompts overwrite / save-as-new).
+    //   - None: "(select preset)".
+    //
+    // Displayed via the combo's own lineEdit (editable + read-only)
+    // so the item list stays intact - the shown text is only a view
+    // string over the current selection, never a real item.
+    enum class EqPresetType { None, Predefined, Custom };
+    EqPresetType m_eqPresetType         = EqPresetType::None;
+    int          m_eqPresetPredefinedIdx = -1;
+    QString      m_eqPresetCustomName;
+    bool         m_eqPresetDirty        = false;
+
+    void onEqBandUserEdited();
+    void refreshEqPresetComboText();
 };

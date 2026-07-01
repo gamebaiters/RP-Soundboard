@@ -162,6 +162,14 @@ set(sources
 	src/dsp/Limiter.cpp
 	src/dsp/Bitcrusher.h
 	src/dsp/GenerationLoss.h
+	src/dsp/DeEsser.h
+	src/dsp/DeEsser.cpp
+	src/dsp/NoiseGate.h
+	src/dsp/NoiseGate.cpp
+	src/dsp/TransientShaper.h
+	src/dsp/TransientShaper.cpp
+	src/dsp/DynEq.h
+	src/dsp/DynEq.cpp
 
 	# --- Sandbox per-channel UI ---
 	src/modules/channel_meter.h

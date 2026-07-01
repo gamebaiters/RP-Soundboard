@@ -75,6 +75,20 @@ public:
     // Show / hide the meter widget (driven by the global "Show audio
     // meter on channels" setting).
     void                setMeterVisible(bool on);
+    // Switch the per-channel LED visualizer between horizontal and
+    // vertical orientation. Driven by the global "Vertical LED
+    // visualizer" setting. Layout re-flows so the sliders on the left
+    // fill the vacated space and no dead gap appears.
+    void                setMeterVertical(bool on);
+    // Show / hide the -10s / -5s / +5s / +10s skip buttons on this
+    // channel's waveform transport. Driven by the global "Show skip
+    // buttons" setting.
+    void                setSkipButtonsVisible(bool on);
+    // Programmatic remove trigger. Emits removeChannelRequested with
+    // the channel's own id so external code (multi-channel infinity
+    // auto-cleanup path) can request removal without touching the
+    // private m_removeBtn.
+    void                requestRemove() { emit removeChannelRequested(m_id); }
     // Show / hide the sandbox button (driven by the global "Enable
     // audio sandbox feature" setting).
     void                setSandboxFeatureEnabled(bool on);

@@ -40,8 +40,13 @@ QColor stopColor(float t) {
 
 EqBandWidget::EqBandWidget(QWidget *parent) : QSlider(Qt::Vertical, parent)
 {
-    setRange(-12, 12);
+    // 0.1 dB granularity so slider drag feels smooth instead of stepping
+    // integer decibels. External code multiplies/divides by 10 via the
+    // dbToSlider / sliderToDb helpers in the header.
+    setRange(kSliderMin, kSliderMax);
     setValue(0);
+    setSingleStep(1);      // keyboard arrow = 0.1 dB
+    setPageStep(10);       // PgUp/PgDn = 1.0 dB
     setMinimumWidth(22);
     setTracking(true);
 }
@@ -195,13 +200,20 @@ void EqBandWidget::paintEvent(QPaintEvent *)
         }
     }
 
-    // Slider thumb.
-    p.setPen(QPen(QColor(245, 245, 245, 230), 2));
+    // Slider thumb. Enlarged to a chunkier 9-pixel bar (was 4) plus a
+    // fine hairline at the exact centre so the user has a bigger target
+    // to click / drag without losing sub-cell precision when reading
+    // the current value. Widened past the track on both sides so the
+    // grab handle protrudes visually like a physical fader cap.
+    p.setPen(QPen(QColor(255, 255, 255, 240), 1));
     p.drawLine(trackX, thumbY, trackX + trackW, thumbY);
-    p.setBrush(QColor(245, 245, 245, 220));
+    p.setBrush(QColor(240, 240, 240, 235));
     p.setPen(Qt::NoPen);
-    p.drawRoundedRect(QRectF(trackX - 2, thumbY - 2, trackW + 4, 4),
-                      2.0, 2.0);
+    p.drawRoundedRect(QRectF(trackX - 4, thumbY - 4, trackW + 8, 9),
+                      3.0, 3.0);
+    // Central hairline for precise readback of the exact set position.
+    p.setPen(QPen(QColor(30, 30, 30, 180), 1));
+    p.drawLine(trackX - 2, thumbY, trackX + trackW + 2, thumbY);
 
     int midY = trackY + trackH / 2;
     if (std::abs(midY - thumbY) > 6) {
@@ -269,17 +281,19 @@ void EqBandWidget::contextMenuEvent(QContextMenuEvent *e)
     QAction *cut   = menu.addAction(tr("Set to -12 dB"));
     QAction *chosen = menu.exec(e->globalPos());
     if (chosen == reset) setValue(0);
-    else if (chosen == boost) setValue(12);
-    else if (chosen == cut)   setValue(-12);
+    else if (chosen == boost) setValue(kSliderMax);
+    else if (chosen == cut)   setValue(kSliderMin);
 }
 
 void EqBandWidget::wheelEvent(QWheelEvent *e)
 {
-    // Vertical wheel adjusts by 1 dB per notch. Easier than dragging
-    // the thin track. Shift = 3 dB.
+    // Vertical wheel adjusts by 0.5 dB per notch (5 slider ticks at
+    // the new 0.1 dB granularity). Shift-wheel = 2 dB per notch. Both
+    // feel more natural than the old 1 dB / 3 dB stepping which locked
+    // out any decimal readings on the wheel path.
     int delta = e->angleDelta().y();
     if (delta == 0) { QSlider::wheelEvent(e); return; }
-    int step = (e->modifiers() & Qt::ShiftModifier) ? 3 : 1;
+    int step = (e->modifiers() & Qt::ShiftModifier) ? 20 : 5;
     setValue(value() + (delta > 0 ? step : -step));
     e->accept();
 }

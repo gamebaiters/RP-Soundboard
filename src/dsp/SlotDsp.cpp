@@ -61,12 +61,16 @@ inline float antiDenormDither(int n) {
     constexpr float kEps = 1e-20f;
     return (n & 1) ? kEps : -kEps;
 }
-// Soft limiter with strict bound to [-1, +1]. T=0.95 -> only the last
-// 0.5 dB of headroom triggers compression; normal program material
-// passes through linearly.
+// Soft limiter with strict bound to [-1, +1]. T=0.98 -> only the last
+// 0.2 dB of headroom triggers compression; normal program material
+// passes through linearly. Softer knee (A=0.12 up from 0.05) so hot
+// bass content is bent into place gently instead of hitting a tight
+// crossover-distortion elbow - the tight elbow was audible as the
+// residual "physical-limiter-inhibits-playback" symptom the user
+// reported on sustained bass through the Leia path.
 inline float softLimit(float x) {
-    constexpr float T = 0.95f;
-    constexpr float A = 0.05f;
+    constexpr float T = 0.98f;
+    constexpr float A = 0.12f;
     float ax = std::fabs(x);
     if (ax <= T) return x;
     float over = ax - T;
@@ -103,6 +107,10 @@ void SlotDsp::setSampleRate(double sr) {
         p.limiter.setSampleRate(m_fs);
         p.bitcrusher.setSampleRate(m_fs);
         p.genLoss.setSampleRate(m_fs);
+        p.deesser.setSampleRate(m_fs);
+        p.gate.setSampleRate(m_fs);
+        p.trans.setSampleRate(m_fs);
+        p.dyneq.setSampleRate(m_fs);
     };
     initPath(m_play);
     initPath(m_cap);
@@ -129,8 +137,17 @@ void SlotDsp::reset() {
         p.limiter.reset();
         p.bitcrusher.reset();
         p.genLoss.reset();
+        p.deesser.reset();
+        p.gate.reset();
+        p.trans.reset();
+        p.dyneq.reset();
         p.rotPhase = 0.0;
         p.rotBlockCounter = 0;
+        std::fill(std::begin(p.dopplerBufL), std::end(p.dopplerBufL), 0.0f);
+        std::fill(std::begin(p.dopplerBufR), std::end(p.dopplerBufR), 0.0f);
+        p.dopplerWrite = 0;
+        p.dopplerDelayL = p.dopplerDelayR = 0.0f;
+        p.dopplerPrevAz = 0.0f;
     };
     resetPath(m_play);
     resetPath(m_cap);
@@ -199,7 +216,11 @@ void SlotDsp::recomputeActive() {
                        s.limiterEnabled ||
                        s.bitcrusherEnabled ||
                        s.monoEnabled ||
-                       s.genLossEnabled;
+                       s.genLossEnabled ||
+                       s.gateEnabled ||
+                       s.deesserEnabled ||
+                       s.transEnabled ||
+                       s.dyneqEnabled;
     bool sandboxActive = s.enabled && (spatialActive || eqActive || reverbActive ||
                                         s.headSway || s.stretchEnabled || newFxActive);
     m_active = sandboxActive || m_fxReverbWet > 0.001f;
@@ -310,6 +331,13 @@ void SlotDsp::applyState(const SandboxState &s) {
         p.reverb.setDamping(0.5f);
         for (int i = 0; i < 16; ++i)
             p.eq.setBandGainDb(i, s.eqBandDb[i]);
+        // Throttle the EQ analyser FFT when the EQ stage is bypassed -
+        // LEDs still animate, just at a coarser rate, freeing audio-
+        // thread CPU for the heavier Spatial path.
+        bool eqBandActive = s.eqEnabled && std::any_of(
+            std::begin(s.eqBandDb), std::end(s.eqBandDb),
+            [](float v){ return std::abs(v) > 0.001f; });
+        p.eq.setStageActive(eqBandActive);
         float swayDeg = s.headSway ? 1.5f : 0.0f;
         p.posL.setHeadSwayAmount(swayDeg);
         p.posR.setHeadSwayAmount(swayDeg);
@@ -333,6 +361,24 @@ void SlotDsp::applyState(const SandboxState &s) {
                             s.limiterRatio, s.limiterGateThresh);
         p.bitcrusher.setParams(s.bitcrusherBitDepth, s.bitcrusherRate);
         p.genLoss.setGenerations(s.genLossGenerations);
+        p.deesser.setParams(s.deesserFreqHz, s.deesserQ, s.deesserThresholdDb,
+                            s.deesserRangeDb, s.deesserAttackMs, s.deesserReleaseMs);
+        p.gate.setParams(s.gateThresholdDb, s.gateRangeDb,
+                         s.gateAttackMs, s.gateHoldMs, s.gateReleaseMs);
+        p.trans.setParams(s.transAttackDb, s.transSustainDb);
+        for (int b = 0; b < DynEq::kNumBands; ++b) {
+            DynEq::BandConfig cfg;
+            cfg.enabled      = s.dyneqBands[b].enabled;
+            cfg.freq         = s.dyneqBands[b].freq;
+            cfg.q            = s.dyneqBands[b].q;
+            cfg.staticGainDb = s.dyneqBands[b].staticGainDb;
+            cfg.thresholdDb  = s.dyneqBands[b].thresholdDb;
+            cfg.ratio        = s.dyneqBands[b].ratio;
+            cfg.dynamicDb    = s.dyneqBands[b].dynamicDb;
+            cfg.attackMs     = s.dyneqBands[b].attackMs;
+            cfg.releaseMs    = s.dyneqBands[b].releaseMs;
+            p.dyneq.setBand(b, cfg);
+        }
 
         // Leia (measured-HRTF) engine. The heavy SOFA load happens
         // lazily here on the GUI thread, and only when the user has
@@ -465,7 +511,13 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
         if (m_state.eqEnabled) p.eq.processStereo(l, r);
         break;
     case SandboxState::Stage_Compressor:
-        if (m_state.compEnabled) p.comp.processStereo(l, r);
+        if (m_state.compEnabled) {
+            if (m_state.compSidechainSlot >= 0)
+                p.comp.feedSidechain(m_extCompEnv.load(std::memory_order_relaxed));
+            else
+                p.comp.feedSidechain(0.0f);
+            p.comp.processStereo(l, r);
+        }
         break;
     case SandboxState::Stage_Saturator:
         if (m_state.saturatorEnabled && m_state.saturatorMix > 0.001f) p.sat.processStereo(l, r);
@@ -484,12 +536,84 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
             case SandboxState::Spatial_3DManual:
             case SandboxState::Spatial_3DRotate:
             case SandboxState::Spatial_8DPreset: {
+                // Pre-attenuate the Spatial input by the EQ's positive
+                // sum, then post-amplify by the inverse so loudness is
+                // preserved. Without this, EQ-boosted material fed
+                // straight into the Spatial stage drove peaks above the
+                // post-engine soft-saturator's knee and produced the
+                // frying the user reported when modifying the EQ while
+                // Leia was active. Capped at 6 dB of pull-down so the
+                // post-mul never has to amplify by more than 2x and the
+                // spatial cue stays audible.
+                float positiveSumDb = m_state.eqEnabled
+                    ? p.eq.positiveSumDb() : 0.0f;
+                if (positiveSumDb > 6.0f) positiveSumDb = 6.0f;
+                const float preAtt = (positiveSumDb > 0.001f)
+                    ? std::pow(10.0f, -positiveSumDb / 20.0f) : 1.0f;
+                const float postAmp = (preAtt > 0.0f) ? 1.0f / preAtt : 1.0f;
+                if (preAtt < 1.0f) {
+                    l *= preAtt;
+                    r *= preAtt;
+                }
                 if (m_state.spatialEngine == SandboxState::Engine_Leia &&
                     p.leia.ready()) {
                     // Leia (measured HRTF). The wrapper does its own
                     // block buffering + wet/dry crossfade internally.
                     updateLeiaDirection(p);
                     p.leia.process(l, r);
+                    // Optional Doppler on the Leia output. Only meaningful
+                    // in rotate / 8D modes where the source azimuth
+                    // actually moves.
+                    if (m_state.dopplerEnabled &&
+                        (m_state.spatialMode == SandboxState::Spatial_3DRotate ||
+                         m_state.spatialMode == SandboxState::Spatial_8DPreset)) {
+                        constexpr float kHeadRadiusM = 0.09f;
+                        constexpr float kSpeedOfSoundMps = 343.0f;
+                        const float strength = 1.0f
+                            + 49.0f * (m_state.dopplerStrength * 0.01f); // 1..50x
+                        const float az = static_cast<float>(p.rotPhase); // rad
+                        const float dAz = az - p.dopplerPrevAz;
+                        p.dopplerPrevAz = az;
+                        // Sample-rate to convert rad/sample to m/s:
+                        // radial velocity per ear = h * cos(az) * dAz/dt
+                        // dAz here is per-block-boundary but we approximate
+                        // per-sample delta by dAz/kRotateUpdateBlock.
+                        const float perSampleDaz = dAz / static_cast<float>(kRotateUpdateBlock);
+                        const float velR =  kHeadRadiusM * std::cos(az) * perSampleDaz
+                                            * static_cast<float>(m_fs);
+                        const float velL = -velR;
+                        // Doppler delay accumulates: per-sample rate of
+                        // change matches velocity / speed-of-sound.
+                        p.dopplerDelayR += velR / kSpeedOfSoundMps * strength;
+                        p.dopplerDelayL += velL / kSpeedOfSoundMps * strength;
+                        // Clamp to buffer capacity - 2 samples of headroom.
+                        auto clampDelay = [](float d) {
+                            const float lim = static_cast<float>(PathState::kDopplerMax - 2);
+                            if (d >  lim) d =  lim;
+                            if (d < -lim) d = -lim;
+                            return d;
+                        };
+                        p.dopplerDelayL = clampDelay(p.dopplerDelayL);
+                        p.dopplerDelayR = clampDelay(p.dopplerDelayR);
+                        // Write current sample, then read fractional at
+                        // (write - delay) in a ring buffer.
+                        int w = p.dopplerWrite;
+                        p.dopplerBufL[w] = l;
+                        p.dopplerBufR[w] = r;
+                        auto fracRead = [](const float *buf, int w, float delay) -> float {
+                            constexpr int N = PathState::kDopplerMax;
+                            float target = w - delay;
+                            while (target < 0.0f) target += N;
+                            while (target >= N) target -= N;
+                            int i0 = static_cast<int>(target);
+                            int i1 = (i0 + 1) % N;
+                            float f = target - static_cast<float>(i0);
+                            return buf[i0] * (1.0f - f) + buf[i1] * f;
+                        };
+                        l = fracRead(p.dopplerBufL, w, p.dopplerDelayL);
+                        r = fracRead(p.dopplerBufR, w, p.dopplerDelayR);
+                        p.dopplerWrite = (w + 1) % PathState::kDopplerMax;
+                    }
                 } else {
                     // Classic parametric HRTF (also the fallback path
                     // when a Leia init failed).
@@ -534,6 +658,12 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
                     l = w * wetL + d * l;
                     r = w * wetR + d * r;
                 }
+                // Post-amplify by the inverse pre-att so output level
+                // matches the un-attenuated path.
+                if (postAmp > 1.0f) {
+                    l *= postAmp;
+                    r *= postAmp;
+                }
                 break;
             }
             default: break;
@@ -565,6 +695,30 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
         break;
     case SandboxState::Stage_GenLoss:
         if (m_state.genLossEnabled) p.genLoss.processStereo(l, r);
+        break;
+    case SandboxState::Stage_NoiseGate:
+        if (m_state.gateEnabled) {
+            if (m_state.gateSidechainSlot >= 0)
+                p.gate.feedSidechain(m_extGateEnv.load(std::memory_order_relaxed));
+            else
+                p.gate.feedSidechain(0.0f);
+            p.gate.processStereo(l, r);
+        }
+        break;
+    case SandboxState::Stage_DeEsser:
+        if (m_state.deesserEnabled) {
+            if (m_state.deesserSidechainSlot >= 0)
+                p.deesser.feedSidechain(m_extDeesserEnv.load(std::memory_order_relaxed));
+            else
+                p.deesser.feedSidechain(0.0f);
+            p.deesser.processStereo(l, r);
+        }
+        break;
+    case SandboxState::Stage_TransientShaper:
+        if (m_state.transEnabled) p.trans.processStereo(l, r);
+        break;
+    case SandboxState::Stage_DynEq:
+        if (m_state.dyneqEnabled) p.dyneq.processStereo(l, r);
         break;
     }
 }
@@ -644,6 +798,15 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
         float ar = std::fabs(r);
         m_peakL = (m_peakL > al) ? m_peakL * m_peakDecay : al;
         m_peakR = (m_peakR > ar) ? m_peakR * m_peakDecay : ar;
+        // Sidechain-visible envelope: post-DSP peak, published lock-free
+        // for cross-slot sidechain sources. Slow release so the envelope
+        // reads as an amplitude, not a transient-noisy sample stream.
+        if (!isCapture) {
+            float peak = (al > ar) ? al : ar;
+            float cur = m_sidechainEnv.load(std::memory_order_relaxed);
+            float ncur = (peak > cur) ? peak : cur * 0.9995f;
+            m_sidechainEnv.store(ncur, std::memory_order_relaxed);
+        }
 
         // No extra headroom scaling: softLimit already bounds the
         // signal strictly inside [-1, +1], so the old 0.95 factor was

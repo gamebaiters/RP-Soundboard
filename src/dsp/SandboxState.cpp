@@ -8,7 +8,8 @@ const char *SandboxState::stageName(int stage)
     static const char *names[Stage_COUNT] = {
         "Paulstretch", "EQ", "Compressor", "Saturator", "Spatial",
         "Chorus", "Flanger", "Flangus", "Phaser", "Delay", "Reverb",
-        "Limiter", "Bitcrush", "GenLoss"
+        "Limiter", "Bitcrush", "GenLoss",
+        "Noise Gate", "De-esser", "Transient", "Dynamic EQ"
     };
     if (stage < 0 || stage >= Stage_COUNT) return "?";
     return names[stage];
@@ -122,6 +123,49 @@ QJsonObject SandboxState::toJson() const
     o["randomPitchCents"]   = randomPitchCents;
     o["duckSource"]         = duckSource;
     o["duckOthersDb"]       = static_cast<double>(duckOthersDb);
+
+    o["gateEnabled"]        = gateEnabled;
+    o["gateThresholdDb"]    = static_cast<double>(gateThresholdDb);
+    o["gateRangeDb"]        = static_cast<double>(gateRangeDb);
+    o["gateAttackMs"]       = static_cast<double>(gateAttackMs);
+    o["gateHoldMs"]         = static_cast<double>(gateHoldMs);
+    o["gateReleaseMs"]      = static_cast<double>(gateReleaseMs);
+    o["gateSidechainSlot"]  = gateSidechainSlot;
+
+    o["deesserEnabled"]      = deesserEnabled;
+    o["deesserFreqHz"]       = static_cast<double>(deesserFreqHz);
+    o["deesserQ"]            = static_cast<double>(deesserQ);
+    o["deesserThresholdDb"]  = static_cast<double>(deesserThresholdDb);
+    o["deesserRangeDb"]      = static_cast<double>(deesserRangeDb);
+    o["deesserAttackMs"]     = static_cast<double>(deesserAttackMs);
+    o["deesserReleaseMs"]    = static_cast<double>(deesserReleaseMs);
+    o["deesserSidechainSlot"]= deesserSidechainSlot;
+
+    o["transEnabled"]   = transEnabled;
+    o["transAttackDb"]  = static_cast<double>(transAttackDb);
+    o["transSustainDb"] = static_cast<double>(transSustainDb);
+
+    o["dyneqEnabled"] = dyneqEnabled;
+    QJsonArray bands;
+    for (int i = 0; i < 4; ++i) {
+        QJsonObject b;
+        b["enabled"]      = dyneqBands[i].enabled;
+        b["freq"]         = static_cast<double>(dyneqBands[i].freq);
+        b["q"]            = static_cast<double>(dyneqBands[i].q);
+        b["staticGainDb"] = static_cast<double>(dyneqBands[i].staticGainDb);
+        b["thresholdDb"]  = static_cast<double>(dyneqBands[i].thresholdDb);
+        b["ratio"]        = static_cast<double>(dyneqBands[i].ratio);
+        b["dynamicDb"]    = static_cast<double>(dyneqBands[i].dynamicDb);
+        b["attackMs"]     = static_cast<double>(dyneqBands[i].attackMs);
+        b["releaseMs"]    = static_cast<double>(dyneqBands[i].releaseMs);
+        bands.append(b);
+    }
+    o["dyneqBands"] = bands;
+
+    o["compSidechainSlot"] = compSidechainSlot;
+
+    o["dopplerEnabled"]  = dopplerEnabled;
+    o["dopplerStrength"] = static_cast<double>(dopplerStrength);
 
     // Key is versioned: the DspStage enum was renumbered (Mono dropped,
     // Paulstretch added). Old "pipelineOrder" arrays carry stale indices
@@ -237,6 +281,47 @@ SandboxState SandboxState::fromJson(const QJsonObject &o)
     s.randomPitchCents   = o.value("randomPitchCents").toInt(0);
     s.duckSource         = o.value("duckSource").toBool(false);
     s.duckOthersDb       = static_cast<float>(o.value("duckOthersDb").toDouble(-12.0));
+
+    s.gateEnabled        = o.value("gateEnabled").toBool(false);
+    s.gateThresholdDb    = static_cast<float>(o.value("gateThresholdDb").toDouble(-40.0));
+    s.gateRangeDb        = static_cast<float>(o.value("gateRangeDb").toDouble(-60.0));
+    s.gateAttackMs       = static_cast<float>(o.value("gateAttackMs").toDouble(2.0));
+    s.gateHoldMs         = static_cast<float>(o.value("gateHoldMs").toDouble(20.0));
+    s.gateReleaseMs      = static_cast<float>(o.value("gateReleaseMs").toDouble(150.0));
+    s.gateSidechainSlot  = o.value("gateSidechainSlot").toInt(-1);
+
+    s.deesserEnabled     = o.value("deesserEnabled").toBool(false);
+    s.deesserFreqHz      = static_cast<float>(o.value("deesserFreqHz").toDouble(6500.0));
+    s.deesserQ           = static_cast<float>(o.value("deesserQ").toDouble(3.0));
+    s.deesserThresholdDb = static_cast<float>(o.value("deesserThresholdDb").toDouble(-30.0));
+    s.deesserRangeDb     = static_cast<float>(o.value("deesserRangeDb").toDouble(-10.0));
+    s.deesserAttackMs    = static_cast<float>(o.value("deesserAttackMs").toDouble(3.0));
+    s.deesserReleaseMs   = static_cast<float>(o.value("deesserReleaseMs").toDouble(80.0));
+    s.deesserSidechainSlot = o.value("deesserSidechainSlot").toInt(-1);
+
+    s.transEnabled       = o.value("transEnabled").toBool(false);
+    s.transAttackDb      = static_cast<float>(o.value("transAttackDb").toDouble(0.0));
+    s.transSustainDb     = static_cast<float>(o.value("transSustainDb").toDouble(0.0));
+
+    s.dyneqEnabled       = o.value("dyneqEnabled").toBool(false);
+    QJsonArray bands = o.value("dyneqBands").toArray();
+    for (int i = 0; i < 4 && i < bands.size(); ++i) {
+        QJsonObject b = bands[i].toObject();
+        s.dyneqBands[i].enabled      = b.value("enabled").toBool(false);
+        s.dyneqBands[i].freq         = static_cast<float>(b.value("freq").toDouble(s.dyneqBands[i].freq));
+        s.dyneqBands[i].q            = static_cast<float>(b.value("q").toDouble(s.dyneqBands[i].q));
+        s.dyneqBands[i].staticGainDb = static_cast<float>(b.value("staticGainDb").toDouble(0.0));
+        s.dyneqBands[i].thresholdDb  = static_cast<float>(b.value("thresholdDb").toDouble(-30.0));
+        s.dyneqBands[i].ratio        = static_cast<float>(b.value("ratio").toDouble(2.0));
+        s.dyneqBands[i].dynamicDb    = static_cast<float>(b.value("dynamicDb").toDouble(-6.0));
+        s.dyneqBands[i].attackMs     = static_cast<float>(b.value("attackMs").toDouble(15.0));
+        s.dyneqBands[i].releaseMs    = static_cast<float>(b.value("releaseMs").toDouble(150.0));
+    }
+
+    s.compSidechainSlot  = o.value("compSidechainSlot").toInt(-1);
+
+    s.dopplerEnabled     = o.value("dopplerEnabled").toBool(false);
+    s.dopplerStrength    = static_cast<float>(o.value("dopplerStrength").toDouble(50.0));
 
     QJsonArray pipe = o.value("pipelineOrderV2").toArray();
     if (pipe.size() >= 1 && pipe.size() <= Stage_COUNT) {

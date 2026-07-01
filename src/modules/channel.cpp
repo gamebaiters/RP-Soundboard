@@ -257,6 +257,33 @@ void Channel::setMeterVisible(bool on) {
     if (m_meter) m_meter->setVisible(on);
 }
 
+void Channel::setMeterVertical(bool on) {
+    if (!m_meter) return;
+    if (on) {
+        // Vertical: narrow strip (~40 px) that stretches to the
+        // channel row height. Remove the fixed height so it can grow
+        // to fill the controls row; parent layout re-flows.
+        m_meter->setOrientation(ChannelMeter::Vertical);
+        m_meter->setMinimumWidth(40);
+        m_meter->setMaximumWidth(48);
+        m_meter->setMinimumHeight(48);
+        m_meter->setMaximumHeight(QWIDGETSIZE_MAX);
+    } else {
+        // Horizontal (default): wide low-height meter matching original layout.
+        m_meter->setOrientation(ChannelMeter::Horizontal);
+        m_meter->setMinimumWidth(120);
+        m_meter->setMaximumWidth(260);
+        m_meter->setFixedHeight(36);
+    }
+    updateMeterWidth();
+    if (auto *p = parentWidget()) p->updateGeometry();
+    updateGeometry();
+}
+
+void Channel::setSkipButtonsVisible(bool on) {
+    if (m_wave) m_wave->setSkipButtonsVisible(on);
+}
+
 void Channel::resizeEvent(QResizeEvent *e)
 {
     QWidget::resizeEvent(e);
@@ -266,6 +293,10 @@ void Channel::resizeEvent(QResizeEvent *e)
 void Channel::updateMeterWidth()
 {
     if (!m_meter || !m_volume || !m_fx) return;
+    // Vertical meter has a fixed narrow footprint so setMeterVertical
+    // handles its sizing directly. Only the horizontal path needs the
+    // "share row width with the surrounding controls" logic below.
+    if (m_meter->orientation() == ChannelMeter::Vertical) return;
     // Width the controls row needs for EVERYTHING except the meter.
     int reserved = m_volume->sizeHint().width()
                  + m_fx->sizeHint().width()

@@ -44,6 +44,18 @@ void WaveformPlayer::setShowCropMarkers(bool on) {
     m_wave->setShowCropMarkers(on);
 }
 
+void WaveformPlayer::setSkipButtonsVisible(bool on) {
+    if (m_back10) m_back10->setVisible(on);
+    if (m_back5)  m_back5->setVisible(on);
+    if (m_fwd5)   m_fwd5->setVisible(on);
+    if (m_fwd10)  m_fwd10->setVisible(on);
+}
+
+void WaveformPlayer::setSpectrogramView(bool on) {
+    if (m_wave) m_wave->setDisplayMode(on ? SoundView::Mode_Spectrogram
+                                          : SoundView::Mode_Waveform);
+}
+
 
 WaveformPlayer::WaveformPlayer(QWidget *parent)
     : QWidget(parent)

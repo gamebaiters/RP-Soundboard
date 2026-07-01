@@ -139,17 +139,14 @@ void EqRack::setBandGainDb(int band, float gainDb) {
     if (gainDb < kMinDb) gainDb = kMinDb;
     if (gainDb > kMaxDb) gainDb = kMaxDb;
     if (m_gainDb[band] == gainDb) return;
-    float oldGain = m_gainDb[band];
     m_gainDb[band] = gainDb;
     recompute(band);
-    // Reset filter state when the gain change is large (>2 dB) to kill
-    // the cascading IIR transient that produced the audible "ronzio"
-    // every time the user moved a slider. Small drags leave state
-    // alone so dragging a slider stays smooth.
-    if (std::fabs(gainDb - oldGain) > 2.0f) {
-        m_left[band].reset();
-        m_right[band].reset();
-    }
+    // No state reset: BiquadPeaking::setParams now ramps coefficients
+    // over kRampSamples. The cascading IIR transient that motivated
+    // the old >2 dB reset is gone, so the reset itself (which was a
+    // step in the y[n] sequence and the original cause of the spread-
+    // spectrum impulse that frye'd the downstream Spatial HRTF
+    // convolution) is no longer needed.
 }
 
 float EqRack::bandGainDb(int band) const {
@@ -197,15 +194,23 @@ void EqRack::processStereo(float &l, float &r) {
 
 void EqRack::feedAnalysis(float l, float r) {
     // Input already in float-normalised domain (SlotDsp scales 1/32768
-    // up front). Mono mix into the ring; trigger an FFT every kHop
-    // samples for the band-level atomics the GUI reads.
+    // up front). Mono mix into the ring; trigger an FFT every
+    // m_fftHopInterval samples for the band-level atomics the GUI reads.
     float mono = (l + r) * 0.5f;
     m_fftRing[m_fftWrite] = mono;
     m_fftWrite = (m_fftWrite + 1) % kFftSize;
-    if (++m_fftHop >= 512) {
+    if (++m_fftHop >= m_fftHopInterval) {
         m_fftHop = 0;
         runFftAnalysis();
     }
+}
+
+void EqRack::setStageActive(bool active) {
+    // Active: 512-sample hop (~94 Hz update at 48 kHz) for smooth LEDs.
+    // Inactive: 2048-sample hop (~24 Hz, one FFT per buffer length) so
+    // the analyser does not steal audio-thread cycles when the EQ
+    // panel is collapsed and the user is not watching the bars.
+    m_fftHopInterval = active ? 512 : 2048;
 }
 
 void EqRack::reset() {

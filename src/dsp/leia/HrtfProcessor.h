@@ -63,27 +63,48 @@ private:
 
     std::vector<float> m_irLeft;         // current left  HRIR (time, filterLength)
     std::vector<float> m_irRight;        // current right HRIR (time, filterLength)
-    std::vector<float> m_irLeftFreq;     // left  HRIR in freq domain  (fftSize+2)  - SMOOTHED, used by convolution
-    std::vector<float> m_irRightFreq;    // right HRIR in freq domain  (fftSize+2)
-    // Target IRs - written by lookupHRIR, lerped toward by process()
-    // each block to eliminate the per-block-boundary transients that
-    // produced an audible frying buzz when 8D rotation crossed SOFA
-    // grid cells (or any other rapid direction change on complex
-    // material). With this smoothing the convolution IR evolves
-    // gradually over ~5-10 blocks, so each block's convolution result
-    // is nearly continuous with the previous one.
+    std::vector<float> m_irLeftFreq;     // ACTIVE left  HRIR (freq) - STATIC between fades
+    std::vector<float> m_irRightFreq;    // ACTIVE right HRIR (freq) - STATIC between fades
+    // Pending chain: loaded with the new IR when lookupHRIR fires; runs
+    // in parallel with the active chain during the crossfade; promoted
+    // to active when the fade completes. This dual-conv design replaces
+    // the previous per-block IR lerp - the lerp was a partial fix that
+    // mutated the IR every block while overlap-add still summed in a
+    // tail computed against the PREVIOUS IR, leaving a small OLA
+    // discontinuity at every block boundary (audible as ~187 Hz frying
+    // on broadband material). With two parallel chains each holding
+    // its own static IR + overlap state, every OLA sum is self-
+    // consistent; the crossfade only blends OUTPUT samples, so no
+    // discontinuity can appear at a block boundary regardless of how
+    // fast direction changes.
+    std::vector<float> m_irLeftFreqPending;
+    std::vector<float> m_irRightFreqPending;
     std::vector<float> m_irLeftFreqTarget;
     std::vector<float> m_irRightFreqTarget;
     bool               m_irTargetValid = false;
 
     std::vector<float> m_convLeft;       // left  conv result (freq)   (fftSize+2)
     std::vector<float> m_convRight;      // right conv result (freq)   (fftSize+2)
+    std::vector<float> m_convLeftPending;
+    std::vector<float> m_convRightPending;
 
     std::vector<float> m_outLeft;        // left  output (time, fftSize)
     std::vector<float> m_outRight;       // right output (time, fftSize)
+    std::vector<float> m_outLeftPending;
+    std::vector<float> m_outRightPending;
 
     std::vector<float> m_overlapLeft;    // OLA overlap (fftSize)
     std::vector<float> m_overlapRight;
+    std::vector<float> m_overlapLeftPending;
+    std::vector<float> m_overlapRightPending;
+
+    // Output crossfade state. m_fadeAlpha == 1.0 = single-chain steady
+    // state (only active chain processes). 0..1 = fade in progress
+    // (both chains process; out = (1-a)*active + a*pending; a += inc
+    // per output sample; on a >= 1 swap pending->active).
+    float m_fadeAlpha    = 1.0f;
+    float m_fadeAlphaInc = 0.0f;
+    bool  m_fadePending  = false;
 
     // Cached direction (to avoid redundant HRIR lookups) ---------------------
     float m_lastAzimuth   = -9999.0f;

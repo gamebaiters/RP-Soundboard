@@ -93,6 +93,19 @@ private:
     // reflection / clarity / width combos can't drive it into clipping.
     float m_postLimGain = 1.0f;
 
+    // DC blocker state applied post-HRTF sum + reflection mix. The
+    // Schroeder tail has its own blocker inside ShoeboxRoom; this one
+    // catches the residual DC that leaks through the HRIR path itself
+    // when the mysofa dataset contains small non-zero mean coefficients
+    // (common for measured HRIR sets). Left alone that bias asymmetrically
+    // clamps bass peaks in the memoryless soft saturator below, producing
+    // the "physical limiter on bass" symptom the user reported after the
+    // v2.2.16 fixes.
+    float m_dcLastInL  = 0.0f;
+    float m_dcLastInR  = 0.0f;
+    float m_dcLastOutL = 0.0f;
+    float m_dcLastOutR = 0.0f;
+
     // Scratch buffers (allocated once in init, reused every block) ---------
     std::vector<float> m_monoL, m_monoR;           // deinterleaved input
     std::vector<float> m_hrtfOutLL, m_hrtfOutLR;   // L chan -> L ear, R ear

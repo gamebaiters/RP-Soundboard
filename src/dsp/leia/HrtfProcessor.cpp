@@ -61,18 +61,43 @@ bool HrtfProcessor::init(const std::string& sofaPath,
     m_irRight      .assign(FL, 0.0f);
     m_irLeftFreq   .assign(N2, 0.0f);
     m_irRightFreq  .assign(N2, 0.0f);
+    m_irLeftFreqPending .assign(N2, 0.0f);
+    m_irRightFreqPending.assign(N2, 0.0f);
     m_irLeftFreqTarget .assign(N2, 0.0f);
     m_irRightFreqTarget.assign(N2, 0.0f);
     m_irTargetValid = false;
 
     m_convLeft     .assign(N2, 0.0f);
     m_convRight    .assign(N2, 0.0f);
+    m_convLeftPending .assign(N2, 0.0f);
+    m_convRightPending.assign(N2, 0.0f);
 
     m_outLeft      .assign(N, 0.0f);
     m_outRight     .assign(N, 0.0f);
+    m_outLeftPending .assign(N, 0.0f);
+    m_outRightPending.assign(N, 0.0f);
 
     m_overlapLeft  .assign(N, 0.0f);
     m_overlapRight .assign(N, 0.0f);
+    m_overlapLeftPending .assign(N, 0.0f);
+    m_overlapRightPending.assign(N, 0.0f);
+
+    // Output crossfade: 30 ms at the configured sample rate. Longer
+    // fade == smoother crossfade == less audible discontinuity when
+    // rotation triggers repeated HRIR updates on high-magnitude
+    // signal. The user reported that with rotation + many DSP
+    // stages boosting the input, residual frying persisted even after
+    // the earlier 5 -> 15 ms bump; going to 30 ms halves the per-sample
+    // slope of the crossfade envelope and lets the pending chain settle
+    // more of its tail into the output while the fade is still in
+    // progress. 30 ms is still short enough that positional lag under
+    // rotation stays subjectively "on the source".
+    const float kFadeSeconds = 0.030f;
+    int fadeSamples = static_cast<int>(sampleRate * kFadeSeconds);
+    if (fadeSamples < 32) fadeSamples = 32;
+    m_fadeAlphaInc = 1.0f / static_cast<float>(fadeSamples);
+    m_fadeAlpha    = 1.0f;
+    m_fadePending  = false;
 
     m_lastAzimuth   = -9999.0f;
     m_lastElevation = -9999.0f;
@@ -94,59 +119,64 @@ void HrtfProcessor::process(const float* monoIn,
     }
     if (frames > m_blockSize) frames = m_blockSize;
 
-    // 1. Update HRIR target if direction changed enough to matter.
-    //    Wider deadband (3 deg) than the SOFA grid resolution (~5 deg
-    //    on MIT KEMAR), well above the 0.32 deg/block 8D rotation
-    //    rate at the default 10 RPM. Cuts mysofa_getfilter_float +
-    //    IR-FFT cost from every block down to every ~10 blocks on a
-    //    moderate rotation - audible CPU savings on the audio thread
-    //    that was missing deadlines and producing the residual frying
-    //    buzz on complex (broadband, high-peak) material.
+    // 1. Update HRIR target if direction changed enough to matter and
+    //    no fade is already in progress. The deadband suppresses tiny
+    //    moves; the fade gate serialises updates so a rapid rotation
+    //    cannot stack up overlapping fades and lose IR continuity.
     constexpr float kHrirAzDeadbandDeg = 3.0f;
     constexpr float kHrirElDeadbandDeg = 3.0f;
     bool firstLookup = (m_lastAzimuth   <= -9000.0f) ||
                         (m_lastElevation <= -9000.0f);
     bool azMoved = std::fabs(azimuthDeg   - m_lastAzimuth)   >= kHrirAzDeadbandDeg;
     bool elMoved = std::fabs(elevationDeg - m_lastElevation) >= kHrirElDeadbandDeg;
-    if (firstLookup || azMoved || elMoved) {
+    bool canStartFade = !m_fadePending;
+
+    if ((firstLookup || azMoved || elMoved) && canStartFade) {
         lookupHRIR(azimuthDeg, elevationDeg);
         m_lastAzimuth   = azimuthDeg;
         m_lastElevation = elevationDeg;
         if (firstLookup) {
-            // Snap on the very first lookup so the first block does
-            // not produce a half-second silent ramp-up.
-            std::memcpy(m_irLeftFreq.data(),  m_irLeftFreqTarget.data(),
-                        (m_fftSize + 2) * sizeof(float));
-            std::memcpy(m_irRightFreq.data(), m_irRightFreqTarget.data(),
-                        (m_fftSize + 2) * sizeof(float));
-        }
-    }
-
-    // 1b. Smooth the live IR toward the latest target. Single-pole
-    //     filter per freq bin: each block the live IR moves a fixed
-    //     fraction of the way toward the lookup result. The convolution
-    //     uses the smoothed IR, so block-to-block changes are tiny and
-    //     the OLA overlap (generated with the live IR's previous state)
-    //     adds nearly-coherently with the new block's convolution.
-    //
-    //     kIrLerp == 0.06 -> ~50 blocks to 95% (~270 ms at 48 kHz /
-    //     kBlock 256). Much slower than the previous 0.18 - turns out
-    //     the residual frying buzz on complex audio came from the
-    //     remaining block-to-block IR delta still being audible. At
-    //     0.06 the per-block delta is 3x smaller; combined with the
-    //     wider 3 deg lookup deadband the IR is effectively held flat
-    //     for slow rotations and creeps smoothly during fast ones -
-    //     listener still perceives motion, no click train.
-    if (m_irTargetValid) {
-        constexpr float kIrLerp = 0.06f;
-        const int n = m_fftSize + 2;
-        const float *tgtL = m_irLeftFreqTarget.data();
-        const float *tgtR = m_irRightFreqTarget.data();
-        float *liveL = m_irLeftFreq.data();
-        float *liveR = m_irRightFreq.data();
-        for (int i = 0; i < n; ++i) {
-            liveL[i] += (tgtL[i] - liveL[i]) * kIrLerp;
-            liveR[i] += (tgtR[i] - liveR[i]) * kIrLerp;
+            // First-time snap: load target into BOTH live and pending
+            // and skip the fade.
+            const int n2 = m_fftSize + 2;
+            std::memcpy(m_irLeftFreq.data(),  m_irLeftFreqTarget.data(),  n2 * sizeof(float));
+            std::memcpy(m_irRightFreq.data(), m_irRightFreqTarget.data(), n2 * sizeof(float));
+            std::memcpy(m_irLeftFreqPending.data(),  m_irLeftFreqTarget.data(),  n2 * sizeof(float));
+            std::memcpy(m_irRightFreqPending.data(), m_irRightFreqTarget.data(), n2 * sizeof(float));
+            m_fadePending = false;
+            m_fadeAlpha   = 1.0f;
+        } else {
+            // Start crossfade: load new IR into pending chain (snap,
+            // not lerp - the pending chain runs its own OLA with this
+            // IR fixed for the fade duration, so the overlap will be
+            // self-consistent).
+            //
+            // Seed pending OLA overlap with a COPY of the active
+            // overlap instead of zeroing. Rationale:
+            //
+            // Zero-init made the pending chain start with NO tail. The
+            // active chain, meanwhile, had a fully-built tail from the
+            // previous block. During the fade, blending (active + tail)
+            // with (pending + zero) added a per-sample residual = the
+            // full active tail scaled by (1 - alpha). That residual
+            // decayed sample-by-sample - exactly the impulse-like
+            // artefact that read as "frying" on rotation-heavy content
+            // when the input was already boosted by upstream DSP.
+            //
+            // The old and new IR are similar for small azimuth deltas
+            // (deadband is 3 deg, HRIRs are smooth in the SOFA grid),
+            // so seeding with the previous tail is a good approximation
+            // - the crossfade replaces the copied tail with the new
+            // IR's own tail over the fade window instead of ADDING one
+            // tail to zero. Discontinuity at fade start is near zero.
+            const int n2 = m_fftSize + 2;
+            const int n  = m_fftSize;
+            std::memcpy(m_irLeftFreqPending.data(),  m_irLeftFreqTarget.data(),  n2 * sizeof(float));
+            std::memcpy(m_irRightFreqPending.data(), m_irRightFreqTarget.data(), n2 * sizeof(float));
+            std::memcpy(m_overlapLeftPending.data(),  m_overlapLeft.data(),  n * sizeof(float));
+            std::memcpy(m_overlapRightPending.data(), m_overlapRight.data(), n * sizeof(float));
+            m_fadePending = true;
+            m_fadeAlpha   = 0.0f;
         }
     }
 
@@ -156,49 +186,101 @@ void HrtfProcessor::process(const float* monoIn,
     std::memset(m_fftInput.data() + frames, 0,
                 (m_fftSize - frames) * sizeof(float));
 
-    // 3. Forward FFT the input.
+    // 3. Forward FFT the input. Shared across both chains.
     m_fft->forward(m_fftInput.data(), m_fftFreq.data());
 
-    // 4. Complex multiply: input * HRIR for each ear.
+    const float invN = 1.0f / static_cast<float>(m_fftSize);
+
+    // 4. Active chain: complex multiply + inverse FFT + scale.
     complexMultiply(m_convLeft.data(),  m_fftFreq.data(), m_irLeftFreq.data(),  m_complexBins);
     complexMultiply(m_convRight.data(), m_fftFreq.data(), m_irRightFreq.data(), m_complexBins);
-
-    // 5. Inverse FFT both results.
     m_fft->inverse(m_convLeft.data(),  m_outLeft.data());
     m_fft->inverse(m_convRight.data(), m_outRight.data());
+    for (int i = 0; i < m_fftSize; ++i) {
+        m_outLeft[i]  *= invN;
+        m_outRight[i] *= invN;
+    }
 
-    // 6. Scale by 1/fftSize (unnormalized IFFT).
-    {
-        float invN = 1.0f / static_cast<float>(m_fftSize);
+    // 5. Pending chain: only when a fade is in progress.
+    if (m_fadePending) {
+        complexMultiply(m_convLeftPending.data(),  m_fftFreq.data(),
+                        m_irLeftFreqPending.data(),  m_complexBins);
+        complexMultiply(m_convRightPending.data(), m_fftFreq.data(),
+                        m_irRightFreqPending.data(), m_complexBins);
+        m_fft->inverse(m_convLeftPending.data(),  m_outLeftPending.data());
+        m_fft->inverse(m_convRightPending.data(), m_outRightPending.data());
         for (int i = 0; i < m_fftSize; ++i) {
-            m_outLeft[i]  *= invN;
-            m_outRight[i] *= invN;
+            m_outLeftPending[i]  *= invN;
+            m_outRightPending[i] *= invN;
         }
     }
 
-    // 7. Overlap-add: output first `frames` samples summed with saved overlap.
-    for (int i = 0; i < frames; ++i) {
-        leftOut[i]  = m_outLeft[i]  + m_overlapLeft[i];
-        rightOut[i] = m_outRight[i] + m_overlapRight[i];
+    // 6. OLA + per-sample output crossfade.
+    if (m_fadePending) {
+        float a = m_fadeAlpha;
+        for (int i = 0; i < frames; ++i) {
+            float aL = m_outLeft[i]         + m_overlapLeft[i];
+            float aR = m_outRight[i]        + m_overlapRight[i];
+            float pL = m_outLeftPending[i]  + m_overlapLeftPending[i];
+            float pR = m_outRightPending[i] + m_overlapRightPending[i];
+            float w  = a;
+            if (w < 0.0f) w = 0.0f; else if (w > 1.0f) w = 1.0f;
+            leftOut[i]  = (1.0f - w) * aL + w * pL;
+            rightOut[i] = (1.0f - w) * aR + w * pR;
+            a += m_fadeAlphaInc;
+        }
+        m_fadeAlpha = a;
+    } else {
+        for (int i = 0; i < frames; ++i) {
+            leftOut[i]  = m_outLeft[i]  + m_overlapLeft[i];
+            rightOut[i] = m_outRight[i] + m_overlapRight[i];
+        }
     }
 
-    // 8. Update overlap buffer: shift left by `frames`, add current tail.
+    // 7. Update overlap buffers for both chains. Each chain MUST keep
+    // its own OLA self-consistent so the tail it adds next block was
+    // generated against the same IR currently in its slot.
     int tailLen = m_fftSize - frames;
     if (tailLen > 0) {
+        // Active.
         std::memmove(m_overlapLeft.data(),
                      m_overlapLeft.data() + frames,
                      tailLen * sizeof(float));
         std::memmove(m_overlapRight.data(),
                      m_overlapRight.data() + frames,
                      tailLen * sizeof(float));
-
         std::memset(m_overlapLeft.data()  + tailLen, 0, frames * sizeof(float));
         std::memset(m_overlapRight.data() + tailLen, 0, frames * sizeof(float));
-
         for (int i = 0; i < tailLen; ++i) {
             m_overlapLeft[i]  += m_outLeft[frames + i];
             m_overlapRight[i] += m_outRight[frames + i];
         }
+        if (m_fadePending) {
+            std::memmove(m_overlapLeftPending.data(),
+                         m_overlapLeftPending.data() + frames,
+                         tailLen * sizeof(float));
+            std::memmove(m_overlapRightPending.data(),
+                         m_overlapRightPending.data() + frames,
+                         tailLen * sizeof(float));
+            std::memset(m_overlapLeftPending.data()  + tailLen, 0, frames * sizeof(float));
+            std::memset(m_overlapRightPending.data() + tailLen, 0, frames * sizeof(float));
+            for (int i = 0; i < tailLen; ++i) {
+                m_overlapLeftPending[i]  += m_outLeftPending[frames + i];
+                m_overlapRightPending[i] += m_outRightPending[frames + i];
+            }
+        }
+    }
+
+    // 8. Fade complete - promote pending to active.
+    if (m_fadePending && m_fadeAlpha >= 1.0f) {
+        const int n2 = m_fftSize + 2;
+        const int n  = m_fftSize;
+        std::memcpy(m_irLeftFreq.data(),  m_irLeftFreqPending.data(),  n2 * sizeof(float));
+        std::memcpy(m_irRightFreq.data(), m_irRightFreqPending.data(), n2 * sizeof(float));
+        std::memcpy(m_overlapLeft.data(),  m_overlapLeftPending.data(),  n * sizeof(float));
+        std::memcpy(m_overlapRight.data(), m_overlapRightPending.data(), n * sizeof(float));
+        m_fadePending = false;
+        m_fadeAlpha   = 1.0f;
     }
 }
 
@@ -261,10 +343,24 @@ int HrtfProcessor::nextPow2(int n)
 
 void HrtfProcessor::reset()
 {
-    if (!m_overlapLeft.empty())
-        std::memset(m_overlapLeft.data(), 0, m_overlapLeft.size() * sizeof(float));
-    if (!m_overlapRight.empty())
-        std::memset(m_overlapRight.data(), 0, m_overlapRight.size() * sizeof(float));
+    auto zero = [](std::vector<float> &v) {
+        if (!v.empty()) std::memset(v.data(), 0, v.size() * sizeof(float));
+    };
+
+    zero(m_overlapLeft);  zero(m_overlapRight);
+    zero(m_overlapLeftPending); zero(m_overlapRightPending);
+
+    // Zero the live + pending + target frequency-domain IRs. Without
+    // this a resumed slot briefly convolves with the previous session's
+    // IR (firstLookup snaps target -> live but the convolution that
+    // produces the overlap-add tail can fire on the first sample of
+    // the new session BEFORE the snap, leaving an audible transient).
+    zero(m_irLeftFreq);  zero(m_irRightFreq);
+    zero(m_irLeftFreqPending);  zero(m_irRightFreqPending);
+    zero(m_irLeftFreqTarget);   zero(m_irRightFreqTarget);
+
+    m_fadePending = false;
+    m_fadeAlpha   = 1.0f;
 
     m_lastAzimuth   = -9999.0f;
     m_lastElevation = -9999.0f;

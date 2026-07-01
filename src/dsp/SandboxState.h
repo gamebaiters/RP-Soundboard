@@ -35,6 +35,13 @@ struct SandboxState
         Stage_Limiter,
         Stage_Bitcrusher,
         Stage_GenLoss,
+        // Appended (never renumbered) so pre-existing pipelineOrderV2
+        // arrays keep their positions and the new stages are simply
+        // added to the tail via the fromJson padding logic.
+        Stage_NoiseGate,
+        Stage_DeEsser,
+        Stage_TransientShaper,
+        Stage_DynEq,
         Stage_COUNT
     };
 
@@ -209,6 +216,64 @@ struct SandboxState
     bool  randomEnabled      = false;
     int   randomPitchCents   = 0;     // 0..200
 
+    // ---- Noise Gate ----
+    bool  gateEnabled       = false;
+    float gateThresholdDb   = -40.0f;    // -80..0
+    float gateRangeDb       = -60.0f;    // -80..0 (deeper = more silent)
+    float gateAttackMs      = 2.0f;      // 0.1..50
+    float gateHoldMs        = 20.0f;     // 0..500
+    float gateReleaseMs     = 150.0f;    // 1..2000
+    int   gateSidechainSlot = -1;        // -1 = self; else Sampler slot idx
+
+    // ---- De-esser ----
+    bool  deesserEnabled     = false;
+    float deesserFreqHz      = 6500.0f;  // 1000..12000
+    float deesserQ           = 3.0f;     // 0.5..12
+    float deesserThresholdDb = -30.0f;   // -60..0
+    float deesserRangeDb     = -10.0f;   // -30..0
+    float deesserAttackMs    = 3.0f;
+    float deesserReleaseMs   = 80.0f;
+    int   deesserSidechainSlot = -1;
+
+    // ---- Transient shaper ----
+    bool  transEnabled   = false;
+    float transAttackDb  = 0.0f;      // -20..+20
+    float transSustainDb = 0.0f;      // -20..+20
+
+    // ---- Dynamic EQ (4 bands) ----
+    bool  dyneqEnabled = false;
+    struct DynEqBand {
+        bool  enabled       = false;
+        float freq          = 200.0f;
+        float q             = 1.4f;
+        float staticGainDb  = 0.0f;
+        float thresholdDb   = -30.0f;
+        float ratio         = 2.0f;
+        float dynamicDb     = -6.0f;
+        float attackMs      = 15.0f;
+        float releaseMs     = 150.0f;
+    };
+    DynEqBand dyneqBands[4] = {
+        { false,  120.0f, 1.0f, 0.0f, -30.0f, 2.0f, -6.0f, 15.0f, 150.0f },
+        { false,  600.0f, 1.2f, 0.0f, -30.0f, 2.0f, -6.0f, 15.0f, 150.0f },
+        { false, 3000.0f, 1.4f, 0.0f, -30.0f, 2.0f, -6.0f, 15.0f, 150.0f },
+        { false, 8000.0f, 1.4f, 0.0f, -30.0f, 2.0f, -6.0f, 15.0f, 150.0f }
+    };
+
+    // ---- Compressor sidechain source ----
+    // -1 = self (per-slot input envelope). Otherwise Sampler slot idx
+    // to sidechain from - lets a bass track duck under a kick track
+    // without any manual routing.
+    int   compSidechainSlot = -1;
+
+    // ---- Doppler (Leia 3D rotate / 8D preset only) ----
+    // Optional physical Doppler simulation on top of the 8D rotation.
+    // dopplerStrength scales the raw physical shift (h*omega/c ~ few
+    // cents at typical RPMs) - realistic listeners hear almost nothing,
+    // so an exaggeration factor is exposed as strength 0..100 %.
+    bool  dopplerEnabled  = false;
+    float dopplerStrength = 50.0f;   // 0..100
+
     // ---- Sidechain ducking (per channel) ----
     // Mark a channel as a DUCK SOURCE - while it is playing, every
     // other slot's output volume drops by duckOthersDb (clamped -30..0).
@@ -222,10 +287,11 @@ struct SandboxState
     // DSP pipeline order (user-draggable). Default = canonical enum
     // order, so it matches defaultPipelineOrder() (out[i] = i).
     int pipelineOrder[Stage_COUNT] = {
-        Stage_Paulstretch, Stage_EQ, Stage_Compressor, Stage_Saturator,
-        Stage_Spatial, Stage_Chorus, Stage_Flanger, Stage_Flangus,
-        Stage_Phaser, Stage_Delay, Stage_Reverb, Stage_Limiter,
-        Stage_Bitcrusher, Stage_GenLoss
+        Stage_Paulstretch, Stage_NoiseGate, Stage_EQ, Stage_DynEq,
+        Stage_DeEsser, Stage_Compressor, Stage_TransientShaper,
+        Stage_Saturator, Stage_Spatial, Stage_Chorus, Stage_Flanger,
+        Stage_Flangus, Stage_Phaser, Stage_Delay, Stage_Reverb,
+        Stage_Limiter, Stage_Bitcrusher, Stage_GenLoss
     };
 
     QJsonObject toJson() const;

@@ -27,8 +27,19 @@ class SoundView : public QWidget
 	Q_OBJECT
 
 public:
+	enum DisplayMode {
+		Mode_Waveform = 0,
+		Mode_Spectrogram = 1,
+	};
+
 	SoundView(QWidget *parent = NULL);
 	~SoundView();
+	// Global visualization mode. Waveform (default) is the traditional
+	// peak min/max column view; Spectrogram renders each column as a
+	// vertical heatmap of bin magnitude so bright/quiet zones read at a
+	// glance. Both modes reuse the SAME analyser bins - no extra CPU.
+	void setDisplayMode(DisplayMode m);
+	DisplayMode displayMode() const { return m_displayMode; }
 	void setSound(const SoundInfo &sound);
 	void setPlaybackPosition(double fraction);
 	// Last set playback cursor fraction (0..1). -1.0 if no cursor.
@@ -124,6 +135,7 @@ private:
 	int  m_fxPitch  = 0;
 	int  m_fxSpeed  = 0;
 	int  m_fxReverb = 0;
+	DisplayMode m_displayMode = Mode_Waveform;
 
 	QTimer        *m_loadTimer = nullptr;
 	QElapsedTimer  m_loadElapsed;

@@ -16,6 +16,13 @@ public:
     void setOrder(const int order[SandboxState::Stage_COUNT]);
     void getOrder(int out[SandboxState::Stage_COUNT]) const;
 
+    // Stages whose bit is SET are hidden: not drawn, not clickable,
+    // layout compacts around them. Used by the Settings module kill
+    // switch and by the mic-mode sandbox (curated subset). The hidden
+    // stages keep their slot in the order array - only the view skips
+    // them.
+    void setHiddenStages(quint32 mask);
+
 signals:
     void orderChanged();
     void stageClicked(int stage);   // DspStage value of the clicked block
@@ -27,10 +34,18 @@ protected:
     void mouseReleaseEvent(QMouseEvent *e) override;
 
 private:
-    int blockAtPos(int x) const;
-    QRect blockRect(int index) const;
+    // Visible-position helpers. All layout / hit-testing runs over the
+    // VISIBLE blocks; visibleIndices() maps visible position -> index
+    // into m_order.
+    QVector<int> visibleIndices() const;
+    int blockAtPos(int x) const;             // returns VISIBLE position
+    QRect blockRect(int visPos, int visCount) const;
+    bool stageHidden(int stage) const {
+        return (m_hiddenMask >> stage) & 1u;
+    }
 
     int m_order[SandboxState::Stage_COUNT];
+    quint32 m_hiddenMask = 0;
     int m_dragIndex = -1;
     int m_pressIndex = -1;
     int m_dragOffsetX = 0;

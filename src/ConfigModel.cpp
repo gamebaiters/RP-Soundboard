@@ -132,6 +132,9 @@ ConfigModel::ConfigModel()
 	m_verticalMeter = false;
 	m_showSkipButtons = true;
 	m_spectrogramView = false;
+	m_showVinylButton = true;
+	m_micFxFeatureEnabled = true;
+	m_loudnessNormalize = false;
 
 	m_resetChVolume = true;
 	m_resetChFx = true;
@@ -217,6 +220,9 @@ void ConfigModel::readConfig(const QString &file)
 	m_verticalMeter       = settings.value("vertical_meter",        false).toBool();
 	m_showSkipButtons     = settings.value("show_skip_buttons",     true).toBool();
 	m_spectrogramView     = settings.value("spectrogram_view",      false).toBool();
+	m_showVinylButton     = settings.value("show_vinyl_button",     true).toBool();
+	m_micFxFeatureEnabled = settings.value("micfx_feature_enabled", true).toBool();
+	m_loudnessNormalize   = settings.value("loudness_normalize",    false).toBool();
 	m_resetChVolume       = settings.value("reset_ch_volume", true).toBool();
 	m_resetChFx           = settings.value("reset_ch_fx", true).toBool();
 	m_resetChFile         = settings.value("reset_ch_file", true).toBool();
@@ -318,6 +324,9 @@ void ConfigModel::writeConfigImmediate(const QString &file)
 	settings.setValue("vertical_meter",        m_verticalMeter);
 	settings.setValue("show_skip_buttons",     m_showSkipButtons);
 	settings.setValue("spectrogram_view",      m_spectrogramView);
+	settings.setValue("show_vinyl_button",     m_showVinylButton);
+	settings.setValue("micfx_feature_enabled", m_micFxFeatureEnabled);
+	settings.setValue("loudness_normalize",    m_loudnessNormalize);
 	settings.setValue("reset_ch_volume", m_resetChVolume);
 	settings.setValue("reset_ch_fx", m_resetChFx);
 	settings.setValue("reset_ch_file", m_resetChFile);
@@ -912,6 +921,9 @@ void ConfigModel::setShowStopAllButton(bool on)    { m_showStopAllButton    = on
 void ConfigModel::setVerticalMeter(bool on)        { m_verticalMeter        = on; writeConfig(); }
 void ConfigModel::setShowSkipButtons(bool on)      { m_showSkipButtons      = on; writeConfig(); }
 void ConfigModel::setSpectrogramView(bool on)      { m_spectrogramView      = on; writeConfig(); }
+void ConfigModel::setShowVinylButton(bool on)      { m_showVinylButton      = on; writeConfig(); }
+void ConfigModel::setMicFxFeatureEnabled(bool on)  { m_micFxFeatureEnabled  = on; writeConfig(); }
+void ConfigModel::setLoudnessNormalize(bool on)    { m_loudnessNormalize    = on; writeConfig(); }
 
 void ConfigModel::setResetChVolume(bool on) { m_resetChVolume = on; writeConfig(); }
 void ConfigModel::setResetChFx(bool on) { m_resetChFx = on; writeConfig(); }

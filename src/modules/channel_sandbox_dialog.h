@@ -2,6 +2,9 @@
 
 #include <QDialog>
 #include <QVector>
+#include <QPair>
+#include <QJsonObject>
+#include <QElapsedTimer>
 #include "../dsp/SandboxState.h"
 
 class QComboBox;
@@ -34,13 +37,24 @@ class ChannelSandboxDialog : public QDialog
 {
     Q_OBJECT
 public:
-    explicit ChannelSandboxDialog(int channelId, QWidget *parent = nullptr);
+    // micMode = the dialog edits the LIVE MICROPHONE chain (MicFx)
+    // instead of a channel slot. Curated subset: the Spatial column,
+    // Paulstretch, Delay and Binaural are hidden (forced off by
+    // MicFx::sanitize anyway); everything else works identically.
+    explicit ChannelSandboxDialog(int channelId, QWidget *parent = nullptr,
+                                  bool micMode = false);
 
     void setChannelTitle(const QString &title);
     void setState(const SandboxState &s);
     SandboxState state() const { return m_state; }
 
     void setAllControlsEnabled(bool on);
+
+    // Re-sync accordion panels + pipeline blocks with the global
+    // per-stage kill switch (SlotDsp::globalStageMask) and the micMode
+    // curated subset. Called on every show so Settings changes apply
+    // the next time the dialog opens.
+    void refreshModuleVisibility();
 
     // Polled from the wiring layer at ~1 Hz: display the DSP CPU% the
     // slot has been spending the last second.
@@ -56,6 +70,9 @@ public:
 signals:
     void stateChanged(const SandboxState &s);
     void resetRequested(int channelId);
+
+protected:
+    void showEvent(class QShowEvent *e) override;
 
 private slots:
     void onEnableToggled(bool on);
@@ -107,6 +124,7 @@ private:
     QString m_channelTitle;
     SandboxState m_state;
     bool m_loading = false;
+    bool m_micMode = false;
 
     QCheckBox     *m_enable      = nullptr;
     class QLabel  *m_cpuLabel    = nullptr;
@@ -243,6 +261,9 @@ private:
     // Mono
     QCheckBox *m_monoEnable = nullptr;
 
+    // Failsafe anti-clip (post-chain -1 dBFS true-peak brickwall)
+    QCheckBox *m_failsafeEnable = nullptr;
+
     // Random per-fire PITCH jitter (per-channel sandbox feature).
     // Lives inside the DSP accordion alongside the other modules now,
     // not as its own full-width section, so it shares the visual
@@ -337,6 +358,102 @@ private:
     // outside the accordion (EQ, Spatial and Reverb are in the left
     // column). Used for click-to-navigate and order-reflection.
     ExpandableSection *m_stageSection[SandboxState::Stage_COUNT] = {};
+
+    // ---- Voice FX macro (Stage_VoiceFx, 10 sub-effects) ----
+    QCheckBox *m_vfxEnable = nullptr;
+    QCheckBox *m_vfxRingEnable = nullptr;
+    QSlider *m_vfxRingFreq = nullptr; QLabel *m_vfxRingFreqLabel = nullptr;
+    QSlider *m_vfxRingMix  = nullptr; QLabel *m_vfxRingMixLabel  = nullptr;
+    QCheckBox *m_vfxTremEnable = nullptr;
+    QSlider *m_vfxTremRate  = nullptr; QLabel *m_vfxTremRateLabel  = nullptr;
+    QSlider *m_vfxTremDepth = nullptr; QLabel *m_vfxTremDepthLabel = nullptr;
+    QComboBox *m_vfxTremShape = nullptr;
+    QCheckBox *m_vfxVibEnable = nullptr;
+    QSlider *m_vfxVibRate  = nullptr; QLabel *m_vfxVibRateLabel  = nullptr;
+    QSlider *m_vfxVibDepth = nullptr; QLabel *m_vfxVibDepthLabel = nullptr;
+    QCheckBox *m_vfxWahEnable = nullptr;
+    QSlider *m_vfxWahSens = nullptr; QLabel *m_vfxWahSensLabel = nullptr;
+    QSlider *m_vfxWahMin  = nullptr; QLabel *m_vfxWahMinLabel  = nullptr;
+    QSlider *m_vfxWahMax  = nullptr; QLabel *m_vfxWahMaxLabel  = nullptr;
+    QSlider *m_vfxWahQ    = nullptr; QLabel *m_vfxWahQLabel    = nullptr;
+    QSlider *m_vfxWahMix  = nullptr; QLabel *m_vfxWahMixLabel  = nullptr;
+    QCheckBox *m_vfxExcEnable = nullptr;
+    QSlider *m_vfxExcFreq  = nullptr; QLabel *m_vfxExcFreqLabel  = nullptr;
+    QSlider *m_vfxExcDrive = nullptr; QLabel *m_vfxExcDriveLabel = nullptr;
+    QSlider *m_vfxExcMix   = nullptr; QLabel *m_vfxExcMixLabel   = nullptr;
+    QCheckBox *m_vfxTuneEnable = nullptr;
+    QSlider *m_vfxTuneStrength = nullptr; QLabel *m_vfxTuneStrengthLabel = nullptr;
+    QSlider *m_vfxTuneSpeed    = nullptr; QLabel *m_vfxTuneSpeedLabel    = nullptr;
+    QComboBox *m_vfxTuneScale = nullptr;
+    QComboBox *m_vfxTuneKey   = nullptr;
+    QCheckBox *m_vfxVocEnable = nullptr;
+    QComboBox *m_vfxVocCarrier = nullptr;
+    QSlider *m_vfxVocPitch = nullptr; QLabel *m_vfxVocPitchLabel = nullptr;
+    QSlider *m_vfxVocMix   = nullptr; QLabel *m_vfxVocMixLabel   = nullptr;
+    QCheckBox *m_vfxFormEnable = nullptr;
+    QSlider *m_vfxFormShift = nullptr; QLabel *m_vfxFormShiftLabel = nullptr;
+    QSlider *m_vfxFormMix   = nullptr; QLabel *m_vfxFormMixLabel   = nullptr;
+    QCheckBox *m_vfxShimEnable = nullptr;
+    QSlider *m_vfxShimMix      = nullptr; QLabel *m_vfxShimMixLabel      = nullptr;
+    QSlider *m_vfxShimFeedback = nullptr; QLabel *m_vfxShimFeedbackLabel = nullptr;
+    QComboBox *m_vfxShimPitch = nullptr;
+    QSlider *m_vfxShimDamp = nullptr; QLabel *m_vfxShimDampLabel = nullptr;
+    QCheckBox *m_vfxRevEnable = nullptr;
+    QSlider *m_vfxRevTime     = nullptr; QLabel *m_vfxRevTimeLabel     = nullptr;
+    QSlider *m_vfxRevFeedback = nullptr; QLabel *m_vfxRevFeedbackLabel = nullptr;
+    QSlider *m_vfxRevMix      = nullptr; QLabel *m_vfxRevMixLabel      = nullptr;
+
+    // ---- Bass enhancer (Stage_BassEnh) ----
+    QCheckBox *m_bassEnhEnable = nullptr;
+    QSlider *m_bassEnhFreq  = nullptr; QLabel *m_bassEnhFreqLabel  = nullptr;
+    QSlider *m_bassEnhDrive = nullptr; QLabel *m_bassEnhDriveLabel = nullptr;
+    QSlider *m_bassEnhMix   = nullptr; QLabel *m_bassEnhMixLabel   = nullptr;
+
+    // ---- Binaural beats (Stage_Binaural) ----
+    QCheckBox *m_binauralEnable = nullptr;
+    QSlider *m_binauralBase  = nullptr; QLabel *m_binauralBaseLabel  = nullptr;
+    QSlider *m_binauralBeat  = nullptr; QLabel *m_binauralBeatLabel  = nullptr;
+    QSlider *m_binauralLevel = nullptr; QLabel *m_binauralLevelLabel = nullptr;
+
+    // ---- LFO modulation matrix (M1) ----
+    QCheckBox *m_lfoEnable[2] = {};
+    QSlider   *m_lfoRate[2]   = {}; QLabel *m_lfoRateLabel[2] = {};
+    QComboBox *m_lfoShapeBox[2] = {};
+    QComboBox *m_lfoRouteLfoBox[4]    = {};
+    QComboBox *m_lfoRouteTargetBox[4] = {};
+    QSlider   *m_lfoRouteAmount[4]    = {};
+    QLabel    *m_lfoRouteAmountLabel[4] = {};
+
+    // ---- Reverb engine (Q6: algorithmic / convolution) ----
+    QComboBox   *m_reverbEngineBox = nullptr;
+    QComboBox   *m_reverbIrPreset  = nullptr;
+    QPushButton *m_reverbIrLoadBtn = nullptr;
+    QPushButton *m_reverbIrClearBtn = nullptr;
+    QLabel      *m_reverbIrPathLabel = nullptr;
+    QGroupBox   *m_reverbGroup     = nullptr;
+    QWidget     *m_ambienceRow     = nullptr;   // for micMode reparenting
+
+    // Widgets hidden wholesale in micMode.
+    QWidget *m_modeWidget = nullptr;
+
+    // ---- FX automation recorder (M3) ----
+    QPushButton *m_autoRecBtn  = nullptr;
+    QPushButton *m_autoPlayBtn = nullptr;
+    QPushButton *m_autoSaveBtn = nullptr;
+    QPushButton *m_autoLoadBtn = nullptr;
+    QCheckBox   *m_autoLoopChk = nullptr;
+    QLabel      *m_autoStatus  = nullptr;
+    bool m_autoRecording = false;
+    bool m_autoPlaying   = false;
+    QElapsedTimer m_autoClock;
+    qint64 m_autoLastSnapMs = -1000;
+    // (ms offset, full state snapshot). Snapshots are small (~2 KB);
+    // 30 Hz throttle keeps a minute of knob riding around ~4 MB max.
+    QVector<QPair<qint64, QJsonObject>> m_autoEvents;
+    int m_autoPlayIdx = 0;
+    class QTimer *m_autoPlayTimer = nullptr;
+    void autoRecordTick();               // called from pushChange()
+    void updateAutoStatus();
 
     // Preset manager combos
     QComboBox *m_eqPresetBox      = nullptr;

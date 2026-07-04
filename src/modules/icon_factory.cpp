@@ -4,6 +4,7 @@
 #include <QPainter>
 #include <QPolygonF>
 #include <QPainterPath>
+#include <QRadialGradient>
 #include <cmath>
 
 namespace {
@@ -157,6 +158,77 @@ QIcon clear(const QColor &c)
                QPointF(kSize - armInset, kSize - armInset));
     p.drawLine(QPointF(kSize - armInset, armInset),
                QPointF(armInset,       kSize - armInset));
+    return finish(pm);
+}
+
+QIcon vinyl(const QColor &labelColor)
+{
+    // Vinyl record built to survive 16-20 px downscale AND look good
+    // at 24-32 px: bold light rim (separates from dark buttons), a
+    // subtly graded body, two groove rings, a specular sheen wedge,
+    // and a large colored label with an inner ring + spindle dot.
+    // Everything >= 3 px on the 64 px canvas so nothing turns to mush.
+    QPixmap pm = canvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const qreal inset = 5.0;
+    const qreal s = kSize - inset * 2.0;
+    const QRectF disc(inset, inset, s, s);
+    const QPointF c = disc.center();
+
+    // Body: gentle radial grade (lighter toward the rim) reads as a
+    // curved lacquer surface even when tiny.
+    QRadialGradient body(c, s * 0.5);
+    body.setColorAt(0.0, QColor(0x26, 0x27, 0x2C));
+    body.setColorAt(0.75, QColor(0x2E, 0x30, 0x36));
+    body.setColorAt(1.0, QColor(0x3C, 0x3F, 0x47));
+    p.setPen(QPen(QColor(0xC9, 0xCE, 0xD6), 3.5));   // bold light rim
+    p.setBrush(body);
+    p.drawEllipse(disc.adjusted(1.8, 1.8, -1.8, -1.8));
+
+    // Two groove rings, two greys - the classic pressed-vinyl texture.
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(QColor(0x60, 0x64, 0x6D), 2.6));
+    qreal g1 = s * 0.145;
+    p.drawEllipse(disc.adjusted(g1, g1, -g1, -g1));
+    p.setPen(QPen(QColor(0x50, 0x53, 0x5B), 2.2));
+    qreal g2 = s * 0.235;
+    p.drawEllipse(disc.adjusted(g2, g2, -g2, -g2));
+
+    // Specular sheen: a soft light arc across the upper-left grooves,
+    // clipped between the rim and the label so it reads as reflection.
+    {
+        p.save();
+        QPainterPath clip;
+        clip.addEllipse(disc.adjusted(4.0, 4.0, -4.0, -4.0));
+        QPainterPath hole;
+        hole.addEllipse(c, s * 0.30, s * 0.30);
+        p.setClipPath(clip.subtracted(hole));
+        p.setPen(QPen(QColor(255, 255, 255, 46), 7.0, Qt::SolidLine,
+                      Qt::RoundCap));
+        QRectF arcRect = disc.adjusted(7.0, 7.0, -7.0, -7.0);
+        p.drawArc(arcRect, 100 * 16, 55 * 16);
+        p.drawArc(arcRect, 280 * 16, 55 * 16);
+        p.restore();
+    }
+
+    // Label: large colored disc with a darker inner ring (record-label
+    // print) - stays a clear colored dot at 16 px.
+    const qreal lr = s * 0.26;
+    p.setPen(Qt::NoPen);
+    QRadialGradient lab(c, lr);
+    lab.setColorAt(0.0, labelColor.lighter(118));
+    lab.setColorAt(1.0, labelColor.darker(112));
+    p.setBrush(lab);
+    p.drawEllipse(c, lr, lr);
+    p.setPen(QPen(labelColor.darker(135), 2.0));
+    p.setBrush(Qt::NoBrush);
+    p.drawEllipse(c, lr * 0.62, lr * 0.62);
+
+    // Spindle dot.
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0xF2, 0xEE, 0xE4));
+    p.drawEllipse(c, 4.0, 4.0);
     return finish(pm);
 }
 

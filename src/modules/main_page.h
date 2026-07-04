@@ -73,6 +73,14 @@ public:
     // with non-default backgrounds.
     void               refreshTheme();
 
+    // ---- Mic FX pinned row (V1/V2) ----
+    // Master feature gate (Settings): hides BOTH the pinned MicChannel
+    // row and the mic toggle button next to "+ Channel". When enabled,
+    // the row's visibility follows the persisted user preference
+    // (micfx/panel_visible), toggled by the mic button.
+    void               setMicFxFeatureVisible(bool on);
+    class MicChannel  *micChannel() { return m_micChannel; }
+
 signals:
     void channelAdded(int idx);
     void channelRemoved(int idx);
@@ -105,6 +113,9 @@ private:
     class QPushButton  *m_addChannelBtn;
     class QPushButton  *m_pauseAllBtn;
     class QPushButton  *m_stopAllBtn;
+    class QPushButton  *m_micFxBtn = nullptr;
+    class MicChannel   *m_micChannel = nullptr;
+    bool                m_micFeatureOn = true;
     class QFrame       *m_disconnectedOverlay;
     bool                m_connected = true;
 

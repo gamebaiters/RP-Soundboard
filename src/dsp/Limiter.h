@@ -10,6 +10,11 @@ public:
     void setSampleRate(double sr);
     void setParams(float ceilingDb, float lookaheadMs, float releaseMs,
                    Mode mode, float ratio, float gateThreshDb);
+    // True-peak sidechain (Q3): estimates inter-sample peaks via 4x
+    // Catmull-Rom interpolation so the limiter catches ISP overshoots
+    // a sample-peak detector misses (typically up to ~1 dB on hot
+    // band-limited material). Default ON via SandboxState::truePeakMode.
+    void setTruePeak(bool on) { m_truePeak = on; }
     void processStereo(float &l, float &r);
     void reset();
 
@@ -32,4 +37,12 @@ private:
     float m_gainDb = 0.0f;
 
     float m_peakBuf[kMaxLookahead] = {};
+
+    // True-peak estimation state: last 4 raw samples per channel for
+    // the Catmull-Rom inter-sample interpolator.
+    bool  m_truePeak = true;
+    float m_tpHistL[4] = {};
+    float m_tpHistR[4] = {};
+    int   m_tpIdx = 0;
+    float truePeakOf(const float *h) const;
 };

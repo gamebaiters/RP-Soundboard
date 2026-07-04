@@ -9,7 +9,8 @@ const char *SandboxState::stageName(int stage)
         "Paulstretch", "EQ", "Compressor", "Saturator", "Spatial",
         "Chorus", "Flanger", "Flangus", "Phaser", "Delay", "Reverb",
         "Limiter", "Bitcrush", "GenLoss",
-        "Noise Gate", "De-esser", "Transient", "Dynamic EQ"
+        "Noise Gate", "De-esser", "Transient", "Dynamic EQ",
+        "Voice FX", "Bass Enh", "Binaural"
     };
     if (stage < 0 || stage >= Stage_COUNT) return "?";
     return names[stage];
@@ -167,6 +168,92 @@ QJsonObject SandboxState::toJson() const
     o["dopplerEnabled"]  = dopplerEnabled;
     o["dopplerStrength"] = static_cast<double>(dopplerStrength);
 
+    // ---- Voice FX macro ----
+    o["vfxEnabled"]      = vfxEnabled;
+    o["vfxRingEnabled"]  = vfxRingEnabled;
+    o["vfxRingFreq"]     = static_cast<double>(vfxRingFreq);
+    o["vfxRingMix"]      = static_cast<double>(vfxRingMix);
+    o["vfxTremEnabled"]  = vfxTremEnabled;
+    o["vfxTremRate"]     = static_cast<double>(vfxTremRate);
+    o["vfxTremDepth"]    = static_cast<double>(vfxTremDepth);
+    o["vfxTremShape"]    = vfxTremShape;
+    o["vfxVibEnabled"]   = vfxVibEnabled;
+    o["vfxVibRate"]      = static_cast<double>(vfxVibRate);
+    o["vfxVibDepth"]     = static_cast<double>(vfxVibDepth);
+    o["vfxWahEnabled"]   = vfxWahEnabled;
+    o["vfxWahSens"]      = static_cast<double>(vfxWahSens);
+    o["vfxWahMinHz"]     = static_cast<double>(vfxWahMinHz);
+    o["vfxWahMaxHz"]     = static_cast<double>(vfxWahMaxHz);
+    o["vfxWahQ"]         = static_cast<double>(vfxWahQ);
+    o["vfxWahMix"]       = static_cast<double>(vfxWahMix);
+    o["vfxExcEnabled"]   = vfxExcEnabled;
+    o["vfxExcFreq"]      = static_cast<double>(vfxExcFreq);
+    o["vfxExcDrive"]     = static_cast<double>(vfxExcDrive);
+    o["vfxExcMix"]       = static_cast<double>(vfxExcMix);
+    o["vfxTuneEnabled"]  = vfxTuneEnabled;
+    o["vfxTuneStrength"] = static_cast<double>(vfxTuneStrength);
+    o["vfxTuneSpeedMs"]  = static_cast<double>(vfxTuneSpeedMs);
+    o["vfxTuneScale"]    = vfxTuneScale;
+    o["vfxTuneKey"]      = vfxTuneKey;
+    o["vfxVocEnabled"]   = vfxVocEnabled;
+    o["vfxVocCarrier"]   = vfxVocCarrier;
+    o["vfxVocPitchHz"]   = static_cast<double>(vfxVocPitchHz);
+    o["vfxVocMix"]       = static_cast<double>(vfxVocMix);
+    o["vfxFormEnabled"]  = vfxFormEnabled;
+    o["vfxFormShift"]    = static_cast<double>(vfxFormShift);
+    o["vfxFormMix"]      = static_cast<double>(vfxFormMix);
+    o["vfxShimEnabled"]  = vfxShimEnabled;
+    o["vfxShimMix"]      = static_cast<double>(vfxShimMix);
+    o["vfxShimFeedback"] = static_cast<double>(vfxShimFeedback);
+    o["vfxShimPitch"]    = vfxShimPitch;
+    o["vfxShimDamp"]     = static_cast<double>(vfxShimDamp);
+    o["vfxRevEnabled"]   = vfxRevEnabled;
+    o["vfxRevTimeMs"]    = static_cast<double>(vfxRevTimeMs);
+    o["vfxRevFeedback"]  = static_cast<double>(vfxRevFeedback);
+    o["vfxRevMix"]       = static_cast<double>(vfxRevMix);
+
+    // ---- Bass enhancer ----
+    o["bassEnhEnabled"]  = bassEnhEnabled;
+    o["bassEnhFreq"]     = static_cast<double>(bassEnhFreq);
+    o["bassEnhDrive"]    = static_cast<double>(bassEnhDrive);
+    o["bassEnhMix"]      = static_cast<double>(bassEnhMix);
+
+    // ---- Binaural beats ----
+    o["binauralEnabled"] = binauralEnabled;
+    o["binauralBaseHz"]  = static_cast<double>(binauralBaseHz);
+    o["binauralBeatHz"]  = static_cast<double>(binauralBeatHz);
+    o["binauralLevelDb"] = static_cast<double>(binauralLevelDb);
+
+    // ---- LFO matrix ----
+    {
+        QJsonArray lfos;
+        for (int i = 0; i < 2; ++i) {
+            QJsonObject L;
+            L["enabled"] = lfoEnabled[i];
+            L["rateHz"]  = static_cast<double>(lfoRateHz[i]);
+            L["shape"]   = lfoShape[i];
+            lfos.append(L);
+        }
+        o["lfos"] = lfos;
+        QJsonArray routes;
+        for (int i = 0; i < 4; ++i) {
+            QJsonObject R;
+            R["lfo"]    = lfoRouteLfo[i];
+            R["target"] = lfoRouteTarget[i];
+            R["amount"] = static_cast<double>(lfoRouteAmount[i]);
+            routes.append(R);
+        }
+        o["lfoRoutes"] = routes;
+    }
+
+    // ---- Reverb engine mode + quality switches ----
+    o["reverbConvMode"]   = reverbConvMode;
+    o["reverbConvPreset"] = reverbConvPreset;
+    o["reverbConvIrPath"] = reverbConvIrPath;
+    o["hqOversampling"]   = hqOversampling;
+    o["truePeakMode"]     = truePeakMode;
+    o["failsafeEnabled"]  = failsafeEnabled;
+
     // Key is versioned: the DspStage enum was renumbered (Mono dropped,
     // Paulstretch added). Old "pipelineOrder" arrays carry stale indices
     // - using a new key makes pre-existing INIs/presets fall back to the
@@ -323,6 +410,83 @@ SandboxState SandboxState::fromJson(const QJsonObject &o)
     s.dopplerEnabled     = o.value("dopplerEnabled").toBool(false);
     s.dopplerStrength    = static_cast<float>(o.value("dopplerStrength").toDouble(50.0));
 
+    s.vfxEnabled      = o.value("vfxEnabled").toBool(false);
+    s.vfxRingEnabled  = o.value("vfxRingEnabled").toBool(false);
+    s.vfxRingFreq     = static_cast<float>(o.value("vfxRingFreq").toDouble(440.0));
+    s.vfxRingMix      = static_cast<float>(o.value("vfxRingMix").toDouble(1.0));
+    s.vfxTremEnabled  = o.value("vfxTremEnabled").toBool(false);
+    s.vfxTremRate     = static_cast<float>(o.value("vfxTremRate").toDouble(5.0));
+    s.vfxTremDepth    = static_cast<float>(o.value("vfxTremDepth").toDouble(0.8));
+    s.vfxTremShape    = o.value("vfxTremShape").toInt(0);
+    s.vfxVibEnabled   = o.value("vfxVibEnabled").toBool(false);
+    s.vfxVibRate      = static_cast<float>(o.value("vfxVibRate").toDouble(5.0));
+    s.vfxVibDepth     = static_cast<float>(o.value("vfxVibDepth").toDouble(0.5));
+    s.vfxWahEnabled   = o.value("vfxWahEnabled").toBool(false);
+    s.vfxWahSens      = static_cast<float>(o.value("vfxWahSens").toDouble(0.7));
+    s.vfxWahMinHz     = static_cast<float>(o.value("vfxWahMinHz").toDouble(350.0));
+    s.vfxWahMaxHz     = static_cast<float>(o.value("vfxWahMaxHz").toDouble(2500.0));
+    s.vfxWahQ         = static_cast<float>(o.value("vfxWahQ").toDouble(4.0));
+    s.vfxWahMix       = static_cast<float>(o.value("vfxWahMix").toDouble(1.0));
+    s.vfxExcEnabled   = o.value("vfxExcEnabled").toBool(false);
+    s.vfxExcFreq      = static_cast<float>(o.value("vfxExcFreq").toDouble(3000.0));
+    s.vfxExcDrive     = static_cast<float>(o.value("vfxExcDrive").toDouble(2.0));
+    s.vfxExcMix       = static_cast<float>(o.value("vfxExcMix").toDouble(0.3));
+    s.vfxTuneEnabled  = o.value("vfxTuneEnabled").toBool(false);
+    s.vfxTuneStrength = static_cast<float>(o.value("vfxTuneStrength").toDouble(1.0));
+    s.vfxTuneSpeedMs  = static_cast<float>(o.value("vfxTuneSpeedMs").toDouble(20.0));
+    s.vfxTuneScale    = o.value("vfxTuneScale").toInt(0);
+    s.vfxTuneKey      = o.value("vfxTuneKey").toInt(0);
+    s.vfxVocEnabled   = o.value("vfxVocEnabled").toBool(false);
+    s.vfxVocCarrier   = o.value("vfxVocCarrier").toInt(0);
+    s.vfxVocPitchHz   = static_cast<float>(o.value("vfxVocPitchHz").toDouble(110.0));
+    s.vfxVocMix       = static_cast<float>(o.value("vfxVocMix").toDouble(1.0));
+    s.vfxFormEnabled  = o.value("vfxFormEnabled").toBool(false);
+    s.vfxFormShift    = static_cast<float>(o.value("vfxFormShift").toDouble(0.0));
+    s.vfxFormMix      = static_cast<float>(o.value("vfxFormMix").toDouble(1.0));
+    s.vfxShimEnabled  = o.value("vfxShimEnabled").toBool(false);
+    s.vfxShimMix      = static_cast<float>(o.value("vfxShimMix").toDouble(0.3));
+    s.vfxShimFeedback = static_cast<float>(o.value("vfxShimFeedback").toDouble(0.5));
+    s.vfxShimPitch    = o.value("vfxShimPitch").toInt(12);
+    s.vfxShimDamp     = static_cast<float>(o.value("vfxShimDamp").toDouble(0.4));
+    s.vfxRevEnabled   = o.value("vfxRevEnabled").toBool(false);
+    s.vfxRevTimeMs    = static_cast<float>(o.value("vfxRevTimeMs").toDouble(500.0));
+    s.vfxRevFeedback  = static_cast<float>(o.value("vfxRevFeedback").toDouble(0.35));
+    s.vfxRevMix       = static_cast<float>(o.value("vfxRevMix").toDouble(0.4));
+
+    s.bassEnhEnabled  = o.value("bassEnhEnabled").toBool(false);
+    s.bassEnhFreq     = static_cast<float>(o.value("bassEnhFreq").toDouble(120.0));
+    s.bassEnhDrive    = static_cast<float>(o.value("bassEnhDrive").toDouble(3.0));
+    s.bassEnhMix      = static_cast<float>(o.value("bassEnhMix").toDouble(0.4));
+
+    s.binauralEnabled = o.value("binauralEnabled").toBool(false);
+    s.binauralBaseHz  = static_cast<float>(o.value("binauralBaseHz").toDouble(200.0));
+    s.binauralBeatHz  = static_cast<float>(o.value("binauralBeatHz").toDouble(7.0));
+    s.binauralLevelDb = static_cast<float>(o.value("binauralLevelDb").toDouble(-24.0));
+
+    {
+        QJsonArray lfos = o.value("lfos").toArray();
+        for (int i = 0; i < 2 && i < lfos.size(); ++i) {
+            QJsonObject L = lfos[i].toObject();
+            s.lfoEnabled[i] = L.value("enabled").toBool(false);
+            s.lfoRateHz[i]  = static_cast<float>(L.value("rateHz").toDouble(s.lfoRateHz[i]));
+            s.lfoShape[i]   = L.value("shape").toInt(0);
+        }
+        QJsonArray routes = o.value("lfoRoutes").toArray();
+        for (int i = 0; i < 4 && i < routes.size(); ++i) {
+            QJsonObject R = routes[i].toObject();
+            s.lfoRouteLfo[i]    = R.value("lfo").toInt(0);
+            s.lfoRouteTarget[i] = R.value("target").toInt(0);
+            s.lfoRouteAmount[i] = static_cast<float>(R.value("amount").toDouble(0.5));
+        }
+    }
+
+    s.reverbConvMode   = o.value("reverbConvMode").toInt(0);
+    s.reverbConvPreset = o.value("reverbConvPreset").toInt(0);
+    s.reverbConvIrPath = o.value("reverbConvIrPath").toString();
+    s.hqOversampling   = o.value("hqOversampling").toBool(true);
+    s.truePeakMode     = o.value("truePeakMode").toBool(true);
+    s.failsafeEnabled  = o.value("failsafeEnabled").toBool(true);
+
     QJsonArray pipe = o.value("pipelineOrderV2").toArray();
     if (pipe.size() >= 1 && pipe.size() <= Stage_COUNT) {
         std::set<int> seen;
@@ -370,5 +534,9 @@ bool SandboxState::isModified() const
     if (bitcrusherEnabled) return true;
     if (monoEnabled) return true;
     if (genLossEnabled) return true;
+    if (vfxEnabled) return true;
+    if (bassEnhEnabled) return true;
+    if (binauralEnabled) return true;
+    if (lfoEnabled[0] || lfoEnabled[1]) return true;
     return false;
 }

@@ -84,6 +84,11 @@ public:
     // channel's waveform transport. Driven by the global "Show skip
     // buttons" setting.
     void                setSkipButtonsVisible(bool on);
+    // Show / hide the tape-stop vinyl button on the transport row.
+    // Driven by the global "Show vinyl (tape stop) button" setting.
+    void                setVinylButtonVisible(bool on) {
+        if (m_wave) m_wave->setVinylButtonVisible(on);
+    }
     // Programmatic remove trigger. Emits removeChannelRequested with
     // the channel's own id so external code (multi-channel infinity
     // auto-cleanup path) can request removal without touching the

@@ -498,7 +498,7 @@ void ts3plugin_initHotkeys(struct PluginHotkey*** hotkeys)
 	 * The description is shown in the clients hotkey dialog. */
 	int i;
 	int numKeys = 200;
-	int numExtra = NUM_CONFIGS + 6;
+	int numExtra = NUM_CONFIGS + 7;
 	char kw[PLUGIN_HOTKEY_BUFSZ];
 	char desc[PLUGIN_HOTKEY_BUFSZ];
 
@@ -523,6 +523,7 @@ void ts3plugin_initHotkeys(struct PluginHotkey*** hotkeys)
 	CREATE_HOTKEY(HOTKEY_MUTE_ON_MY_CLIENT, "Toggle 'Mute on my client'");
 	CREATE_HOTKEY(HOTKEY_VOLUME_INCREASE, "Increase volume by 20%");
 	CREATE_HOTKEY(HOTKEY_VOLUME_DECREASE, "Decrease volume by 20%");
+	CREATE_HOTKEY(HOTKEY_MICFX_TOGGLE, "Toggle Mic FX (voice changer)");
 	END_CREATE_HOTKEYS;
 
 	/* The client will call ts3plugin_freeMemory to release all allocated memory */

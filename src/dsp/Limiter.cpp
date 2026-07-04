@@ -19,11 +19,42 @@ void Limiter::setParams(float ceilingDb, float lookaheadMs, float releaseMs,
     m_gateThresh = AudioUtils::dbToLinear(gateThreshDb);
 }
 
+// Max |value| over the 3 inter-sample points between h[1] and h[2]
+// (Catmull-Rom through h[0..3]), plus the samples themselves. h is
+// chronological: h[0] oldest.
+float Limiter::truePeakOf(const float *h) const {
+    float peak = std::max(std::fabs(h[1]), std::fabs(h[2]));
+    for (int k = 1; k <= 3; ++k) {
+        float t = 0.25f * k;
+        float t2 = t * t, t3 = t2 * t;
+        float v = 0.5f * ((2.0f * h[1]) +
+                          (-h[0] + h[2]) * t +
+                          (2.0f * h[0] - 5.0f * h[1] + 4.0f * h[2] - h[3]) * t2 +
+                          (-h[0] + 3.0f * h[1] - 3.0f * h[2] + h[3]) * t3);
+        float av = std::fabs(v);
+        if (av > peak) peak = av;
+    }
+    return peak;
+}
+
 void Limiter::processStereo(float &l, float &r) {
     m_delayL[m_delayPos] = l;
     m_delayR[m_delayPos] = r;
 
-    float peak = std::max(std::abs(l), std::abs(r));
+    float peak;
+    if (m_truePeak) {
+        // Shift the 4-sample histories and estimate the inter-sample
+        // peak of the segment that just became fully defined. The one-
+        // sample detection delay this introduces is far inside the
+        // limiter's own lookahead window.
+        m_tpHistL[0] = m_tpHistL[1]; m_tpHistL[1] = m_tpHistL[2];
+        m_tpHistL[2] = m_tpHistL[3]; m_tpHistL[3] = l;
+        m_tpHistR[0] = m_tpHistR[1]; m_tpHistR[1] = m_tpHistR[2];
+        m_tpHistR[2] = m_tpHistR[3]; m_tpHistR[3] = r;
+        peak = std::max(truePeakOf(m_tpHistL), truePeakOf(m_tpHistR));
+    } else {
+        peak = std::max(std::abs(l), std::abs(r));
+    }
     m_peakBuf[m_delayPos] = peak;
 
     float maxPeak = 0.0f;
@@ -63,6 +94,8 @@ void Limiter::reset() {
     std::fill(std::begin(m_delayL), std::end(m_delayL), 0.0f);
     std::fill(std::begin(m_delayR), std::end(m_delayR), 0.0f);
     std::fill(std::begin(m_peakBuf), std::end(m_peakBuf), 0.0f);
+    std::fill(std::begin(m_tpHistL), std::end(m_tpHistL), 0.0f);
+    std::fill(std::begin(m_tpHistR), std::end(m_tpHistR), 0.0f);
     m_delayPos = 0;
     m_gainDb = 0.0f;
 }

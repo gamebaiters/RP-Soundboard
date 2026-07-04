@@ -156,6 +156,14 @@ void SampleProducerThread::waitForReadDrain(int maxWaitMs)
 	}
 }
 
+// Producer fill target: how far ahead of the play head the decoder
+// keeps the sample buffer. Kept SMALL (0.5 s) so live pitch / speed /
+// reverb edits (applied in the decoder's filter graph) are heard almost
+// immediately - a larger target means that many seconds of already-
+// buffered audio play with the OLD settings before the change lands.
+// The vinyl tape decode-ahead window still builds fine from this: the
+// producer refills continuously, so the tape can pull ~3x realtime out
+// of it and grow its own ring window over a second regardless.
 #define MIN_BUFFER_SAMPLES (48000 / 2)
 //---------------------------------------------------------------
 // Purpose: 

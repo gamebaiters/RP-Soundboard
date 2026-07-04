@@ -42,6 +42,10 @@ struct SandboxState
         Stage_DeEsser,
         Stage_TransientShaper,
         Stage_DynEq,
+        // v2.3 additions - same append-only rule.
+        Stage_VoiceFx,      // macro-module: 10 classic voice/creative FX
+        Stage_BassEnh,      // psychoacoustic bass enhancer
+        Stage_Binaural,     // binaural-beats tone layer
         Stage_COUNT
     };
 
@@ -274,6 +278,119 @@ struct SandboxState
     bool  dopplerEnabled  = false;
     float dopplerStrength = 50.0f;   // 0..100
 
+    // ---- Voice FX macro-module (Stage_VoiceFx) ----
+    // 10 classic effects sharing ONE pipeline stage; each sub-effect is
+    // individually toggleable. vfxEnabled is the macro master switch.
+    bool  vfxEnabled = false;
+
+    // Ring modulator (Dalek voice)
+    bool  vfxRingEnabled = false;
+    float vfxRingFreq    = 440.0f;   // 20..2000 Hz
+    float vfxRingMix     = 1.0f;     // 0..1
+
+    // Tremolo (amplitude LFO)
+    bool  vfxTremEnabled = false;
+    float vfxTremRate    = 5.0f;     // 0.1..20 Hz
+    float vfxTremDepth   = 0.8f;     // 0..1
+    int   vfxTremShape   = 0;        // 0=sine 1=square
+
+    // Vibrato (pitch LFO via modulated delay)
+    bool  vfxVibEnabled  = false;
+    float vfxVibRate     = 5.0f;     // 0.1..14 Hz
+    float vfxVibDepth    = 0.5f;     // 0..1 -> 0..8 ms delay swing
+
+    // Auto-wah (envelope-follower bandpass sweep)
+    bool  vfxWahEnabled  = false;
+    float vfxWahSens     = 0.7f;     // 0..1
+    float vfxWahMinHz    = 350.0f;   // 100..1000
+    float vfxWahMaxHz    = 2500.0f;  // 1000..6000
+    float vfxWahQ        = 4.0f;     // 1..12
+    float vfxWahMix      = 1.0f;     // 0..1
+
+    // Exciter (HF harmonic enhancement)
+    bool  vfxExcEnabled  = false;
+    float vfxExcFreq     = 3000.0f;  // 1000..8000 Hz split
+    float vfxExcDrive    = 2.0f;     // 1..10
+    float vfxExcMix      = 0.3f;     // 0..1
+
+    // Autotune (pitch correction, T-Pain at strength 1 / speed low)
+    bool  vfxTuneEnabled  = false;
+    float vfxTuneStrength = 1.0f;    // 0..1
+    float vfxTuneSpeedMs  = 20.0f;   // 1..200 (low = hard snap)
+    int   vfxTuneScale    = 0;       // 0=Chromatic 1=Major 2=Minor
+    int   vfxTuneKey      = 0;       // 0=C .. 11=B
+
+    // Vocoder (internal carrier, input = modulator)
+    bool  vfxVocEnabled  = false;
+    int   vfxVocCarrier  = 0;        // 0=Saw 1=Noise
+    float vfxVocPitchHz  = 110.0f;   // 50..400
+    float vfxVocMix      = 1.0f;     // 0..1
+
+    // Formant shifter (spectral envelope warp, pitch preserved)
+    bool  vfxFormEnabled = false;
+    float vfxFormShift   = 0.0f;     // -12..+12 "semitones" of warp
+    float vfxFormMix     = 1.0f;     // 0..1
+
+    // Shimmer reverb (pitch-shifted feedback tail)
+    bool  vfxShimEnabled  = false;
+    float vfxShimMix      = 0.3f;    // 0..1
+    float vfxShimFeedback = 0.5f;    // 0..0.9
+    int   vfxShimPitch    = 12;      // +12 or +7 semitones
+    float vfxShimDamp     = 0.4f;    // 0..1
+
+    // Reverse delay (grain-reversed echo - live "reverse reverb" feel)
+    bool  vfxRevEnabled   = false;
+    float vfxRevTimeMs    = 500.0f;  // 100..2000 grain size
+    float vfxRevFeedback  = 0.35f;   // 0..0.9
+    float vfxRevMix       = 0.4f;    // 0..1
+
+    // ---- Bass Enhancer (Stage_BassEnh) ----
+    // Psychoacoustic bass: harmonics generated from the sub band are
+    // mixed on top so small speakers/earbuds "hear" the low end.
+    bool  bassEnhEnabled = false;
+    float bassEnhFreq    = 120.0f;   // 60..300 Hz crossover
+    float bassEnhDrive   = 3.0f;     // 1..10
+    float bassEnhMix     = 0.4f;     // 0..1 harmonics level
+
+    // ---- Binaural beats (Stage_Binaural) ----
+    // Adds a sine pair under the program: baseHz to the left ear,
+    // baseHz+beatHz to the right. Level in dB (well under the music).
+    bool  binauralEnabled = false;
+    float binauralBaseHz  = 200.0f;  // 80..600
+    float binauralBeatHz  = 7.0f;    // 0.5..40
+    float binauralLevelDb = -24.0f;  // -60..-6
+
+    // ---- LFO modulation matrix (per channel) ----
+    // Two free-running LFOs, four routing rows. Target values are the
+    // LfoMatrix::Target enum (0 = none). Amount is bipolar -1..+1.
+    bool  lfoEnabled[2]     = { false, false };
+    float lfoRateHz[2]      = { 1.0f, 0.25f };
+    int   lfoShape[2]       = { 0, 0 };     // 0=sine 1=tri 2=square 3=S&H
+    int   lfoRouteLfo[4]    = { 0, 0, 1, 1 };
+    int   lfoRouteTarget[4] = { 0, 0, 0, 0 };
+    float lfoRouteAmount[4] = { 0.5f, 0.5f, 0.5f, 0.5f };
+
+    // ---- Reverb engine mode ----
+    // 0 = Algorithmic (Freeverb-style, the historical engine).
+    // 1 = Convolution (partitioned FFT convolution against a procedural
+    //     or user-loaded impulse response). Wet level reuses reverbWet.
+    int     reverbConvMode   = 0;
+    int     reverbConvPreset = 0;    // 0=Hall 1=Church 2=Room 3=Spring
+    QString reverbConvIrPath;        // empty = use the preset IR
+
+    // ---- Quality switches ----
+    // hqOversampling gates the 2x-oversampled shapers in the nonlinear
+    // stages (Saturator core is always oversampled; this covers the new
+    // Exciter / BassEnhancer shapers). truePeakMode upgrades the Limiter
+    // sidechain to 4x interpolated inter-sample peak estimation.
+    bool  hqOversampling = true;
+    bool  truePeakMode   = true;
+    // Failsafe anti-clip: dedicated -1 dBFS true-peak brickwall applied
+    // at the very end of the chain (after every stage, mono fold, LFO
+    // gains and tape stop). Guarantees no effect combination - EQ
+    // boosts included - can ever clip the output. Default ON.
+    bool  failsafeEnabled = true;
+
     // ---- Sidechain ducking (per channel) ----
     // Mark a channel as a DUCK SOURCE - while it is playing, every
     // other slot's output volume drops by duckOthersDb (clamped -30..0).
@@ -284,14 +401,16 @@ struct SandboxState
     bool  duckSource         = false;
     float duckOthersDb       = -12.0f; // -30..0; less = deeper duck
 
-    // DSP pipeline order (user-draggable). Default = canonical enum
-    // order, so it matches defaultPipelineOrder() (out[i] = i).
+    // DSP pipeline order (user-draggable). Default = a musically sane
+    // chain: dynamics first, tone shaping, spatial, modulation, the
+    // Voice FX macro, time effects, then finalizers + generators.
     int pipelineOrder[Stage_COUNT] = {
         Stage_Paulstretch, Stage_NoiseGate, Stage_EQ, Stage_DynEq,
         Stage_DeEsser, Stage_Compressor, Stage_TransientShaper,
-        Stage_Saturator, Stage_Spatial, Stage_Chorus, Stage_Flanger,
-        Stage_Flangus, Stage_Phaser, Stage_Delay, Stage_Reverb,
-        Stage_Limiter, Stage_Bitcrusher, Stage_GenLoss
+        Stage_Saturator, Stage_BassEnh, Stage_Spatial, Stage_Chorus,
+        Stage_Flanger, Stage_Flangus, Stage_Phaser, Stage_VoiceFx,
+        Stage_Delay, Stage_Reverb, Stage_Limiter, Stage_Bitcrusher,
+        Stage_GenLoss, Stage_Binaural
     };
 
     QJsonObject toJson() const;

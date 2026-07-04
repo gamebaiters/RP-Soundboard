@@ -20,6 +20,12 @@
 #include "NoiseGate.h"
 #include "TransientShaper.h"
 #include "DynEq.h"
+#include "VoiceFx.h"
+#include "BassEnhancer.h"
+#include "BinauralBeats.h"
+#include "TapeStop.h"
+#include "LfoMatrix.h"
+#include "ConvolutionReverb.h"
 
 
 #include <vector>
@@ -47,7 +53,10 @@ public:
     SlotDsp();
 
     void setSampleRate(double sr);
-    void reset();
+    // keepTape leaves the TapeStop instances untouched: a scrub-seek
+    // committing mid-scratch must not kick the tape out of its gesture
+    // (see the seek worker / loop-restart call sites).
+    void reset(bool keepTape = false);
     // Same as reset() but preserves the rotation phase on both paths.
     // Used by the reverse-toggle swap path so a 3D Rotate / 8D source
     // doesn't snap back to the front-azimuth start the moment the
@@ -68,6 +77,92 @@ public:
     // own ensureInit call inside hot DSP setup degenerates to a no-op.
     void prepareLeia(double fs);
 
+    // GUI/worker-thread-only convolution-reverb IR bring-up (same
+    // outside-the-audio-mutex contract as prepareLeia). Builds the IR
+    // partitions for both paths when reverbConvMode == 1; cached
+    // early-return when the requested IR is already loaded.
+    void prepareConvReverb(const SandboxState &s);
+
+    // ---- Tape stop (vinyl brake) transport effect ----
+    // Commands fan out to both paths so local and server listeners
+    // hear the same brake. GUI thread; processing is post-chain.
+    void tapeTrigger(float brakeMs);
+    void tapeRelease(float spinMs);
+    void tapeSnapReset();
+    // Popup visibility: armed = ring ingests history + head tracks
+    // live (audibly transparent), so the first backward drag has real
+    // material under it.
+    void tapeArm(bool on);
+    // Scratch (DJ drag): begin on grab, angular displacement streamed
+    // per mouse move as SECONDS of tape (position-locked servo), end
+    // on hand-off.
+    void tapeScratchBegin();
+    void tapeScratchDelta(float deltaSeconds);
+    void tapeScratchRebase();
+    void tapeScratchEnd(float spinMs);
+    // ---- Backward-infinite backfill (playback path only - that is the
+    // audible scratch; the capture tape stays ring-limited). ----
+    // Older output samples the tape wants prepended to keep the backward
+    // window full; the Sampler decodes them off-thread and feeds them.
+    int  tapeBackfillWant() const { return m_play.tape.backfillWantSamples(); }
+    float tapeBackwardRoomSeconds() const {
+        return m_play.tape.backwardRoomSeconds();
+    }
+    // Net head motion (output seconds, negative = backward) since the
+    // scratch began - the cursor uses this to follow the head's true
+    // file position during a scratch (the frontier lag does not).
+    float tapeHeadDisplacementSeconds() const {
+        return m_play.tape.headDisplacementSeconds();
+    }
+    // Prepend a contiguous OLDER block (oldest-first) - audio thread.
+    void tapeFeedBackfill(const float* L, const float* R, int n) {
+        m_play.tape.feedBackfill(L, R, n);
+    }
+    // Output-domain seconds the tape head lags live. The Sampler
+    // subtracts this from the cursor so the waveform follows brakes /
+    // scratches.
+    //
+    // PLAYBACK path = the reference for every tape read-back: it is
+    // what the local user actually HEARS and it always processes while
+    // the slot plays (the playback fetch drives it). The capture
+    // instance only processes while transmitting - using it as the
+    // reference froze the cursor lag at 0 (and starved the scratch
+    // budget) whenever the mic path was idle.
+    float tapeLagSeconds() const { return m_play.tape.lagSeconds(); }
+    // Seconds of real audio in the tape ring (backward-scratch budget).
+    float tapeHistorySeconds() const {
+        return m_play.tape.availableHistorySeconds();
+    }
+    // True when the brake has reached a full stop. Sampler auto-pauses
+    // the slot.
+    bool tapeFullyStopped() const { return m_play.tape.fullyStopped(); }
+    bool tapeActive() const { return m_play.tape.active(); }
+    // True only while the tape actually RE-TIMES the output (brake /
+    // stop / scratch / spin-up / catch-up). Armed - the transparent
+    // whole-playback ingest state - does not count: the cursor
+    // rate-limiter must stay engaged there.
+    bool tapeRetiming() const {
+        TapeStop::Phase ph = m_play.tape.phase();
+        return ph != TapeStop::Idle && ph != TapeStop::Armed;
+    }
+    TapeStop::Phase tapePhase() const { return m_play.tape.phase(); }
+
+    // ---- Global per-stage kill switch (Settings > sandbox modules) ----
+    // Bit i = stage i enabled. Stages with a cleared bit are skipped in
+    // every slot's chain AND hidden from the sandbox UI. Static: one
+    // mask for the whole process, read lock-free by the audio thread.
+    static void setGlobalStageEnabled(int stage, bool on) {
+        uint32_t bit = 1u << stage;
+        if (on) s_globalStageMask.fetch_or(bit, std::memory_order_relaxed);
+        else    s_globalStageMask.fetch_and(~bit, std::memory_order_relaxed);
+    }
+    static bool globalStageEnabled(int stage) {
+        return (s_globalStageMask.load(std::memory_order_relaxed) >> stage) & 1u;
+    }
+    static uint32_t globalStageMask() {
+        return s_globalStageMask.load(std::memory_order_relaxed);
+    }
+
     bool isActive() const { return m_active; }
     const SandboxState &state() const { return m_state; }
 
@@ -78,6 +173,18 @@ public:
     // isCapture selects per-path DSP state.
     void process(short *interleaved, int frames, int channels,
                  float &peakL, float &peakR, bool isCapture);
+
+    // Tape (vinyl) decode-ahead path. Runs the full DSP chain on up to
+    // `inFrames` decoded input frames from `in`, feeding them into the
+    // tape ring AHEAD of the play head; then produces `outFrames` from
+    // the head at the current tape rate into `out`. Returns the number
+    // of input frames actually ingested (the caller consumes exactly
+    // that many from the sample buffer). Decouples input from output so
+    // the ring can build a forward-scratch window and drain past EOF.
+    // Only called when tape.active(); `in` and `out` must NOT alias.
+    int processTapeBlock(const short *in, int inFrames,
+                         short *out, int outFrames, int channels,
+                         float &peakL, float &peakR, bool isCapture);
 
     // ---- Paulstretch (streaming, dual-path) ----
     bool isStretchEnabled() const { return m_state.enabled && m_state.stretchEnabled; }
@@ -157,6 +264,25 @@ private:
         NoiseGate      gate;
         TransientShaper trans;
         DynEq          dyneq;
+        VoiceFx        voicefx;
+        BassEnhancer   bassEnh;
+        BinauralBeats  binaural;
+        ConvolutionReverb convRev;
+        TapeStop       tape;
+        LfoMatrix      lfo;
+        // Failsafe anti-clip: dedicated true-peak brickwall at -1 dBFS
+        // applied post-chain when SandboxState::failsafeEnabled. Kept
+        // separate from the user-facing Stage_Limiter instance.
+        Limiter        failsafe;
+        // Per-block output gains driven by the LFO matrix Pan / Volume
+        // targets. 1.0 when no such route is active.
+        float      lfoGainL = 1.0f;
+        float      lfoGainR = 1.0f;
+        // Stage bits the LFO matrix forces PAST their "mix > 0" gates
+        // this block, so modulating e.g. Reverb Wet from a 0 baseline
+        // is audible. Cleared (with a base-param restore) when the
+        // matrix goes inactive.
+        uint32_t   lfoForce = 0;
         double     rotPhase = 0.0;
         int        rotBlockCounter = 0;
         // Doppler variable-delay-line state (per-ear, ~10 sample max).
@@ -174,6 +300,15 @@ private:
     void advanceRotationIfNeeded(PathState &p);
     void updateLeiaDirection(PathState &p);     // control-rate az/el feed
     void applyStage(int stage, PathState &p, float &l, float &r);
+    // LFO matrix block tick: advances the path's LFOs and pushes the
+    // modulated values (base from m_state + lfo * amount) into the
+    // cheap live setters of the routed DSP objects.
+    void applyLfoRoutes(PathState &p, int frames);
+    // Restores slider-truth params + unity gains when the matrix goes
+    // inactive (otherwise the last modulated values would stick).
+    void clearLfoRoutes(PathState &p);
+
+    static std::atomic<uint32_t> s_globalStageMask;
 
     double m_fs = 0.0;
     bool   m_active = false;

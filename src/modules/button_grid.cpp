@@ -187,6 +187,7 @@ void ButtonGrid::showContextMenu(int idx, const QPoint &globalPos) {
     QAction *aEdit   = nullptr;
     QAction *aRename = nullptr;
     QAction *aMacro  = nullptr;
+    QAction *aMicMacro = nullptr;
 
     if (isMacro) {
         // Macros are frozen: only rename or clear.
@@ -202,6 +203,7 @@ void ButtonGrid::showContextMenu(int idx, const QPoint &globalPos) {
     if (!isMacro) {
         menu.addSeparator();
         aMacro = menu.addAction(tr("Freeze all channels into macro"));
+        aMicMacro = menu.addAction(tr("Save Mic FX package into macro"));
     }
 
     QAction *chosen = menu.exec(globalPos);
@@ -211,6 +213,7 @@ void ButtonGrid::showContextMenu(int idx, const QPoint &globalPos) {
     else if (chosen && chosen == aClear)  emit clearButtonRequested(idx);
     else if (chosen && chosen == aHotkey) emit setHotkeyRequested(idx);
     else if (chosen && chosen == aMacro)  emit createMacroRequested(idx);
+    else if (chosen && chosen == aMicMacro) emit createMicMacroRequested(idx);
 }
 
 void ButtonGrid::onButtonFileDropped(const QList<QUrl> &urls) {

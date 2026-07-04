@@ -5,6 +5,7 @@
 #include "search_bar.h"
 #include "button_grid.h"
 #include "channel.h"
+#include "mic_channel.h"
 #include "channel_state_persistence.h"
 #include "reset_channels_btn.h"
 #include "settings_window.h"
@@ -33,6 +34,7 @@
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QShowEvent>
+#include <QSettings>
 #include <cmath>
 
 MainPage::MainPage(QWidget *parent)
@@ -71,6 +73,14 @@ MainPage::MainPage(QWidget *parent)
     m_channelsLayout->setSpacing(4);
     m_channelsLayout->addStretch(1);
     m_channelsHost->setLayout(m_channelsLayout);
+
+    // Pinned Microphone FX row - ALWAYS index 0 of the channels column,
+    // above every playback channel. Self-contained (talks straight to
+    // the MicFx singleton); visibility = feature switch AND the user's
+    // last toggle (restored below once m_micFxBtn exists).
+    m_micChannel = new MicChannel(m_channelsHost);
+    m_channelsLayout->insertWidget(0, m_micChannel);
+    m_micChannel->hide();
     m_channelsScroll->setWidgetResizable(true);
     m_channelsScroll->setFrameShape(QFrame::NoFrame);
     m_channelsScroll->setWidget(m_channelsHost);
@@ -161,10 +171,33 @@ MainPage::MainPage(QWidget *parent)
         "QPushButton { background-color: #3c6e9c; color: white; padding: 2px 10px;"
         " border-radius: 4px; } QPushButton:hover { background-color: #4a8bc2; }");
 
+    // Mic FX toggle button (V1): shows/hides the pinned MicChannel
+    // row. Hidden entirely (with the row) when the Settings feature
+    // switch is off. Row visibility preference persists.
+    m_micFxBtn = new QPushButton(QString::fromUtf8("\xF0\x9F\x8E\xA4"), this);
+    m_micFxBtn->setMinimumHeight(28);
+    m_micFxBtn->setMaximumWidth(40);
+    m_micFxBtn->setCheckable(true);
+    m_micFxBtn->setToolTip(tr(
+        "Show / hide the Microphone FX panel (real-time voice changer)."));
+    connect(m_micFxBtn, &QPushButton::toggled, this, [this](bool on){
+        if (m_micChannel) m_micChannel->setVisible(on && m_micFeatureOn);
+        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        st.setValue(QStringLiteral("micfx/panel_visible"), on);
+    });
+    {
+        // Restore the user's last panel state.
+        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        bool vis = st.value(QStringLiteral("micfx/panel_visible"), false).toBool();
+        m_micFxBtn->setChecked(vis);
+        if (m_micChannel) m_micChannel->setVisible(vis && m_micFeatureOn);
+    }
+
     auto *bottom = new QHBoxLayout;
     bottom->setContentsMargins(10,6,10,6);
     bottom->setSpacing(8);
     bottom->addWidget(m_addChannelBtn);
+    bottom->addWidget(m_micFxBtn);
     bottom->addWidget(m_pauseAllBtn);
     bottom->addWidget(m_stopAllBtn);
     bottom->addWidget(m_restoreMacroBtn);
@@ -352,6 +385,14 @@ void MainPage::refreshTheme() {
     Theme::Derived d = Theme::derive(Theme::colors());
     m_channelsHost->setStyleSheet(QString(
         "#channelsHost { background-color: %1; }").arg(d.bg.name()));
+    if (m_micChannel) m_micChannel->refreshTheme();
+}
+
+void MainPage::setMicFxFeatureVisible(bool on) {
+    m_micFeatureOn = on;
+    if (m_micFxBtn) m_micFxBtn->setVisible(on);
+    if (m_micChannel)
+        m_micChannel->setVisible(on && m_micFxBtn && m_micFxBtn->isChecked());
 }
 
 void MainPage::updateChannelsAreaHeight(bool waveformVisible) {

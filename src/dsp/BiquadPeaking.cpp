@@ -54,5 +54,17 @@ void BiquadPeaking::setParams(double f0, double q, double gainDb, double sampleR
 
 void BiquadPeaking::reset() {
     x1 = x2 = y1 = y2 = 0.0;
-    m_rampRemaining = 0;
+    // Resolve any in-flight coefficient ramp to its TARGET before
+    // dropping it. Zeroing m_rampRemaining alone left b/a frozen at
+    // whatever mid-ramp value process() had reached; the owner's gain
+    // cache still matched the requested dB, so the next setBandGainDb
+    // early-returned and the band stayed silently wrong - audible as
+    // "EQ enabled but not actually applied" whenever a chain reset
+    // (spatial mode/engine change, stretch toggle, play restart)
+    // landed inside the few-ms ramp window after an EQ edit.
+    if (m_rampRemaining > 0) {
+        b0 = m_tb0; b1 = m_tb1; b2 = m_tb2;
+        a1 = m_ta1; a2 = m_ta2;
+        m_rampRemaining = 0;
+    }
 }

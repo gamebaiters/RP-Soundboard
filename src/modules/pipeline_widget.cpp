@@ -3,6 +3,7 @@
 #include <QPainter>
 #include <QMouseEvent>
 #include <QFontMetrics>
+#include <QVector>
 #include <algorithm>
 #include <cstdlib>
 
@@ -27,6 +28,9 @@ const QColor kStageColors[] = {
     QColor(0xE8, 0x74, 0x9C),  // De-esser - pink
     QColor(0x1A, 0xBC, 0x9C),  // Transient - aqua
     QColor(0xF3, 0x9C, 0x12),  // Dynamic EQ - amber
+    QColor(0x6C, 0x3E, 0xC9),  // Voice FX - violet
+    QColor(0xA9, 0x32, 0x26),  // Bass Enh - brick
+    QColor(0x5C, 0x6B, 0xC0),  // Binaural - indigo
 };
 }
 
@@ -52,20 +56,42 @@ void PipelineWidget::getOrder(int out[SandboxState::Stage_COUNT]) const
         out[i] = m_order[i];
 }
 
-QRect PipelineWidget::blockRect(int index) const
+void PipelineWidget::setHiddenStages(quint32 mask)
 {
-    int totalGaps = (SandboxState::Stage_COUNT - 1) * kGap + kMargin * 2;
-    int blockW = (width() - totalGaps) / SandboxState::Stage_COUNT;
+    if (m_hiddenMask == mask) return;
+    m_hiddenMask = mask;
+    update();
+}
+
+QVector<int> PipelineWidget::visibleIndices() const
+{
+    QVector<int> vis;
+    vis.reserve(SandboxState::Stage_COUNT);
+    for (int i = 0; i < SandboxState::Stage_COUNT; ++i) {
+        int stage = m_order[i];
+        if (stage >= 0 && stage < SandboxState::Stage_COUNT &&
+            !stageHidden(stage))
+            vis.append(i);
+    }
+    return vis;
+}
+
+QRect PipelineWidget::blockRect(int visPos, int visCount) const
+{
+    if (visCount < 1) visCount = 1;
+    int totalGaps = (visCount - 1) * kGap + kMargin * 2;
+    int blockW = (width() - totalGaps) / visCount;
     if (blockW < 20) blockW = 20;
-    int x = kMargin + index * (blockW + kGap);
+    int x = kMargin + visPos * (blockW + kGap);
     return QRect(x, kMargin, blockW, kBlockH);
 }
 
 int PipelineWidget::blockAtPos(int x) const
 {
-    for (int i = 0; i < SandboxState::Stage_COUNT; ++i) {
-        QRect r = blockRect(i);
-        if (x >= r.left() && x <= r.right()) return i;
+    const int visCount = visibleIndices().size();
+    for (int k = 0; k < visCount; ++k) {
+        QRect r = blockRect(k, visCount);
+        if (x >= r.left() && x <= r.right()) return k;
     }
     return -1;
 }
@@ -78,12 +104,21 @@ void PipelineWidget::paintEvent(QPaintEvent *)
     f.setPixelSize(11);
     p.setFont(f);
 
-    // Draw arrows between blocks
+    const QVector<int> vis = visibleIndices();
+    const int visCount = vis.size();
+    if (visCount == 0) return;
+
+    // Visible position of the dragged ORDER index, -1 when not dragging.
+    int dragVisPos = -1;
+    if (m_dragging && m_dragIndex >= 0)
+        dragVisPos = vis.indexOf(m_dragIndex);
+
+    // Arrows between consecutive visible blocks.
     p.setPen(QPen(palette().text().color(), 1));
-    for (int i = 0; i < SandboxState::Stage_COUNT - 1; ++i) {
-        if (m_dragging && i == m_dragIndex) continue;
-        QRect r1 = blockRect(i);
-        QRect r2 = blockRect(i + 1);
+    for (int k = 0; k < visCount - 1; ++k) {
+        if (m_dragging && k == dragVisPos) continue;
+        QRect r1 = blockRect(k, visCount);
+        QRect r2 = blockRect(k + 1, visCount);
         int y = kMargin + kBlockH / 2;
         int x1 = r1.right() + 1;
         int x2 = r2.left() - 1;
@@ -94,10 +129,10 @@ void PipelineWidget::paintEvent(QPaintEvent *)
         }
     }
 
-    for (int i = 0; i < SandboxState::Stage_COUNT; ++i) {
-        if (m_dragging && i == m_dragIndex) continue;
-        QRect r = blockRect(i);
-        int stage = m_order[i];
+    for (int k = 0; k < visCount; ++k) {
+        if (m_dragging && k == dragVisPos) continue;
+        QRect r = blockRect(k, visCount);
+        int stage = m_order[vis[k]];
         QColor c = (stage >= 0 && stage < SandboxState::Stage_COUNT)
                    ? kStageColors[stage] : QColor(128, 128, 128);
         p.setBrush(c);
@@ -107,9 +142,9 @@ void PipelineWidget::paintEvent(QPaintEvent *)
         p.drawText(r, Qt::AlignCenter, SandboxState::stageName(stage));
     }
 
-    // Draw dragged block on top
-    if (m_dragging && m_dragIndex >= 0) {
-        QRect r = blockRect(m_dragIndex);
+    // Draw dragged block on top.
+    if (m_dragging && dragVisPos >= 0) {
+        QRect r = blockRect(dragVisPos, visCount);
         int dx = m_dragCurrentX - (r.left() + m_dragOffsetX);
         r.translate(dx, 0);
         int stage = m_order[m_dragIndex];
@@ -127,7 +162,9 @@ void PipelineWidget::paintEvent(QPaintEvent *)
 
 void PipelineWidget::mousePressEvent(QMouseEvent *e)
 {
-    int idx = blockAtPos(e->x());
+    const QVector<int> vis = visibleIndices();
+    int k = blockAtPos(e->x());
+    int idx = (k >= 0 && k < vis.size()) ? vis[k] : -1;
     m_pressIndex = idx;
     m_movedDuringDrag = false;
     m_dragging = false;
@@ -135,7 +172,7 @@ void PipelineWidget::mousePressEvent(QMouseEvent *e)
     // Pinned prefix (Paulstretch) cannot be dragged - still clickable.
     if (idx >= kPinnedCount) {
         m_dragIndex = idx;
-        m_dragOffsetX = e->x() - blockRect(idx).left();
+        m_dragOffsetX = e->x() - blockRect(k, vis.size()).left();
         m_dragCurrentX = e->x();
         m_dragging = true;
         setCursor(Qt::ClosedHandCursor);
@@ -145,30 +182,38 @@ void PipelineWidget::mousePressEvent(QMouseEvent *e)
 
 void PipelineWidget::mouseMoveEvent(QMouseEvent *e)
 {
+    const QVector<int> vis = visibleIndices();
     if (!m_dragging) {
         // Hover feedback: pinned blocks read as clickable, not draggable.
-        int idx = blockAtPos(e->x());
+        int k = blockAtPos(e->x());
+        int idx = (k >= 0 && k < vis.size()) ? vis[k] : -1;
         setCursor(idx >= 0 && idx < kPinnedCount ? Qt::PointingHandCursor
                                                  : Qt::OpenHandCursor);
         return;
     }
     m_dragCurrentX = e->x();
 
-    int targetIdx = blockAtPos(e->x());
-    if (targetIdx < kPinnedCount) targetIdx = kPinnedCount;  // never displace the pin
-    if (targetIdx >= 0 && targetIdx != m_dragIndex) {
-        int stage = m_order[m_dragIndex];
-        if (targetIdx < m_dragIndex) {
-            for (int i = m_dragIndex; i > targetIdx; --i)
-                m_order[i] = m_order[i - 1];
-        } else {
-            for (int i = m_dragIndex; i < targetIdx; ++i)
-                m_order[i] = m_order[i + 1];
+    int kTarget = blockAtPos(e->x());
+    if (kTarget >= 0 && kTarget < vis.size()) {
+        int targetIdx = vis[kTarget];
+        if (targetIdx < kPinnedCount) targetIdx = kPinnedCount;  // never displace the pin
+        if (targetIdx != m_dragIndex) {
+            int stage = m_order[m_dragIndex];
+            if (targetIdx < m_dragIndex) {
+                for (int i = m_dragIndex; i > targetIdx; --i)
+                    m_order[i] = m_order[i - 1];
+            } else {
+                for (int i = m_dragIndex; i < targetIdx; ++i)
+                    m_order[i] = m_order[i + 1];
+            }
+            m_order[targetIdx] = stage;
+            m_dragIndex = targetIdx;
+            int newVisPos = visibleIndices().indexOf(targetIdx);
+            if (newVisPos >= 0)
+                m_dragOffsetX = e->x() - blockRect(newVisPos,
+                                                   vis.size()).left();
+            m_movedDuringDrag = true;
         }
-        m_order[targetIdx] = stage;
-        m_dragIndex = targetIdx;
-        m_dragOffsetX = e->x() - blockRect(targetIdx).left();
-        m_movedDuringDrag = true;
     }
     update();
 }
@@ -183,7 +228,9 @@ void PipelineWidget::mouseReleaseEvent(QMouseEvent *e)
 
     // A press+release on the same block with no reorder = a click:
     // jump the parameter panel to that effect instead of reordering.
-    int releaseIdx = blockAtPos(e->x());
+    const QVector<int> vis = visibleIndices();
+    int k = blockAtPos(e->x());
+    int releaseIdx = (k >= 0 && k < vis.size()) ? vis[k] : -1;
     if (!m_movedDuringDrag && m_pressIndex >= 0 && releaseIdx == m_pressIndex) {
         emit stageClicked(m_order[m_pressIndex]);
     } else if (wasDragging && m_movedDuringDrag) {

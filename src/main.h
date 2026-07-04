@@ -60,6 +60,7 @@ CAPI void sb_disableHotkeysTemporarily(bool disable);
 #define HOTKEY_MUTE_ON_MY_CLIENT "mute_on_my_client"
 #define HOTKEY_VOLUME_INCREASE "volume_increase"
 #define HOTKEY_VOLUME_DECREASE "volume_decrease"
+#define HOTKEY_MICFX_TOGGLE "micfx_toggle"
 
 #ifdef __cplusplus
 class TalkStateManager;

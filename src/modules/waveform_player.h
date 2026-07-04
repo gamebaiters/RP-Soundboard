@@ -40,6 +40,12 @@ public slots:
     // Show / hide the -10s / -5s / +5s / +10s skip buttons for this
     // channel. Driven by the global "Show skip buttons" setting.
     void setSkipButtonsVisible(bool on);
+    // Show / hide the tape-stop vinyl button. Driven by the global
+    // "Show vinyl (tape stop) button" setting.
+    void setVinylButtonVisible(bool on);
+    // Global position of the vinyl button's bottom-left corner - the
+    // wiring anchors the VinylPopup here.
+    QPoint vinylButtonGlobalPos() const;
     // Toggle the underlying SoundView between waveform (default) and
     // spectrogram-style heatmap. Driven by the global setting.
     void setSpectrogramView(bool on);
@@ -100,6 +106,8 @@ signals:
     void cropClearAllRequested();
     // Forwarded from SoundView: user right-button-dragged a loop area.
     void loopAreaSelected(double startSec, double endSec);
+    // Vinyl (tape stop) button clicked - the wiring opens the popup.
+    void vinylClicked();
 
 private slots:
     void onPlayPause();
@@ -120,6 +128,7 @@ private:
     QPushButton *m_loop;
     QPushButton *m_reverse;
     QPushButton *m_fwd10;
+    QPushButton *m_vinylBtn = nullptr;
     // Red "X" next to the filename label. Visible only when there is
     // something to clear (a filename loaded or a replay context). Hidden
     // when the channel is truly empty.

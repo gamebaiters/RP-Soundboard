@@ -128,6 +128,41 @@ public:
 	// after a re-play. endSec < 0 means "no end point".
 	void setSlotCropLive(int slot, double startSec, double endSec);
 
+	// --- Tape stop (vinyl brake, D1) ---
+	// tapeStop engages the brake (rate ramps 1 -> 0 over brakeMs); when
+	// it reaches zero the audio thread auto-pauses the slot. tapeRelease
+	// spins back up (and unpauses when fully stopped). tapeState returns
+	// TapeStop::Phase as int (0=Idle 1=Braking 2=Stopped 3=SpinUp
+	// 4=CatchUp) for the vinyl popup animation. All GUI-thread.
+	void tapeStop(int slot, float brakeMs);
+	void tapeRelease(int slot, float spinMs);
+	int  tapeState(int slot) const;
+	// Popup visibility: while armed the tape ring ingests history and
+	// the head tracks live (audibly transparent) so a backward drag
+	// right after opening the popup already has material under it.
+	void tapeArm(int slot, bool on);
+	// Scratch (DJ drag on the vinyl popup): begin on grab (resumes a
+	// tape-stopped slot), angular displacement streamed per mouse move
+	// as SECONDS of tape (position-locked servo - the audio tracks the
+	// disc 1:1, both directions), end = hand off -> spin back up.
+	void tapeScratchBegin(int slot);
+	// In-ring scratch first; overflow past the ring walls (forward
+	// beyond live / backward beyond the history) becomes an async
+	// decoder seek + tape scratchRebase() so the drag continues
+	// endlessly through the whole file (CDJ-style needle jumps at the
+	// walls, true scratch inside them).
+	void tapeScratchDelta(int slot, float deltaSeconds);
+	void tapeScratchEnd(int slot, float spinMs);
+
+	// Global EBU R128 loudness normalization (Q2). When on, every sound
+	// opens with the decoder's loudnorm filter (-16 LUFS single-pass)
+	// even if the per-cell "normalize" checkbox is off. Takes effect on
+	// the NEXT play of each sound. (Reverse mode still skips loudnorm -
+	// the per-chunk graph rebuild would restart its convergence.)
+	void setGlobalNormalize(bool on) {
+		m_globalNormalize.store(on, std::memory_order_relaxed);
+	}
+
 signals:
 	void onStartPlaying(int slot, bool preview, QString filename);
 	void onStopPlaying(int slot);
@@ -274,6 +309,58 @@ private:
 		std::atomic<double> pendingSeekSec{
 			std::numeric_limits<double>::quiet_NaN()};
 
+		// Scratch-seek deadband accumulator (seconds, output-domain).
+		// Forward drags at the live edge / backward drags beyond the
+		// ring history collect here and fire an async seek only past
+		// +/-0.25 s - hand jitter must never trigger a seek (a seek
+		// rebases the tape ring). GUI thread only.
+		float tapeSeekAccum = 0.0f;
+		// Needle-jump pacing: steady-clock ms of the last scrub seek.
+		// At most one seek + rebase fires per 120 ms; overflow keeps
+		// accumulating in between so fast drags make fewer, bigger
+		// hops instead of out-racing the async seek worker.
+		int64_t lastScrubMs = 0;
+		// Last committed scrub target (input seconds, GUI thread only,
+		// NaN = none this gesture). The seek worker NaNs pendingSeekSec
+		// when it COLLECTS a batch - during the slow FFmpeg scan a new
+		// hop would chain off the stale position cache (audio is still
+		// draining pre-seek content) and land BEHIND the in-flight
+		// target: a fast forward drag visibly jumped backward. Chaining
+		// off max(cache, lastScrubTarget) in the drag direction keeps
+		// the hop sequence monotone. Reset by tapeScratchBegin.
+		double lastScrubTargetSec = std::numeric_limits<double>::quiet_NaN();
+		// Direction (+1/-1, 0 = none) of the last fired hop: opposite-
+		// direction hops need 350 ms separation so wiggle strokes
+		// cancel in the accumulator instead of seek-storming both ways.
+		int lastScrubDir = 0;
+		// Natural-end defer deadline (steady ms, 0 = unarmed): a
+		// re-timing tape at EOF may play its remaining history for at
+		// most lag+1 s before the slot is allowed to end - without the
+		// cap a deep-lag CatchUp (drains at 0.3%) became an immortal
+		// silence-playing slot.
+		int64_t tapeEndDeferMs = 0;
+		// Cursor anchor for a scratch gesture: the audible file position
+		// at the instant the disc was grabbed. During the scratch the
+		// cursor = this + tapeHeadDisplacementSeconds()*speed, which
+		// follows the head's true file position even as backfill slides
+		// the ring across the whole file (the head-to-frontier lag stays
+		// pinned by the frontier trim and can't drive the cursor). NaN
+		// when no scratch is in progress. GUI/audio-thread read.
+		double scratchStartCursorSec = std::numeric_limits<double>::quiet_NaN();
+		// Release re-home ("resta indietro"): on a big BACKWARD scratch the
+		// frontier trim decouples the main decoder from the head (the
+		// decoder stays parked at the pre-scratch spot while the ring slides
+		// across the file via backfill). Releasing must resume forward from
+		// the NEEDLE, not snap back to the stranded decoder. tapeScratchEnd
+		// spins the flywheel up on the ring and fires an async prime-seek
+		// that re-homes the decoder to the ring's frontier file position.
+		// While this flag is set: (1) the cursor stays pinned to the head
+		// (scratchStartCursorSec + headDisplacement) instead of the stranded
+		// decoder formula; (2) the tape ingest is HELD so the stale
+		// pre-seek buffer is never spliced into the ring. Cleared by the
+		// seek worker at prime-commit (buffer refilled from the needle).
+		std::atomic<bool> tapePrimeSeek{false};
+
 		// Sidechain ducking. duckSource: when this slot is playing it
 		// attenuates every OTHER slot's output by duckOthersDb. duckGain:
 		// the smoothly attacked / released gain currently APPLIED to
@@ -284,6 +371,32 @@ private:
 		bool                duckSource       = false;
 		float               duckOthersDb     = -12.0f;
 		std::atomic<float>  duckGain         { 1.0f };
+
+		// ---- Backward-infinite vinyl backfill ----
+		// A dedicated decoder + a single-chunk handoff feed OLDER audio
+		// into the playback tape ring's oldest end, so backward scratch
+		// is unbounded while the ring stays a fixed 10 s. All decode work
+		// runs on m_backfillWorker; the audio thread only drains a ready
+		// chunk (try_lock, never blocks). See Sampler::backfillWorkerProc.
+		InputFile*          backfillFile = nullptr;   // worker-owned, lazy
+		QString             backfillPath;             // desired file (set by play)
+		QString             backfillOpenPath;         // worker-only: file open on
+		std::mutex          backfillMutex;            // guards the chunk
+		std::vector<float>  backfillChunkL, backfillChunkR;
+		std::atomic<int>    backfillChunkN { 0 };     // ready samples (0=none)
+		std::atomic<double> backfillNextFileSec { 0.0 }; // file pos of tape oldest
+		std::atomic<float>  backfillSpeed { 1.0f };
+		// Mirror the live FxPanel pitch + reverb onto the backfill decoder
+		// so backward-scratched history sounds like the forward stream. The
+		// backfill decoder is a SEPARATE InputFile; without these its output
+		// was dry / un-pitched, so scratching back into backfilled audio cut
+		// the effects out ("gli effetti si attivano in ritardo"). Speed is
+		// already matched via backfillSpeed. (The per-sample sandbox chain
+		// is not re-applied to backfill - only the decoder-graph FX.)
+		std::atomic<float>  backfillPitch  { 1.0f };
+		std::atomic<float>  backfillReverb { 0.0f };
+		std::atomic<bool>   backfillActive { false }; // scratch in progress
+		std::atomic<bool>   backfillAtStart { false };// reached file start
 
 		PlaybackSlot();
 		~PlaybackSlot();
@@ -324,6 +437,7 @@ private:
 	std::atomic<bool> m_localPlayback;
 	std::atomic<bool> m_muteMyself;
 	std::atomic<bool> m_earrapeProtection;
+	std::atomic<bool> m_globalNormalize{false};
 	float m_pitchFactor;
 	float m_speedFactor;
 	float m_intensityFactor;
@@ -354,6 +468,28 @@ private:
 	std::atomic<bool>       m_seekWorkerStarted{false};
 	void seekWorkerProc();
 	void startSeekWorker();
+
+	// ---- Backward-infinite vinyl backfill worker ----
+	// Decodes OLDER chunks off-thread for the actively-scratching slot
+	// and hands them to the audio thread (see PlaybackSlot backfill
+	// members). Started lazily on the first scratch; joined in shutdown.
+	std::thread             m_backfillWorker;
+	std::mutex              m_backfillMutex;
+	std::condition_variable m_backfillCv;
+	std::atomic<bool>       m_backfillStop{false};
+	std::atomic<bool>       m_backfillStarted{false};
+	std::atomic<int>        m_backfillSlot{-1};   // slot being scratched, -1=none
+	void backfillWorkerProc();
+	void startBackfillWorker();
+	// GUI-thread: begin / end a backfill session for a scratching slot.
+	void backfillBegin(int slot);
+	void backfillEnd(int slot);
+	// Re-home the main decoder to `frontierSec` (input seconds) so forward
+	// playback continues from where a backward scratch left the needle.
+	// Unlike seek() this never snap-resets the tape (the flywheel keeps
+	// spinning on the ring) and the commit preserves the tape/cursor state
+	// - it only repositions the decoder that feeds the ring frontier.
+	void primeSeekDecoder(int slot, double frontierSec);
 };
 
 

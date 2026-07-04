@@ -236,6 +236,12 @@ public:
 	void setShowSkipButtons(bool on);
 	inline bool getSpectrogramView() const { return m_spectrogramView; }
 	void setSpectrogramView(bool on);
+	inline bool getShowVinylButton() const { return m_showVinylButton; }
+	void setShowVinylButton(bool on);
+	inline bool getMicFxFeatureEnabled() const { return m_micFxFeatureEnabled; }
+	void setMicFxFeatureEnabled(bool on);
+	inline bool getLoudnessNormalize() const { return m_loudnessNormalize; }
+	void setLoudnessNormalize(bool on);
 
 	inline bool getResetChVolume() const { return m_resetChVolume; }
 	void setResetChVolume(bool on);
@@ -329,6 +335,9 @@ private:
 	bool m_verticalMeter        = false;
 	bool m_showSkipButtons      = true;
 	bool m_spectrogramView      = false;
+	bool m_showVinylButton      = true;
+	bool m_micFxFeatureEnabled  = true;
+	bool m_loudnessNormalize    = false;
 
 	bool m_resetChVolume     = true;
 	bool m_resetChFx         = true;

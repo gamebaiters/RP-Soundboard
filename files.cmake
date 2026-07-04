@@ -170,6 +170,17 @@ set(sources
 	src/dsp/TransientShaper.cpp
 	src/dsp/DynEq.h
 	src/dsp/DynEq.cpp
+	src/dsp/PitchShiftGrain.h
+	src/dsp/VoiceFx.h
+	src/dsp/VoiceFx.cpp
+	src/dsp/BassEnhancer.h
+	src/dsp/BinauralBeats.h
+	src/dsp/TapeStop.h
+	src/dsp/LfoMatrix.h
+	src/dsp/ConvolutionReverb.h
+	src/dsp/ConvolutionReverb.cpp
+	src/MicFx.h
+	src/MicFx.cpp
 
 	# --- Sandbox per-channel UI ---
 	src/modules/channel_meter.h
@@ -188,4 +199,8 @@ set(sources
 	src/modules/export_progress_dialog.cpp
 	src/modules/pipeline_widget.h
 	src/modules/pipeline_widget.cpp
+	src/modules/vinyl_popup.h
+	src/modules/vinyl_popup.cpp
+	src/modules/mic_channel.h
+	src/modules/mic_channel.cpp
 )

@@ -51,6 +51,9 @@ public:
     bool verticalMeter() const;
     bool showSkipButtons() const;
     bool spectrogramView() const;
+    bool showVinylButton() const;
+    bool micFxFeatureEnabled() const;
+    bool loudnessNormalize() const;
 
     // Reset behaviour flags
     bool resetChVolume() const;
@@ -94,6 +97,12 @@ public slots:
     void setVerticalMeter(bool on);
     void setShowSkipButtons(bool on);
     void setSpectrogramView(bool on);
+    void setShowVinylButton(bool on);
+    void setMicFxFeatureEnabled(bool on);
+    void setLoudnessNormalize(bool on);
+    // Sandbox module kill-switch: push the current global stage mask
+    // into the checkboxes (bit set = module enabled).
+    void setSandboxModuleMask(quint32 mask);
 
     void setResetChVolume(bool on);
     void setResetChFx(bool on);
@@ -153,6 +162,12 @@ signals:
     void verticalMeterChanged(bool);
     void showSkipButtonsChanged(bool);
     void spectrogramViewChanged(bool);
+    void showVinylButtonChanged(bool);
+    void micFxFeatureEnabledChanged(bool);
+    void loudnessNormalizeChanged(bool);
+    // A sandbox module was enabled/disabled process-wide (stage =
+    // SandboxState::DspStage value).
+    void sandboxModuleToggled(int stage, bool enabled);
 
     void resetChVolumeChanged(bool);
     void resetChFxChanged(bool);
@@ -224,6 +239,13 @@ private:
     QCheckBox   *m_verticalMeter        = nullptr;
     QCheckBox   *m_showSkipButtons      = nullptr;
     QCheckBox   *m_spectrogramView      = nullptr;
+    QCheckBox   *m_showVinylButton      = nullptr;
+    QCheckBox   *m_micFxFeature         = nullptr;
+    QCheckBox   *m_loudnessNormalize    = nullptr;
+
+    // One checkbox per DSP stage (index = DspStage). Unchecked =
+    // module bypassed everywhere AND hidden from the sandbox UI.
+    QCheckBox   *m_moduleChecks[32]     = {};
 
     // Reset behaviour
     QCheckBox   *m_resetChVolume     = nullptr;

@@ -6,6 +6,8 @@
 #include "icon_factory.h"
 #include "../ExpandableSection.h"
 #include "../dsp/EqRack.h"
+#include "../dsp/LfoMatrix.h"
+#include "../dsp/SlotDsp.h"
 #include "eq_band_widget.h"
 
 #include <QVBoxLayout>
@@ -27,9 +29,15 @@
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QScreen>
 #include <QGuiApplication>
 #include <QSettings>
+#include <QFileDialog>
+#include <QFile>
+#include <QTimer>
+#include <QCoreApplication>
+#include <QShowEvent>
 #include <cmath>
 
 namespace {
@@ -110,9 +118,11 @@ const ModeMap kModes[] = {
 constexpr int kModeCount = sizeof(kModes) / sizeof(kModes[0]);
 }
 
-ChannelSandboxDialog::ChannelSandboxDialog(int channelId, QWidget *parent)
+ChannelSandboxDialog::ChannelSandboxDialog(int channelId, QWidget *parent,
+                                           bool micMode)
     : QDialog(parent)
     , m_channelId(channelId)
+    , m_micMode(micMode)
 {
     setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     setProperty("isGBSoundboard", true);
@@ -153,6 +163,10 @@ void ChannelSandboxDialog::setChannelTitle(const QString &title)
 
 void ChannelSandboxDialog::refreshTitle()
 {
+    if (m_micMode) {
+        setWindowTitle(tr("Microphone - Voice FX"));
+        return;
+    }
     QString base = tr("Channel %1").arg(m_channelId + 1);
     if (!m_channelTitle.isEmpty() && m_channelTitle != base)
         base = QString("%1 (%2)").arg(m_channelTitle, base);
@@ -182,7 +196,86 @@ void ChannelSandboxDialog::setState(const SandboxState &s)
 void ChannelSandboxDialog::pushChange()
 {
     if (m_loading) return;
+    autoRecordTick();
     emit stateChanged(m_state);
+}
+
+void ChannelSandboxDialog::showEvent(QShowEvent *e)
+{
+    refreshModuleVisibility();
+    QDialog::showEvent(e);
+}
+
+void ChannelSandboxDialog::refreshModuleVisibility()
+{
+    // Bits SET in hidden = stage removed from the view. Combine the
+    // Settings global kill switch with the micMode curated subset
+    // (Spatial stays available on the mic - Leia 8D voice orbit).
+    quint32 hidden = ~SlotDsp::globalStageMask();
+    if (m_micMode) {
+        hidden |= (1u << SandboxState::Stage_Paulstretch) |
+                  (1u << SandboxState::Stage_Delay) |
+                  (1u << SandboxState::Stage_Binaural);
+    }
+    hidden &= (1u << SandboxState::Stage_COUNT) - 1u;
+
+    for (int st = 0; st < SandboxState::Stage_COUNT; ++st) {
+        if (!m_stageSection[st]) continue;
+        m_stageSection[st]->setVisible(!((hidden >> st) & 1u));
+    }
+    if (m_pipeline) m_pipeline->setHiddenStages(hidden);
+
+    // Left-column groups for stages without accordions.
+    bool spatialOff = (hidden >> SandboxState::Stage_Spatial) & 1u;
+    if (spatialOff) {
+        if (m_modeWidget) m_modeWidget->hide();
+        if (m_panGroup)   m_panGroup->hide();
+        if (m_hrtfGroup)  m_hrtfGroup->hide();
+        if (m_leiaGroup)  m_leiaGroup->hide();
+    } else {
+        if (m_modeWidget) m_modeWidget->show();
+        applyModeVisibility();   // restores the mode-dependent groups
+    }
+    bool reverbOff = (hidden >> SandboxState::Stage_Reverb) & 1u;
+    if (m_reverbGroup) m_reverbGroup->setVisible(!reverbOff);
+    bool eqOff = (hidden >> SandboxState::Stage_EQ) & 1u;
+    if (m_eqBox) m_eqBox->setVisible(!eqOff);
+}
+
+void ChannelSandboxDialog::autoRecordTick()
+{
+    if (!m_autoRecording) return;
+    qint64 now = m_autoClock.elapsed();
+    // 30 Hz throttle: rapid slider drags collapse to ~33 ms snapshots.
+    if (now - m_autoLastSnapMs < 33) {
+        // Refresh the LAST snapshot instead of dropping the change so
+        // the final value of a fast drag is never lost.
+        if (!m_autoEvents.isEmpty())
+            m_autoEvents.last().second = m_state.toJson();
+        return;
+    }
+    m_autoLastSnapMs = now;
+    m_autoEvents.push_back(qMakePair(now, m_state.toJson()));
+    updateAutoStatus();
+}
+
+void ChannelSandboxDialog::updateAutoStatus()
+{
+    if (!m_autoStatus) return;
+    if (m_autoRecBtn)  m_autoRecBtn->setText(m_autoRecording ? tr("Stop rec") : tr("Record"));
+    if (m_autoPlayBtn) m_autoPlayBtn->setText(m_autoPlaying ? tr("Stop") : tr("Play"));
+    if (m_autoRecording) {
+        m_autoStatus->setText(tr("Recording... %1 snapshots").arg(m_autoEvents.size()));
+    } else if (m_autoPlaying) {
+        m_autoStatus->setText(tr("Playing (%1 snapshots)").arg(m_autoEvents.size()));
+    } else if (m_autoEvents.isEmpty()) {
+        m_autoStatus->setText(tr("Empty"));
+    } else {
+        qint64 lenMs = m_autoEvents.last().first;
+        m_autoStatus->setText(tr("%1 snapshots, %2 s")
+            .arg(m_autoEvents.size())
+            .arg(QString::number(lenMs / 1000.0, 'f', 1)));
+    }
 }
 
 namespace {
@@ -266,6 +359,7 @@ void ChannelSandboxDialog::buildUi()
     // independently scrollable box.
     auto *modeWidget = new QWidget(this);
     modeWidget->setLayout(modeSection);
+    m_modeWidget = modeWidget;
 
     // ===== Mid row: Spatial column | EQ column =====
     auto *midRow = new QHBoxLayout;
@@ -377,9 +471,17 @@ void ChannelSandboxDialog::buildUi()
             "HRTF placement OUT of the head by adding subtle room\n"
             "reflections. Independent from the per-button FxPanel\n"
             "reverb (which is a sound-shaping wet, not a spatialiser)."));
+        m_ambienceRow = r2;
         l->addWidget(r2);
     }
     spatialCol->addWidget(m_hrtfGroup, 1);
+
+    // NOTE: the reverb ENGINE settings (algorithmic vs convolution +
+    // IR choice) intentionally do NOT live in this dialog - the reverb
+    // wet is a channel-wide control outside the sandbox, so its engine
+    // settings sit behind the gear button next to the FxPanel Reverb
+    // slider (see main_page_wiring). The reverbConv* fields still ride
+    // in SandboxState for serialization.
 
     // Leia engine room / tone controls (visible only when the Leia
     // engine is selected for a 3D mode).
@@ -799,6 +901,20 @@ void ChannelSandboxDialog::buildUi()
         "Mono fold-down collapses the stereo image to one centred\n"
         "signal. Handy for compatibility checks or to feed the spatial\n"
         "stage from a clean mono source."), m_dspGroup));
+    monoRow->addSpacing(16);
+    m_failsafeEnable = new QCheckBox(tr("Failsafe anti-clip"), m_dspGroup);
+    m_failsafeEnable->setToolTip(tr(
+        "Guarantee: with this ON, NO effect combination can ever clip\n"
+        "the output. A dedicated true-peak brickwall limiter (-1 dBFS,\n"
+        "1 ms lookahead) sits at the very end of the chain and catches\n"
+        "EQ boosts, resonant filters, stacked drives - transparently\n"
+        "when the level is fine, instantly when it is not."));
+    monoRow->addWidget(m_failsafeEnable);
+    monoRow->addWidget(new HelpBubble(tr(
+        "The failsafe is separate from the Limiter module: that one is\n"
+        "a creative tool you shape, this one is a fixed safety ceiling\n"
+        "applied after EVERYTHING (effects, mono fold, LFO, tape stop)."),
+        m_dspGroup));
     monoRow->addStretch(1);
     dspGroupLay->addLayout(monoRow);
 
@@ -1446,6 +1562,384 @@ void ChannelSandboxDialog::buildUi()
     }
     dspScrollLay->addWidget(compScSection);
 
+    // ---- Voice FX macro (10 individually toggleable sub-effects) ----
+    auto *voiceFxSection = new ExpandableSection(tr("Voice FX (10 effects)"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *hdr = new QHBoxLayout;
+        m_vfxEnable = new QCheckBox(tr("Enable Voice FX"));
+        m_vfxEnable->setToolTip(tr(
+            "Macro-module bundling 10 classic effects in one pipeline\n"
+            "stage: Autotune, Vocoder, Ring Mod, Tremolo, Vibrato,\n"
+            "Auto-Wah, Formant, Shimmer, Reverse Delay, Exciter.\n"
+            "Each sub-effect has its own switch; disabled subs cost\n"
+            "zero CPU. Internal order is fixed (pitch -> spectral ->\n"
+            "modulation -> space)."));
+        hdr->addWidget(m_vfxEnable);
+        hdr->addStretch(1);
+        lay->addLayout(hdr);
+        QSlider *s = nullptr; QLabel *lbl = nullptr;
+
+        // Autotune
+        {
+            auto *box = new QGroupBox(tr("Autotune"));
+            auto *bl = new QVBoxLayout(box);
+            m_vfxTuneEnable = new QCheckBox(tr("Enable"));
+            m_vfxTuneEnable->setToolTip(tr(
+                "Pitch correction: snaps the detected pitch to the\n"
+                "nearest note of the chosen scale. Strength 100% +\n"
+                "fast retune = the classic hard T-Pain snap."));
+            bl->addWidget(m_vfxTuneEnable);
+            auto *r = buildSliderRow(nullptr, tr("Strength"), 0, 100, 100, "%", s, lbl);
+            m_vfxTuneStrength = s; m_vfxTuneStrengthLabel = lbl; bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Retune"), 1, 200, 20, " ms", s, lbl);
+            m_vfxTuneSpeed = s; m_vfxTuneSpeedLabel = lbl; bl->addWidget(r);
+            auto *sc = new QHBoxLayout;
+            sc->addWidget(new QLabel(tr("Scale:")));
+            m_vfxTuneScale = new QComboBox;
+            m_vfxTuneScale->addItem(tr("Chromatic"));
+            m_vfxTuneScale->addItem(tr("Major"));
+            m_vfxTuneScale->addItem(tr("Minor"));
+            sc->addWidget(m_vfxTuneScale);
+            sc->addWidget(new QLabel(tr("Key:")));
+            m_vfxTuneKey = new QComboBox;
+            static const char *kKeys[12] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
+            for (auto *k : kKeys) m_vfxTuneKey->addItem(QString::fromLatin1(k));
+            sc->addWidget(m_vfxTuneKey);
+            sc->addStretch(1);
+            bl->addLayout(sc);
+            lay->addWidget(box);
+        }
+        // Vocoder
+        {
+            auto *box = new QGroupBox(tr("Vocoder"));
+            auto *bl = new QVBoxLayout(box);
+            m_vfxVocEnable = new QCheckBox(tr("Enable"));
+            m_vfxVocEnable->setToolTip(tr(
+                "16-band vocoder: your audio modulates an internal\n"
+                "carrier (saw = classic robot, noise = whisper-bot)."));
+            bl->addWidget(m_vfxVocEnable);
+            auto *cr = new QHBoxLayout;
+            cr->addWidget(new QLabel(tr("Carrier:")));
+            m_vfxVocCarrier = new QComboBox;
+            m_vfxVocCarrier->addItem(tr("Saw"));
+            m_vfxVocCarrier->addItem(tr("Noise"));
+            cr->addWidget(m_vfxVocCarrier);
+            cr->addStretch(1);
+            bl->addLayout(cr);
+            auto *r = buildSliderRow(nullptr, tr("Pitch"), 50, 400, 110, " Hz", s, lbl);
+            m_vfxVocPitch = s; m_vfxVocPitchLabel = lbl; bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Mix"), 0, 100, 100, "%", s, lbl);
+            m_vfxVocMix = s; m_vfxVocMixLabel = lbl; bl->addWidget(r);
+            lay->addWidget(box);
+        }
+        // Ring modulator
+        {
+            auto *box = new QGroupBox(tr("Ring Modulator"));
+            auto *bl = new QVBoxLayout(box);
+            m_vfxRingEnable = new QCheckBox(tr("Enable"));
+            m_vfxRingEnable->setToolTip(tr(
+                "Multiplies the signal by a sine oscillator - the Dalek\n"
+                "voice. Low frequencies = growl, high = metallic bells."));
+            bl->addWidget(m_vfxRingEnable);
+            auto *r = buildSliderRow(nullptr, tr("Freq"), 20, 2000, 440, " Hz", s, lbl);
+            m_vfxRingFreq = s; m_vfxRingFreqLabel = lbl; bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Mix"), 0, 100, 100, "%", s, lbl);
+            m_vfxRingMix = s; m_vfxRingMixLabel = lbl; bl->addWidget(r);
+            lay->addWidget(box);
+        }
+        // Tremolo
+        {
+            auto *box = new QGroupBox(tr("Tremolo"));
+            auto *bl = new QVBoxLayout(box);
+            m_vfxTremEnable = new QCheckBox(tr("Enable"));
+            bl->addWidget(m_vfxTremEnable);
+            auto *r = buildSliderRow(nullptr, tr("Rate"), 1, 200, 50, "", s, lbl);
+            m_vfxTremRate = s; m_vfxTremRateLabel = lbl;
+            m_vfxTremRateLabel->setText("5.0 Hz");
+            bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Depth"), 0, 100, 80, "%", s, lbl);
+            m_vfxTremDepth = s; m_vfxTremDepthLabel = lbl; bl->addWidget(r);
+            auto *sr = new QHBoxLayout;
+            sr->addWidget(new QLabel(tr("Shape:")));
+            m_vfxTremShape = new QComboBox;
+            m_vfxTremShape->addItem(tr("Sine"));
+            m_vfxTremShape->addItem(tr("Square"));
+            sr->addWidget(m_vfxTremShape);
+            sr->addStretch(1);
+            bl->addLayout(sr);
+            lay->addWidget(box);
+        }
+        // Vibrato
+        {
+            auto *box = new QGroupBox(tr("Vibrato"));
+            auto *bl = new QVBoxLayout(box);
+            m_vfxVibEnable = new QCheckBox(tr("Enable"));
+            bl->addWidget(m_vfxVibEnable);
+            auto *r = buildSliderRow(nullptr, tr("Rate"), 1, 140, 50, "", s, lbl);
+            m_vfxVibRate = s; m_vfxVibRateLabel = lbl;
+            m_vfxVibRateLabel->setText("5.0 Hz");
+            bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Depth"), 0, 100, 50, "%", s, lbl);
+            m_vfxVibDepth = s; m_vfxVibDepthLabel = lbl; bl->addWidget(r);
+            lay->addWidget(box);
+        }
+        // Auto-wah
+        {
+            auto *box = new QGroupBox(tr("Auto-Wah"));
+            auto *bl = new QVBoxLayout(box);
+            m_vfxWahEnable = new QCheckBox(tr("Enable"));
+            m_vfxWahEnable->setToolTip(tr(
+                "Envelope-driven bandpass sweep: the louder the input,\n"
+                "the higher the filter sweeps. The funk pedal."));
+            bl->addWidget(m_vfxWahEnable);
+            auto *r = buildSliderRow(nullptr, tr("Sensitivity"), 0, 100, 70, "%", s, lbl);
+            m_vfxWahSens = s; m_vfxWahSensLabel = lbl; bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Min freq"), 100, 1000, 350, " Hz", s, lbl);
+            m_vfxWahMin = s; m_vfxWahMinLabel = lbl; bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Max freq"), 1000, 6000, 2500, " Hz", s, lbl);
+            m_vfxWahMax = s; m_vfxWahMaxLabel = lbl; bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Q"), 10, 120, 40, "", s, lbl);
+            m_vfxWahQ = s; m_vfxWahQLabel = lbl; m_vfxWahQLabel->setText("4.0");
+            bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Mix"), 0, 100, 100, "%", s, lbl);
+            m_vfxWahMix = s; m_vfxWahMixLabel = lbl; bl->addWidget(r);
+            lay->addWidget(box);
+        }
+        // Formant
+        {
+            auto *box = new QGroupBox(tr("Formant Shifter"));
+            auto *bl = new QVBoxLayout(box);
+            m_vfxFormEnable = new QCheckBox(tr("Enable"));
+            m_vfxFormEnable->setToolTip(tr(
+                "Warps the spectral envelope WITHOUT changing pitch or\n"
+                "speed: + = helium/child, - = giant. Combine with pitch\n"
+                "for full voice-character redesign."));
+            bl->addWidget(m_vfxFormEnable);
+            auto *r = buildSliderRow(nullptr, tr("Shift"), -120, 120, 0, "", s, lbl);
+            m_vfxFormShift = s; m_vfxFormShiftLabel = lbl;
+            m_vfxFormShiftLabel->setText("0.0 st");
+            bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Mix"), 0, 100, 100, "%", s, lbl);
+            m_vfxFormMix = s; m_vfxFormMixLabel = lbl; bl->addWidget(r);
+            lay->addWidget(box);
+        }
+        // Exciter
+        {
+            auto *box = new QGroupBox(tr("Exciter"));
+            auto *bl = new QVBoxLayout(box);
+            m_vfxExcEnable = new QCheckBox(tr("Enable"));
+            m_vfxExcEnable->setToolTip(tr(
+                "Adds saturated harmonics above the split frequency -\n"
+                "air and presence without EQ boost."));
+            bl->addWidget(m_vfxExcEnable);
+            auto *r = buildSliderRow(nullptr, tr("Freq"), 1000, 8000, 3000, " Hz", s, lbl);
+            m_vfxExcFreq = s; m_vfxExcFreqLabel = lbl; bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Drive"), 10, 100, 20, "", s, lbl);
+            m_vfxExcDrive = s; m_vfxExcDriveLabel = lbl;
+            m_vfxExcDriveLabel->setText("2.0");
+            bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Mix"), 0, 100, 30, "%", s, lbl);
+            m_vfxExcMix = s; m_vfxExcMixLabel = lbl; bl->addWidget(r);
+            lay->addWidget(box);
+        }
+        // Reverse delay
+        {
+            auto *box = new QGroupBox(tr("Reverse Delay"));
+            auto *bl = new QVBoxLayout(box);
+            m_vfxRevEnable = new QCheckBox(tr("Enable"));
+            m_vfxRevEnable->setToolTip(tr(
+                "Grain-reversed echo: every repeat plays BACKWARDS.\n"
+                "The live take on the classic reverse-reverb trailer\n"
+                "effect."));
+            bl->addWidget(m_vfxRevEnable);
+            auto *r = buildSliderRow(nullptr, tr("Time"), 100, 2000, 500, " ms", s, lbl);
+            m_vfxRevTime = s; m_vfxRevTimeLabel = lbl; bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Feedback"), 0, 90, 35, "%", s, lbl);
+            m_vfxRevFeedback = s; m_vfxRevFeedbackLabel = lbl; bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Mix"), 0, 100, 40, "%", s, lbl);
+            m_vfxRevMix = s; m_vfxRevMixLabel = lbl; bl->addWidget(r);
+            lay->addWidget(box);
+        }
+        // Shimmer
+        {
+            auto *box = new QGroupBox(tr("Shimmer"));
+            auto *bl = new QVBoxLayout(box);
+            m_vfxShimEnable = new QCheckBox(tr("Enable"));
+            m_vfxShimEnable->setToolTip(tr(
+                "Reverb tail whose feedback is pitch-shifted +12 (or +7)\n"
+                "semitones on every pass - the rising angelic wash of\n"
+                "ambient records."));
+            bl->addWidget(m_vfxShimEnable);
+            auto *r = buildSliderRow(nullptr, tr("Mix"), 0, 100, 30, "%", s, lbl);
+            m_vfxShimMix = s; m_vfxShimMixLabel = lbl; bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Feedback"), 0, 90, 50, "%", s, lbl);
+            m_vfxShimFeedback = s; m_vfxShimFeedbackLabel = lbl; bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Damping"), 0, 100, 40, "%", s, lbl);
+            m_vfxShimDamp = s; m_vfxShimDampLabel = lbl; bl->addWidget(r);
+            auto *pr = new QHBoxLayout;
+            pr->addWidget(new QLabel(tr("Shift:")));
+            m_vfxShimPitch = new QComboBox;
+            m_vfxShimPitch->addItem(tr("+12 st (octave)"));
+            m_vfxShimPitch->addItem(tr("+7 st (fifth)"));
+            pr->addWidget(m_vfxShimPitch);
+            pr->addStretch(1);
+            bl->addLayout(pr);
+            lay->addWidget(box);
+        }
+        voiceFxSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(voiceFxSection);
+
+    // ---- Bass Enhancer ----
+    auto *bassEnhSection = new ExpandableSection(tr("Bass Enhancer"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *hdr = new QHBoxLayout;
+        m_bassEnhEnable = new QCheckBox(tr("Enable Bass Enhancer"));
+        m_bassEnhEnable->setToolTip(tr(
+            "Psychoacoustic bass: generates harmonics from the sub band\n"
+            "so small speakers and earbuds 'hear' low end they cannot\n"
+            "physically reproduce. On real subwoofers it adds weight\n"
+            "and growl instead of mud."));
+        hdr->addWidget(m_bassEnhEnable);
+        hdr->addStretch(1);
+        lay->addLayout(hdr);
+        QSlider *s = nullptr; QLabel *lbl = nullptr;
+        auto *r = buildSliderRow(nullptr, tr("Crossover"), 60, 300, 120, " Hz", s, lbl);
+        m_bassEnhFreq = s; m_bassEnhFreqLabel = lbl; lay->addWidget(r);
+        r = buildSliderRow(nullptr, tr("Drive"), 10, 100, 30, "", s, lbl);
+        m_bassEnhDrive = s; m_bassEnhDriveLabel = lbl;
+        m_bassEnhDriveLabel->setText("3.0");
+        lay->addWidget(r);
+        r = buildSliderRow(nullptr, tr("Mix"), 0, 100, 40, "%", s, lbl);
+        m_bassEnhMix = s; m_bassEnhMixLabel = lbl; lay->addWidget(r);
+        bassEnhSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(bassEnhSection);
+
+    // ---- Binaural beats ----
+    auto *binauralSection = new ExpandableSection(tr("Binaural Beats"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *hdr = new QHBoxLayout;
+        m_binauralEnable = new QCheckBox(tr("Enable Binaural Beats"));
+        m_binauralEnable->setToolTip(tr(
+            "Lays a pure sine pair UNDER the audio: base frequency to\n"
+            "the left ear, base+beat to the right. The brain perceives\n"
+            "a pulse at the beat rate that neither ear receives.\n"
+            "Headphones only. Delta <4 Hz, theta 4-8, alpha 8-13,\n"
+            "beta 13-30."));
+        hdr->addWidget(m_binauralEnable);
+        hdr->addStretch(1);
+        lay->addLayout(hdr);
+        QSlider *s = nullptr; QLabel *lbl = nullptr;
+        auto *r = buildSliderRow(nullptr, tr("Base"), 80, 600, 200, " Hz", s, lbl);
+        m_binauralBase = s; m_binauralBaseLabel = lbl; lay->addWidget(r);
+        r = buildSliderRow(nullptr, tr("Beat"), 5, 400, 70, "", s, lbl);
+        m_binauralBeat = s; m_binauralBeatLabel = lbl;
+        m_binauralBeatLabel->setText("7.0 Hz");
+        lay->addWidget(r);
+        r = buildSliderRow(nullptr, tr("Level"), -60, -6, -24, " dB", s, lbl);
+        m_binauralLevel = s; m_binauralLevelLabel = lbl; lay->addWidget(r);
+        binauralSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(binauralSection);
+
+    // ---- LFO modulation matrix (M1) ----
+    auto *lfoSection = new ExpandableSection(tr("LFO Matrix"), 200, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *info = new QLabel(tr(
+            "Two free-running LFOs, four routing rows. Each route adds\n"
+            "lfo x amount on top of the target's slider value - sliders\n"
+            "are never moved, disable a route to restore them instantly."));
+        info->setStyleSheet("color: #8aa6c0; font-size: 10px;");
+        info->setWordWrap(true);
+        lay->addWidget(info);
+        QSlider *s = nullptr; QLabel *lbl = nullptr;
+        for (int i = 0; i < 2; ++i) {
+            auto *box = new QGroupBox(tr("LFO %1").arg(i + 1));
+            auto *bl = new QVBoxLayout(box);
+            m_lfoEnable[i] = new QCheckBox(tr("Enable"));
+            bl->addWidget(m_lfoEnable[i]);
+            auto *r = buildSliderRow(nullptr, tr("Rate"), 5, 2000,
+                                     i == 0 ? 100 : 25, "", s, lbl);
+            m_lfoRate[i] = s; m_lfoRateLabel[i] = lbl;
+            m_lfoRateLabel[i]->setText(i == 0 ? "1.00 Hz" : "0.25 Hz");
+            bl->addWidget(r);
+            auto *sr = new QHBoxLayout;
+            sr->addWidget(new QLabel(tr("Shape:")));
+            m_lfoShapeBox[i] = new QComboBox;
+            m_lfoShapeBox[i]->addItem(tr("Sine"));
+            m_lfoShapeBox[i]->addItem(tr("Triangle"));
+            m_lfoShapeBox[i]->addItem(tr("Square"));
+            m_lfoShapeBox[i]->addItem(tr("Sample & Hold"));
+            sr->addWidget(m_lfoShapeBox[i]);
+            sr->addStretch(1);
+            bl->addLayout(sr);
+            lay->addWidget(box);
+        }
+        for (int i = 0; i < 4; ++i) {
+            auto *box = new QGroupBox(tr("Route %1").arg(i + 1));
+            auto *bl = new QVBoxLayout(box);
+            auto *tr1 = new QHBoxLayout;
+            tr1->addWidget(new QLabel(tr("LFO:")));
+            m_lfoRouteLfoBox[i] = new QComboBox;
+            m_lfoRouteLfoBox[i]->addItem(QStringLiteral("LFO 1"));
+            m_lfoRouteLfoBox[i]->addItem(QStringLiteral("LFO 2"));
+            tr1->addWidget(m_lfoRouteLfoBox[i]);
+            tr1->addWidget(new QLabel(tr("Target:")));
+            m_lfoRouteTargetBox[i] = new QComboBox;
+            for (int t = 0; t < LfoMatrix::Target_COUNT; ++t)
+                m_lfoRouteTargetBox[i]->addItem(
+                    QCoreApplication::translate("LfoTargets",
+                                                LfoMatrix::targetName(t)));
+            tr1->addWidget(m_lfoRouteTargetBox[i], 1);
+            bl->addLayout(tr1);
+            auto *r = buildSliderRow(nullptr, tr("Amount"), -100, 100, 50, "%", s, lbl);
+            m_lfoRouteAmount[i] = s; m_lfoRouteAmountLabel[i] = lbl;
+            bl->addWidget(r);
+            lay->addWidget(box);
+        }
+        lfoSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(lfoSection);
+
+    // ---- FX automation recorder (M3) ----
+    auto *autoSection = new ExpandableSection(tr("FX Automation"), 160, dspScrollContent);
+    {
+        auto *lay = new QVBoxLayout;
+        auto *info = new QLabel(tr(
+            "Records every knob move you make (30 snapshots/s max) and\n"
+            "replays them with the same timing. Save/load as .json."));
+        info->setStyleSheet("color: #8aa6c0; font-size: 10px;");
+        info->setWordWrap(true);
+        lay->addWidget(info);
+        auto *row = new QHBoxLayout;
+        m_autoRecBtn  = new QPushButton(tr("Record"));
+        m_autoPlayBtn = new QPushButton(tr("Play"));
+        m_autoLoopChk = new QCheckBox(tr("Loop"));
+        row->addWidget(m_autoRecBtn);
+        row->addWidget(m_autoPlayBtn);
+        row->addWidget(m_autoLoopChk);
+        row->addStretch(1);
+        lay->addLayout(row);
+        auto *row2 = new QHBoxLayout;
+        m_autoSaveBtn = new QPushButton(tr("Save..."));
+        m_autoLoadBtn = new QPushButton(tr("Load..."));
+        row2->addWidget(m_autoSaveBtn);
+        row2->addWidget(m_autoLoadBtn);
+        row2->addStretch(1);
+        lay->addLayout(row2);
+        m_autoStatus = new QLabel(tr("Empty"));
+        m_autoStatus->setStyleSheet("color: #8aa6c0; font-size: 10px;");
+        lay->addWidget(m_autoStatus);
+        autoSection->setContentLayout(*lay);
+    }
+    dspScrollLay->addWidget(autoSection);
+    autoSection->setPersistenceKey(QStringLiteral("sandbox_automation"));
+
     // Map each DspStage to its accordion panel. EQ, Spatial and Reverb
     // stay nullptr - their controls live in the left column.
     m_stageSection[SandboxState::Stage_Paulstretch] = stretchSection;
@@ -1463,6 +1957,28 @@ void ChannelSandboxDialog::buildUi()
     m_stageSection[SandboxState::Stage_DeEsser]          = deessSection;
     m_stageSection[SandboxState::Stage_TransientShaper]  = transSection;
     m_stageSection[SandboxState::Stage_DynEq]            = dynEqSection;
+    m_stageSection[SandboxState::Stage_VoiceFx]          = voiceFxSection;
+    m_stageSection[SandboxState::Stage_BassEnh]          = bassEnhSection;
+    m_stageSection[SandboxState::Stage_Binaural]         = binauralSection;
+
+    // micMode: curated subset - hide the stages that make no sense on
+    // a live mic stream (MicFx::sanitize forces them off anyway).
+    // Spatial (incl. the Leia 8D engine) IS available on the mic: the
+    // whole left spatial column stays, so the user can orbit their own
+    // voice around the listeners.
+    if (m_micMode) {
+        if (m_stageSection[SandboxState::Stage_Paulstretch])
+            m_stageSection[SandboxState::Stage_Paulstretch]->hide();
+        if (m_stageSection[SandboxState::Stage_Delay])
+            m_stageSection[SandboxState::Stage_Delay]->hide();
+        if (m_stageSection[SandboxState::Stage_Binaural])
+            m_stageSection[SandboxState::Stage_Binaural]->hide();
+        if (m_pipeline)
+            m_pipeline->setHiddenStages(
+                (1u << SandboxState::Stage_Paulstretch) |
+                (1u << SandboxState::Stage_Delay) |
+                (1u << SandboxState::Stage_Binaural));
+    }
 
     // Remember which DSP panels the user left open/closed so re-opening
     // the sandbox does not force them to re-collapse everything.
@@ -2035,6 +2551,12 @@ void ChannelSandboxDialog::buildUi()
         m_state.monoEnabled = on; pushChange();
     });
 
+    // Failsafe anti-clip
+    if (m_failsafeEnable)
+        connect(m_failsafeEnable, &QCheckBox::toggled, this, [this](bool on){
+            m_state.failsafeEnabled = on; pushChange();
+        });
+
     // Generation Loss
     if (m_randomEnable)
         connect(m_randomEnable, &QCheckBox::toggled, this, [this](bool on){
@@ -2203,6 +2725,388 @@ void ChannelSandboxDialog::buildUi()
         if (m_dopplerStrengthLabel)
             m_dopplerStrengthLabel->setText(QString::number(v) + "%");
         pushChange();
+    });
+
+    // ---- Voice FX wiring ----
+    if (m_vfxEnable) connect(m_vfxEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.vfxEnabled = on; pushChange();
+    });
+    if (m_vfxTuneEnable) connect(m_vfxTuneEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.vfxTuneEnabled = on; pushChange();
+    });
+    if (m_vfxTuneStrength) connect(m_vfxTuneStrength, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxTuneStrength = v / 100.0f;
+        m_vfxTuneStrengthLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+    if (m_vfxTuneSpeed) connect(m_vfxTuneSpeed, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxTuneSpeedMs = static_cast<float>(v);
+        m_vfxTuneSpeedLabel->setText(QString::number(v) + " ms");
+        pushChange();
+    });
+    if (m_vfxTuneScale) connect(m_vfxTuneScale, qOverload<int>(&QComboBox::currentIndexChanged),
+        this, [this](int v){ m_state.vfxTuneScale = v; pushChange(); });
+    if (m_vfxTuneKey) connect(m_vfxTuneKey, qOverload<int>(&QComboBox::currentIndexChanged),
+        this, [this](int v){ m_state.vfxTuneKey = v; pushChange(); });
+
+    if (m_vfxVocEnable) connect(m_vfxVocEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.vfxVocEnabled = on; pushChange();
+    });
+    if (m_vfxVocCarrier) connect(m_vfxVocCarrier, qOverload<int>(&QComboBox::currentIndexChanged),
+        this, [this](int v){ m_state.vfxVocCarrier = v; pushChange(); });
+    if (m_vfxVocPitch) connect(m_vfxVocPitch, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxVocPitchHz = static_cast<float>(v);
+        m_vfxVocPitchLabel->setText(QString::number(v) + " Hz");
+        pushChange();
+    });
+    if (m_vfxVocMix) connect(m_vfxVocMix, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxVocMix = v / 100.0f;
+        m_vfxVocMixLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+
+    if (m_vfxRingEnable) connect(m_vfxRingEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.vfxRingEnabled = on; pushChange();
+    });
+    if (m_vfxRingFreq) connect(m_vfxRingFreq, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxRingFreq = static_cast<float>(v);
+        m_vfxRingFreqLabel->setText(QString::number(v) + " Hz");
+        pushChange();
+    });
+    if (m_vfxRingMix) connect(m_vfxRingMix, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxRingMix = v / 100.0f;
+        m_vfxRingMixLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+
+    if (m_vfxTremEnable) connect(m_vfxTremEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.vfxTremEnabled = on; pushChange();
+    });
+    if (m_vfxTremRate) connect(m_vfxTremRate, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxTremRate = v / 10.0f;
+        m_vfxTremRateLabel->setText(QString::number(m_state.vfxTremRate, 'f', 1) + " Hz");
+        pushChange();
+    });
+    if (m_vfxTremDepth) connect(m_vfxTremDepth, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxTremDepth = v / 100.0f;
+        m_vfxTremDepthLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+    if (m_vfxTremShape) connect(m_vfxTremShape, qOverload<int>(&QComboBox::currentIndexChanged),
+        this, [this](int v){ m_state.vfxTremShape = v; pushChange(); });
+
+    if (m_vfxVibEnable) connect(m_vfxVibEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.vfxVibEnabled = on; pushChange();
+    });
+    if (m_vfxVibRate) connect(m_vfxVibRate, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxVibRate = v / 10.0f;
+        m_vfxVibRateLabel->setText(QString::number(m_state.vfxVibRate, 'f', 1) + " Hz");
+        pushChange();
+    });
+    if (m_vfxVibDepth) connect(m_vfxVibDepth, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxVibDepth = v / 100.0f;
+        m_vfxVibDepthLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+
+    if (m_vfxWahEnable) connect(m_vfxWahEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.vfxWahEnabled = on; pushChange();
+    });
+    if (m_vfxWahSens) connect(m_vfxWahSens, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxWahSens = v / 100.0f;
+        m_vfxWahSensLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+    if (m_vfxWahMin) connect(m_vfxWahMin, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxWahMinHz = static_cast<float>(v);
+        m_vfxWahMinLabel->setText(QString::number(v) + " Hz");
+        pushChange();
+    });
+    if (m_vfxWahMax) connect(m_vfxWahMax, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxWahMaxHz = static_cast<float>(v);
+        m_vfxWahMaxLabel->setText(QString::number(v) + " Hz");
+        pushChange();
+    });
+    if (m_vfxWahQ) connect(m_vfxWahQ, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxWahQ = v / 10.0f;
+        m_vfxWahQLabel->setText(QString::number(m_state.vfxWahQ, 'f', 1));
+        pushChange();
+    });
+    if (m_vfxWahMix) connect(m_vfxWahMix, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxWahMix = v / 100.0f;
+        m_vfxWahMixLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+
+    if (m_vfxFormEnable) connect(m_vfxFormEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.vfxFormEnabled = on; pushChange();
+    });
+    if (m_vfxFormShift) connect(m_vfxFormShift, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxFormShift = v / 10.0f;
+        m_vfxFormShiftLabel->setText(QString::number(m_state.vfxFormShift, 'f', 1) + " st");
+        pushChange();
+    });
+    if (m_vfxFormMix) connect(m_vfxFormMix, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxFormMix = v / 100.0f;
+        m_vfxFormMixLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+
+    if (m_vfxExcEnable) connect(m_vfxExcEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.vfxExcEnabled = on; pushChange();
+    });
+    if (m_vfxExcFreq) connect(m_vfxExcFreq, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxExcFreq = static_cast<float>(v);
+        m_vfxExcFreqLabel->setText(QString::number(v) + " Hz");
+        pushChange();
+    });
+    if (m_vfxExcDrive) connect(m_vfxExcDrive, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxExcDrive = v / 10.0f;
+        m_vfxExcDriveLabel->setText(QString::number(m_state.vfxExcDrive, 'f', 1));
+        pushChange();
+    });
+    if (m_vfxExcMix) connect(m_vfxExcMix, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxExcMix = v / 100.0f;
+        m_vfxExcMixLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+
+    if (m_vfxRevEnable) connect(m_vfxRevEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.vfxRevEnabled = on; pushChange();
+    });
+    if (m_vfxRevTime) connect(m_vfxRevTime, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxRevTimeMs = static_cast<float>(v);
+        m_vfxRevTimeLabel->setText(QString::number(v) + " ms");
+        pushChange();
+    });
+    if (m_vfxRevFeedback) connect(m_vfxRevFeedback, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxRevFeedback = v / 100.0f;
+        m_vfxRevFeedbackLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+    if (m_vfxRevMix) connect(m_vfxRevMix, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxRevMix = v / 100.0f;
+        m_vfxRevMixLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+
+    if (m_vfxShimEnable) connect(m_vfxShimEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.vfxShimEnabled = on; pushChange();
+    });
+    if (m_vfxShimMix) connect(m_vfxShimMix, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxShimMix = v / 100.0f;
+        m_vfxShimMixLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+    if (m_vfxShimFeedback) connect(m_vfxShimFeedback, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxShimFeedback = v / 100.0f;
+        m_vfxShimFeedbackLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+    if (m_vfxShimDamp) connect(m_vfxShimDamp, &QSlider::valueChanged, this, [this](int v){
+        m_state.vfxShimDamp = v / 100.0f;
+        m_vfxShimDampLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+    if (m_vfxShimPitch) connect(m_vfxShimPitch, qOverload<int>(&QComboBox::currentIndexChanged),
+        this, [this](int v){ m_state.vfxShimPitch = (v == 1) ? 7 : 12; pushChange(); });
+
+    // ---- Bass Enhancer wiring ----
+    if (m_bassEnhEnable) connect(m_bassEnhEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.bassEnhEnabled = on; pushChange();
+    });
+    if (m_bassEnhFreq) connect(m_bassEnhFreq, &QSlider::valueChanged, this, [this](int v){
+        m_state.bassEnhFreq = static_cast<float>(v);
+        m_bassEnhFreqLabel->setText(QString::number(v) + " Hz");
+        pushChange();
+    });
+    if (m_bassEnhDrive) connect(m_bassEnhDrive, &QSlider::valueChanged, this, [this](int v){
+        m_state.bassEnhDrive = v / 10.0f;
+        m_bassEnhDriveLabel->setText(QString::number(m_state.bassEnhDrive, 'f', 1));
+        pushChange();
+    });
+    if (m_bassEnhMix) connect(m_bassEnhMix, &QSlider::valueChanged, this, [this](int v){
+        m_state.bassEnhMix = v / 100.0f;
+        m_bassEnhMixLabel->setText(QString::number(v) + "%");
+        pushChange();
+    });
+
+    // ---- Binaural wiring ----
+    if (m_binauralEnable) connect(m_binauralEnable, &QCheckBox::toggled, this, [this](bool on){
+        m_state.binauralEnabled = on; pushChange();
+    });
+    if (m_binauralBase) connect(m_binauralBase, &QSlider::valueChanged, this, [this](int v){
+        m_state.binauralBaseHz = static_cast<float>(v);
+        m_binauralBaseLabel->setText(QString::number(v) + " Hz");
+        pushChange();
+    });
+    if (m_binauralBeat) connect(m_binauralBeat, &QSlider::valueChanged, this, [this](int v){
+        m_state.binauralBeatHz = v / 10.0f;
+        m_binauralBeatLabel->setText(QString::number(m_state.binauralBeatHz, 'f', 1) + " Hz");
+        pushChange();
+    });
+    if (m_binauralLevel) connect(m_binauralLevel, &QSlider::valueChanged, this, [this](int v){
+        m_state.binauralLevelDb = static_cast<float>(v);
+        m_binauralLevelLabel->setText(QString::number(v) + " dB");
+        pushChange();
+    });
+
+    // ---- LFO matrix wiring ----
+    for (int i = 0; i < 2; ++i) {
+        if (m_lfoEnable[i]) connect(m_lfoEnable[i], &QCheckBox::toggled, this, [this, i](bool on){
+            m_state.lfoEnabled[i] = on; pushChange();
+        });
+        if (m_lfoRate[i]) connect(m_lfoRate[i], &QSlider::valueChanged, this, [this, i](int v){
+            m_state.lfoRateHz[i] = v / 100.0f;
+            m_lfoRateLabel[i]->setText(QString::number(m_state.lfoRateHz[i], 'f', 2) + " Hz");
+            pushChange();
+        });
+        if (m_lfoShapeBox[i]) connect(m_lfoShapeBox[i],
+            qOverload<int>(&QComboBox::currentIndexChanged), this, [this, i](int v){
+            m_state.lfoShape[i] = v; pushChange();
+        });
+    }
+    for (int i = 0; i < 4; ++i) {
+        if (m_lfoRouteLfoBox[i]) connect(m_lfoRouteLfoBox[i],
+            qOverload<int>(&QComboBox::currentIndexChanged), this, [this, i](int v){
+            m_state.lfoRouteLfo[i] = v; pushChange();
+        });
+        if (m_lfoRouteTargetBox[i]) connect(m_lfoRouteTargetBox[i],
+            qOverload<int>(&QComboBox::currentIndexChanged), this, [this, i](int v){
+            m_state.lfoRouteTarget[i] = v; pushChange();
+        });
+        if (m_lfoRouteAmount[i]) connect(m_lfoRouteAmount[i],
+            &QSlider::valueChanged, this, [this, i](int v){
+            m_state.lfoRouteAmount[i] = v / 100.0f;
+            m_lfoRouteAmountLabel[i]->setText(QString::number(v) + "%");
+            pushChange();
+        });
+    }
+
+    // ---- Reverb engine wiring (Q6) ----
+    if (m_reverbEngineBox) connect(m_reverbEngineBox,
+        qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int v){
+        if (m_loading) return;
+        m_state.reverbConvMode = v;
+        pushChange();
+    });
+    if (m_reverbIrPreset) connect(m_reverbIrPreset,
+        qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int v){
+        if (m_loading) return;
+        m_state.reverbConvPreset = v;
+        pushChange();
+    });
+    if (m_reverbIrLoadBtn) connect(m_reverbIrLoadBtn, &QPushButton::clicked, this, [this]{
+        QString path = QFileDialog::getOpenFileName(this, tr("Load impulse response"),
+            QString(), tr("Audio files (*.wav *.flac *.mp3 *.ogg *.m4a);;All files (*.*)"));
+        if (path.isEmpty()) return;
+        m_state.reverbConvIrPath = path;
+        m_state.reverbConvMode = 1;   // picking an IR implies convolution
+        pushStateToWidgets();
+        pushChange();
+    });
+    if (m_reverbIrClearBtn) connect(m_reverbIrClearBtn, &QPushButton::clicked, this, [this]{
+        m_state.reverbConvIrPath.clear();
+        pushStateToWidgets();
+        pushChange();
+    });
+
+    // ---- FX automation recorder wiring (M3) ----
+    if (m_autoRecBtn) connect(m_autoRecBtn, &QPushButton::clicked, this, [this]{
+        if (m_autoRecording) {
+            m_autoRecording = false;
+        } else {
+            m_autoPlaying = false;
+            if (m_autoPlayTimer) m_autoPlayTimer->stop();
+            m_autoEvents.clear();
+            m_autoClock.restart();
+            m_autoLastSnapMs = -1000;
+            m_autoRecording = true;
+            // Seed with the initial state so replay starts from the
+            // exact point recording began.
+            m_autoEvents.push_back(qMakePair<qint64>(0, m_state.toJson()));
+        }
+        updateAutoStatus();
+    });
+    if (m_autoPlayBtn) connect(m_autoPlayBtn, &QPushButton::clicked, this, [this]{
+        if (m_autoPlaying) {
+            m_autoPlaying = false;
+            if (m_autoPlayTimer) m_autoPlayTimer->stop();
+            updateAutoStatus();
+            return;
+        }
+        if (m_autoEvents.isEmpty()) return;
+        m_autoRecording = false;
+        m_autoPlaying = true;
+        m_autoPlayIdx = 0;
+        m_autoClock.restart();
+        if (!m_autoPlayTimer) {
+            m_autoPlayTimer = new QTimer(this);
+            m_autoPlayTimer->setInterval(15);
+            connect(m_autoPlayTimer, &QTimer::timeout, this, [this]{
+                if (!m_autoPlaying) { m_autoPlayTimer->stop(); return; }
+                qint64 now = m_autoClock.elapsed();
+                bool applied = false;
+                while (m_autoPlayIdx < m_autoEvents.size() &&
+                       m_autoEvents[m_autoPlayIdx].first <= now) {
+                    m_state = SandboxState::fromJson(
+                        m_autoEvents[m_autoPlayIdx].second);
+                    ++m_autoPlayIdx;
+                    applied = true;
+                }
+                if (applied) {
+                    pushStateToWidgets();
+                    emit stateChanged(m_state);
+                }
+                if (m_autoPlayIdx >= m_autoEvents.size()) {
+                    if (m_autoLoopChk && m_autoLoopChk->isChecked()) {
+                        m_autoPlayIdx = 0;
+                        m_autoClock.restart();
+                    } else {
+                        m_autoPlaying = false;
+                        m_autoPlayTimer->stop();
+                        updateAutoStatus();
+                    }
+                }
+            });
+        }
+        m_autoPlayTimer->start();
+        updateAutoStatus();
+    });
+    if (m_autoSaveBtn) connect(m_autoSaveBtn, &QPushButton::clicked, this, [this]{
+        if (m_autoEvents.isEmpty()) return;
+        QString path = QFileDialog::getSaveFileName(this, tr("Save automation"),
+            QString(), tr("Automation (*.json)"));
+        if (path.isEmpty()) return;
+        QJsonArray arr;
+        for (const auto &ev : m_autoEvents) {
+            QJsonObject o;
+            o["t"] = static_cast<double>(ev.first);
+            o["state"] = ev.second;
+            arr.append(o);
+        }
+        QFile f(path);
+        if (f.open(QIODevice::WriteOnly))
+            f.write(QJsonDocument(arr).toJson(QJsonDocument::Compact));
+    });
+    if (m_autoLoadBtn) connect(m_autoLoadBtn, &QPushButton::clicked, this, [this]{
+        QString path = QFileDialog::getOpenFileName(this, tr("Load automation"),
+            QString(), tr("Automation (*.json)"));
+        if (path.isEmpty()) return;
+        QFile f(path);
+        if (!f.open(QIODevice::ReadOnly)) return;
+        QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+        if (!doc.isArray()) return;
+        m_autoEvents.clear();
+        for (const auto &v : doc.array()) {
+            QJsonObject o = v.toObject();
+            m_autoEvents.push_back(qMakePair(
+                static_cast<qint64>(o.value("t").toDouble(0.0)),
+                o.value("state").toObject()));
+        }
+        m_autoRecording = false;
+        m_autoPlaying = false;
+        updateAutoStatus();
     });
 
     connect(m_genLossEnable, &QCheckBox::toggled, this, [this](bool on){
@@ -2451,6 +3355,7 @@ void ChannelSandboxDialog::pushStateToWidgets()
     if (m_bitcrushRate) { m_bitcrushRate->setValue(static_cast<int>(m_state.bitcrusherRate)); m_bitcrushRateLabel->setText(QString::number(static_cast<int>(m_state.bitcrusherRate)) + " Hz"); }
 
     if (m_monoEnable) m_monoEnable->setChecked(m_state.monoEnabled);
+    if (m_failsafeEnable) m_failsafeEnable->setChecked(m_state.failsafeEnabled);
 
     if (m_genLossEnable) m_genLossEnable->setChecked(m_state.genLossEnabled);
     if (m_randomEnable) m_randomEnable->setChecked(m_state.randomEnabled);
@@ -2534,6 +3439,129 @@ void ChannelSandboxDialog::pushStateToWidgets()
     }
 
     if (m_bitcrushPreset) { QSignalBlocker blk(m_bitcrushPreset); m_bitcrushPreset->setCurrentIndex(0); }
+
+    // ---- Voice FX ----
+    if (m_vfxEnable) m_vfxEnable->setChecked(m_state.vfxEnabled);
+    if (m_vfxTuneEnable) m_vfxTuneEnable->setChecked(m_state.vfxTuneEnabled);
+    if (m_vfxTuneStrength) { m_vfxTuneStrength->setValue(static_cast<int>(m_state.vfxTuneStrength * 100.0f));
+        m_vfxTuneStrengthLabel->setText(QString::number(static_cast<int>(m_state.vfxTuneStrength * 100.0f)) + "%"); }
+    if (m_vfxTuneSpeed) { m_vfxTuneSpeed->setValue(static_cast<int>(m_state.vfxTuneSpeedMs));
+        m_vfxTuneSpeedLabel->setText(QString::number(static_cast<int>(m_state.vfxTuneSpeedMs)) + " ms"); }
+    if (m_vfxTuneScale) { QSignalBlocker b(m_vfxTuneScale); m_vfxTuneScale->setCurrentIndex(m_state.vfxTuneScale); }
+    if (m_vfxTuneKey)   { QSignalBlocker b(m_vfxTuneKey);   m_vfxTuneKey->setCurrentIndex(m_state.vfxTuneKey); }
+    if (m_vfxVocEnable) m_vfxVocEnable->setChecked(m_state.vfxVocEnabled);
+    if (m_vfxVocCarrier) { QSignalBlocker b(m_vfxVocCarrier); m_vfxVocCarrier->setCurrentIndex(m_state.vfxVocCarrier); }
+    if (m_vfxVocPitch) { m_vfxVocPitch->setValue(static_cast<int>(m_state.vfxVocPitchHz));
+        m_vfxVocPitchLabel->setText(QString::number(static_cast<int>(m_state.vfxVocPitchHz)) + " Hz"); }
+    if (m_vfxVocMix) { m_vfxVocMix->setValue(static_cast<int>(m_state.vfxVocMix * 100.0f));
+        m_vfxVocMixLabel->setText(QString::number(static_cast<int>(m_state.vfxVocMix * 100.0f)) + "%"); }
+    if (m_vfxRingEnable) m_vfxRingEnable->setChecked(m_state.vfxRingEnabled);
+    if (m_vfxRingFreq) { m_vfxRingFreq->setValue(static_cast<int>(m_state.vfxRingFreq));
+        m_vfxRingFreqLabel->setText(QString::number(static_cast<int>(m_state.vfxRingFreq)) + " Hz"); }
+    if (m_vfxRingMix) { m_vfxRingMix->setValue(static_cast<int>(m_state.vfxRingMix * 100.0f));
+        m_vfxRingMixLabel->setText(QString::number(static_cast<int>(m_state.vfxRingMix * 100.0f)) + "%"); }
+    if (m_vfxTremEnable) m_vfxTremEnable->setChecked(m_state.vfxTremEnabled);
+    if (m_vfxTremRate) { m_vfxTremRate->setValue(static_cast<int>(m_state.vfxTremRate * 10.0f));
+        m_vfxTremRateLabel->setText(QString::number(m_state.vfxTremRate, 'f', 1) + " Hz"); }
+    if (m_vfxTremDepth) { m_vfxTremDepth->setValue(static_cast<int>(m_state.vfxTremDepth * 100.0f));
+        m_vfxTremDepthLabel->setText(QString::number(static_cast<int>(m_state.vfxTremDepth * 100.0f)) + "%"); }
+    if (m_vfxTremShape) { QSignalBlocker b(m_vfxTremShape); m_vfxTremShape->setCurrentIndex(m_state.vfxTremShape); }
+    if (m_vfxVibEnable) m_vfxVibEnable->setChecked(m_state.vfxVibEnabled);
+    if (m_vfxVibRate) { m_vfxVibRate->setValue(static_cast<int>(m_state.vfxVibRate * 10.0f));
+        m_vfxVibRateLabel->setText(QString::number(m_state.vfxVibRate, 'f', 1) + " Hz"); }
+    if (m_vfxVibDepth) { m_vfxVibDepth->setValue(static_cast<int>(m_state.vfxVibDepth * 100.0f));
+        m_vfxVibDepthLabel->setText(QString::number(static_cast<int>(m_state.vfxVibDepth * 100.0f)) + "%"); }
+    if (m_vfxWahEnable) m_vfxWahEnable->setChecked(m_state.vfxWahEnabled);
+    if (m_vfxWahSens) { m_vfxWahSens->setValue(static_cast<int>(m_state.vfxWahSens * 100.0f));
+        m_vfxWahSensLabel->setText(QString::number(static_cast<int>(m_state.vfxWahSens * 100.0f)) + "%"); }
+    if (m_vfxWahMin) { m_vfxWahMin->setValue(static_cast<int>(m_state.vfxWahMinHz));
+        m_vfxWahMinLabel->setText(QString::number(static_cast<int>(m_state.vfxWahMinHz)) + " Hz"); }
+    if (m_vfxWahMax) { m_vfxWahMax->setValue(static_cast<int>(m_state.vfxWahMaxHz));
+        m_vfxWahMaxLabel->setText(QString::number(static_cast<int>(m_state.vfxWahMaxHz)) + " Hz"); }
+    if (m_vfxWahQ) { m_vfxWahQ->setValue(static_cast<int>(m_state.vfxWahQ * 10.0f));
+        m_vfxWahQLabel->setText(QString::number(m_state.vfxWahQ, 'f', 1)); }
+    if (m_vfxWahMix) { m_vfxWahMix->setValue(static_cast<int>(m_state.vfxWahMix * 100.0f));
+        m_vfxWahMixLabel->setText(QString::number(static_cast<int>(m_state.vfxWahMix * 100.0f)) + "%"); }
+    if (m_vfxFormEnable) m_vfxFormEnable->setChecked(m_state.vfxFormEnabled);
+    if (m_vfxFormShift) { m_vfxFormShift->setValue(static_cast<int>(m_state.vfxFormShift * 10.0f));
+        m_vfxFormShiftLabel->setText(QString::number(m_state.vfxFormShift, 'f', 1) + " st"); }
+    if (m_vfxFormMix) { m_vfxFormMix->setValue(static_cast<int>(m_state.vfxFormMix * 100.0f));
+        m_vfxFormMixLabel->setText(QString::number(static_cast<int>(m_state.vfxFormMix * 100.0f)) + "%"); }
+    if (m_vfxExcEnable) m_vfxExcEnable->setChecked(m_state.vfxExcEnabled);
+    if (m_vfxExcFreq) { m_vfxExcFreq->setValue(static_cast<int>(m_state.vfxExcFreq));
+        m_vfxExcFreqLabel->setText(QString::number(static_cast<int>(m_state.vfxExcFreq)) + " Hz"); }
+    if (m_vfxExcDrive) { m_vfxExcDrive->setValue(static_cast<int>(m_state.vfxExcDrive * 10.0f));
+        m_vfxExcDriveLabel->setText(QString::number(m_state.vfxExcDrive, 'f', 1)); }
+    if (m_vfxExcMix) { m_vfxExcMix->setValue(static_cast<int>(m_state.vfxExcMix * 100.0f));
+        m_vfxExcMixLabel->setText(QString::number(static_cast<int>(m_state.vfxExcMix * 100.0f)) + "%"); }
+    if (m_vfxRevEnable) m_vfxRevEnable->setChecked(m_state.vfxRevEnabled);
+    if (m_vfxRevTime) { m_vfxRevTime->setValue(static_cast<int>(m_state.vfxRevTimeMs));
+        m_vfxRevTimeLabel->setText(QString::number(static_cast<int>(m_state.vfxRevTimeMs)) + " ms"); }
+    if (m_vfxRevFeedback) { m_vfxRevFeedback->setValue(static_cast<int>(m_state.vfxRevFeedback * 100.0f));
+        m_vfxRevFeedbackLabel->setText(QString::number(static_cast<int>(m_state.vfxRevFeedback * 100.0f)) + "%"); }
+    if (m_vfxRevMix) { m_vfxRevMix->setValue(static_cast<int>(m_state.vfxRevMix * 100.0f));
+        m_vfxRevMixLabel->setText(QString::number(static_cast<int>(m_state.vfxRevMix * 100.0f)) + "%"); }
+    if (m_vfxShimEnable) m_vfxShimEnable->setChecked(m_state.vfxShimEnabled);
+    if (m_vfxShimMix) { m_vfxShimMix->setValue(static_cast<int>(m_state.vfxShimMix * 100.0f));
+        m_vfxShimMixLabel->setText(QString::number(static_cast<int>(m_state.vfxShimMix * 100.0f)) + "%"); }
+    if (m_vfxShimFeedback) { m_vfxShimFeedback->setValue(static_cast<int>(m_state.vfxShimFeedback * 100.0f));
+        m_vfxShimFeedbackLabel->setText(QString::number(static_cast<int>(m_state.vfxShimFeedback * 100.0f)) + "%"); }
+    if (m_vfxShimDamp) { m_vfxShimDamp->setValue(static_cast<int>(m_state.vfxShimDamp * 100.0f));
+        m_vfxShimDampLabel->setText(QString::number(static_cast<int>(m_state.vfxShimDamp * 100.0f)) + "%"); }
+    if (m_vfxShimPitch) { QSignalBlocker b(m_vfxShimPitch);
+        m_vfxShimPitch->setCurrentIndex(m_state.vfxShimPitch == 7 ? 1 : 0); }
+
+    // ---- Bass Enhancer ----
+    if (m_bassEnhEnable) m_bassEnhEnable->setChecked(m_state.bassEnhEnabled);
+    if (m_bassEnhFreq) { m_bassEnhFreq->setValue(static_cast<int>(m_state.bassEnhFreq));
+        m_bassEnhFreqLabel->setText(QString::number(static_cast<int>(m_state.bassEnhFreq)) + " Hz"); }
+    if (m_bassEnhDrive) { m_bassEnhDrive->setValue(static_cast<int>(m_state.bassEnhDrive * 10.0f));
+        m_bassEnhDriveLabel->setText(QString::number(m_state.bassEnhDrive, 'f', 1)); }
+    if (m_bassEnhMix) { m_bassEnhMix->setValue(static_cast<int>(m_state.bassEnhMix * 100.0f));
+        m_bassEnhMixLabel->setText(QString::number(static_cast<int>(m_state.bassEnhMix * 100.0f)) + "%"); }
+
+    // ---- Binaural ----
+    if (m_binauralEnable) m_binauralEnable->setChecked(m_state.binauralEnabled);
+    if (m_binauralBase) { m_binauralBase->setValue(static_cast<int>(m_state.binauralBaseHz));
+        m_binauralBaseLabel->setText(QString::number(static_cast<int>(m_state.binauralBaseHz)) + " Hz"); }
+    if (m_binauralBeat) { m_binauralBeat->setValue(static_cast<int>(m_state.binauralBeatHz * 10.0f));
+        m_binauralBeatLabel->setText(QString::number(m_state.binauralBeatHz, 'f', 1) + " Hz"); }
+    if (m_binauralLevel) { m_binauralLevel->setValue(static_cast<int>(m_state.binauralLevelDb));
+        m_binauralLevelLabel->setText(QString::number(static_cast<int>(m_state.binauralLevelDb)) + " dB"); }
+
+    // ---- LFO matrix ----
+    for (int i = 0; i < 2; ++i) {
+        if (m_lfoEnable[i]) m_lfoEnable[i]->setChecked(m_state.lfoEnabled[i]);
+        if (m_lfoRate[i]) { m_lfoRate[i]->setValue(static_cast<int>(m_state.lfoRateHz[i] * 100.0f));
+            m_lfoRateLabel[i]->setText(QString::number(m_state.lfoRateHz[i], 'f', 2) + " Hz"); }
+        if (m_lfoShapeBox[i]) { QSignalBlocker b(m_lfoShapeBox[i]);
+            m_lfoShapeBox[i]->setCurrentIndex(m_state.lfoShape[i]); }
+    }
+    for (int i = 0; i < 4; ++i) {
+        if (m_lfoRouteLfoBox[i]) { QSignalBlocker b(m_lfoRouteLfoBox[i]);
+            m_lfoRouteLfoBox[i]->setCurrentIndex(m_state.lfoRouteLfo[i] != 0 ? 1 : 0); }
+        if (m_lfoRouteTargetBox[i]) { QSignalBlocker b(m_lfoRouteTargetBox[i]);
+            int t = m_state.lfoRouteTarget[i];
+            if (t < 0 || t >= LfoMatrix::Target_COUNT) t = 0;
+            m_lfoRouteTargetBox[i]->setCurrentIndex(t); }
+        if (m_lfoRouteAmount[i]) { m_lfoRouteAmount[i]->setValue(static_cast<int>(m_state.lfoRouteAmount[i] * 100.0f));
+            m_lfoRouteAmountLabel[i]->setText(QString::number(static_cast<int>(m_state.lfoRouteAmount[i] * 100.0f)) + "%"); }
+    }
+
+    // ---- Reverb engine ----
+    if (m_reverbEngineBox) { QSignalBlocker b(m_reverbEngineBox);
+        m_reverbEngineBox->setCurrentIndex(m_state.reverbConvMode == 1 ? 1 : 0); }
+    if (m_reverbIrPreset) { QSignalBlocker b(m_reverbIrPreset);
+        int p = m_state.reverbConvPreset;
+        if (p < 0 || p > 3) p = 0;
+        m_reverbIrPreset->setCurrentIndex(p);
+        m_reverbIrPreset->setEnabled(m_state.reverbConvIrPath.isEmpty()); }
+    if (m_reverbIrPathLabel)
+        m_reverbIrPathLabel->setText(m_state.reverbConvIrPath.isEmpty()
+            ? tr("Using preset IR")
+            : tr("IR: %1").arg(m_state.reverbConvIrPath));
+    if (m_reverbIrClearBtn)
+        m_reverbIrClearBtn->setEnabled(!m_state.reverbConvIrPath.isEmpty());
 
     if (m_pipeline) m_pipeline->setOrder(m_state.pipelineOrder);
     applyPipelineOrderToUi();

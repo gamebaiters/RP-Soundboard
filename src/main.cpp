@@ -49,6 +49,7 @@
 #include "SoundInfo.h"
 #include "TalkStateManager.h"
 #include "SpeechBubble.h"
+#include "MicFx.h"
 #include "modules/main_page.h"
 #include "modules/main_page_wiring.h"
 #include "modules/theme.h"
@@ -171,6 +172,32 @@ CAPI void sb_handlePlaybackData(uint64 serverConnectionHandlerID, short* samples
 	if (!s) return;
 
 	s->fetchOutputSamples(samples, sampleCount, channels, channelSpeakerArray, channelFillMask);
+
+	// Mic FX monitor ("hear my own processed voice"): mix of the
+	// processed capture stream into the local playback buffer. Resolve
+	// the L/R channel indices from the speaker array and honour the
+	// fill-mask semantics (unfilled channels must be overwritten).
+	{
+		MicFx &mic = MicFx::instance();
+		if (mic.enabled() && mic.monitor())
+		{
+			const unsigned int bmL = SPEAKER_FRONT_LEFT | SPEAKER_HEADPHONES_LEFT;
+			const unsigned int bmR = SPEAKER_FRONT_RIGHT | SPEAKER_HEADPHONES_RIGHT;
+			int ciLeft = 0, ciRight = (channels >= 2) ? 1 : 0;
+			if (channelSpeakerArray)
+			{
+				for (int i = 0; i < channels; ++i)
+					if (channelSpeakerArray[i] & bmL) { ciLeft = i; break; }
+				for (int i = 0; i < channels; ++i)
+					if (channelSpeakerArray[i] & bmR) { ciRight = i; break; }
+			}
+			bool overL = (*channelFillMask & bmL) == 0;
+			bool overR = (*channelFillMask & bmR) == 0;
+			if (mic.mixMonitor(samples, sampleCount, channels,
+			                   ciLeft, ciRight, overL, overR))
+				*channelFillMask |= (bmL | bmR);
+		}
+	}
 }
 
 
@@ -182,6 +209,12 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 	// Atomic snapshot — see sb_handlePlaybackData.
 	Sampler *s = g_samplerAtomic.load(std::memory_order_acquire);
 	if (!s) return;
+
+	// Mic FX (V1): process the user's OWN voice BEFORE the soundboard
+	// mix-in, so listeners hear voice-through-effects + clean soundboard
+	// audio on top. try-lock design inside: never blocks this thread.
+	if (MicFx::instance().processCapture(samples, sampleCount, channels))
+		*edited |= 0x1;
 
 	if (g_rpsbPreviewOnly)
 	{
@@ -327,6 +360,16 @@ CAPI void sb_init()
 		// thread's acquire load in sb_handlePlaybackData /
 		// sb_handleCaptureData.
 		g_samplerAtomic.store(sampler, std::memory_order_release);
+
+		// Mic FX: restore persisted state (chain, pitch, monitor and -
+		// per user decision - the master toggle itself). Must run after
+		// the Sampler publish so a restored "enabled" flows into a fully
+		// live audio path. Feature gate FIRST so a disabled feature
+		// blocks the restored master toggle.
+		MicFx::instance().setFeatureEnabled(configModel->getMicFxFeatureEnabled());
+		MicFx::instance().loadSettings();
+		// Global loudness normalization (Q2) applies from the first play.
+		sampler->setGlobalNormalize(configModel->getLoudnessNormalize());
 
 		tsMgr = new TalkStateManager();
 		tsMgr->setSampler(sampler);
@@ -811,6 +854,12 @@ CAPI void sb_onHotkeyPressed(const char * keyword)
 	{
 		configModel->setVolumeRemote(std::max(configModel->getVolumeRemote() - 20, 0));
 		configModel->setVolumeLocal(std::max(configModel->getVolumeLocal() - 20, 0));
+	}
+	else if (strcmp(keyword, HOTKEY_MICFX_TOGGLE) == 0)
+	{
+		// Mic FX master toggle (V1). The MicFx singleton is thread-safe
+		// and no-ops when the feature is disabled in Settings.
+		MicFx::instance().toggle();
 	}
 }
 

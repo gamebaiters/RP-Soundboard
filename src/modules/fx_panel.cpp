@@ -93,7 +93,30 @@ FxPanel::FxPanel(QWidget *parent)
     grid->addWidget(m_speed,       1, 1);
     grid->addWidget(m_speedLabel,  1, 2);
     grid->addWidget(capReverb,     2, 0);
-    grid->addWidget(m_reverb,      2, 1);
+    // Reverb slider shares its cell with the engine gear so the grid
+    // columns stay aligned with the pitch/speed rows.
+    {
+        auto *revRow = new QWidget(this);
+        // The TS3 host ships its own app-level stylesheet: an unstyled
+        // plain QWidget inside our tree picks the HOST background (the
+        // same leak that once hit the pitch/speed sliders - hence the
+        // per-widget "QSlider { background: transparent }" above). The
+        // wrapper must be see-through so the row shows the channel
+        // frame's surface exactly like the pitch / speed rows.
+        revRow->setStyleSheet(QStringLiteral("background: transparent;"));
+        auto *rh = new QHBoxLayout(revRow);
+        rh->setContentsMargins(0, 0, 0, 0);
+        rh->setSpacing(4);
+        rh->addWidget(m_reverb, 1);
+        m_reverbEngineBtn = new QToolButton(revRow);
+        m_reverbEngineBtn->setText(QString::fromUtf8("\xE2\x9A\x99"));
+        m_reverbEngineBtn->setToolTip(tr(
+            "Reverb engine settings: algorithmic (classic) or\n"
+            "convolution with a preset / custom impulse response."));
+        m_reverbEngineBtn->setAutoRaise(true);
+        rh->addWidget(m_reverbEngineBtn);
+        grid->addWidget(revRow, 2, 1);
+    }
     grid->addWidget(m_reverbLabel, 2, 2);
     grid->addWidget(m_reset,       2, 3);
 
@@ -102,12 +125,20 @@ FxPanel::FxPanel(QWidget *parent)
     connect(m_reverb, &QSlider::valueChanged,  this, &FxPanel::onReverbMoved);
     connect(m_sync,   &QToolButton::toggled,   this, &FxPanel::onSyncToggled);
     connect(m_reset,  &QToolButton::clicked,   this, [this]{ resetAll(); emit resetClicked(); });
+    connect(m_reverbEngineBtn, &QToolButton::clicked,
+            this, &FxPanel::reverbEngineClicked);
 }
 
 int  FxPanel::pitch()  const { return m_pitch->value(); }
 int  FxPanel::speed()  const { return m_speed->value(); }
 int  FxPanel::reverb() const { return m_reverb->value(); }
 bool FxPanel::sync()   const { return m_sync->isChecked(); }
+
+QRect FxPanel::reverbEngineBtnGlobalRect() const {
+    if (!m_reverbEngineBtn) return QRect();
+    return QRect(m_reverbEngineBtn->mapToGlobal(QPoint(0, 0)),
+                 m_reverbEngineBtn->size());
+}
 
 void FxPanel::setPitch(int v)  { QSignalBlocker b(m_pitch);  m_pitch->setValue(v);  m_pitchLabel->setText(fmtFactor(v)); }
 void FxPanel::setSpeed(int v)  { QSignalBlocker b(m_speed);  m_speed->setValue(v);  m_speedLabel->setText(fmtFactor(v)); }
@@ -206,6 +237,18 @@ void FxPanel::refreshTheme() {
         "QToolButton:disabled { background-color: %1; color: %2;"
         " border: 1px solid %3; }")
         .arg(d.disabledSurface.name(), d.textMuted.name(), d.disabledBorder.name()));
+    // Reverb-engine gear: flat on the channel surface (transparent -
+    // an unstyled QToolButton picks the HOST app style, which painted
+    // it a different grey), themed feedback on hover / press.
+    if (m_reverbEngineBtn) {
+        m_reverbEngineBtn->setStyleSheet(QString(
+            "QToolButton { background: transparent; border: none;"
+            " border-radius: 4px; padding: 1px 3px; color: %1; }"
+            "QToolButton:hover { background-color: %2; color: %3; }"
+            "QToolButton:pressed { background-color: %4; }")
+            .arg(d.textMuted.name(), d.surfaceAlt.name(),
+                 d.text.name(), d.button.name()));
+    }
 }
 
 void FxPanel::onSyncToggled(bool on) {

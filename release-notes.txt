@@ -1,3 +1,139 @@
+GameBaiters Soundboard v2.3.0
+=============================
+
+The largest feature release since the fork. A full live microphone
+FX chain with a dedicated pinned channel and 13 ready-made voice
+presets, a ten-effect "Voice FX" macro module, a real DJ vinyl /
+turntable scratch engine per channel, convolution reverb, binaural
+beats, a psychoacoustic bass enhancer, a per-channel LFO modulation
+matrix, an FX automation recorder, EBU-R128 loudness normalisation,
+2x-oversampled saturation and a true-peak limiter. Plus a Settings
+pass that groups every option into clear sub-categories, and a long
+audio-quality campaign that makes the vinyl scratch seamless in both
+directions while keeping live FX real-time.
+
+Highlights
+----------
+
+* NEW - Microphone FX. A dedicated pinned "Microphone" channel at
+  the top of the channel list (reduced UI: no waveform / transport)
+  processes your live voice through a curated DSP chain in real
+  time. Toggle it from the button next to "+ Channel"; the whole
+  feature can be switched off in Settings (every related control
+  then disappears). Live 1:1 pitch shift (granular, no time
+  stretch), an always-on output limiter, optional self-monitor
+  ("hear my own processed voice", default off), a TS3 "Toggle Mic
+  FX" hotkey, and full state persistence. Auto-bypasses on any DSP
+  error so the mic is never left dead.
+
+* NEW - 13 voice presets. Robot, Chipmunk, Demon, Telephone,
+  Military radio, Alien, Cave, Underwater, Megaphone, Helium,
+  Giant, Ghost and Vintage AM radio - one click each, built on the
+  mic chain + Voice FX macro.
+
+* NEW DSP - Voice FX (one macro stage, ten sub-effects). Autotune,
+  Vocoder (16-band), Ring Modulator, Tremolo, Vibrato, Auto-Wah,
+  Formant shift, Shimmer, Reverse-Reverb (grain-reverse delay) and
+  Exciter, each independently togglable and settable inside one
+  collapsible accordion. Shares a granular pitch shifter with
+  Autotune / Shimmer / the mic live pitch.
+
+* NEW - Vinyl / Tape-Stop scratch (per channel). A transport-row
+  button opens a popup with an animated spinning disc. Grab and
+  drag the disc to SCRATCH the audio like a real turntable - both
+  directions, position-locked to your hand. HOLD = brake (rate
+  ramps 1 -> 0 over an adjustable time), release = spin back up,
+  single click = one-shot full stop. Backward scratch is
+  effectively infinite (a background decoder back-fills older audio
+  on demand) while memory stays a fixed 10 s ring - scratch back
+  through a ten-hour file without a huge buffer. The mouse pointer
+  vanishes "into the disc" during the drag (FPS-style capture) and
+  returns on release. Vinyl button visibility toggles in Settings.
+
+* NEW DSP - Convolution reverb. The Reverb module gains an
+  Algorithmic / Convolution mode combo. Partitioned FFT (OLA)
+  convolution with four synthesised impulse responses (Hall,
+  Church, Room, Spring - each with its own distinct signature) plus
+  "Load IR..." to convolve against any user WAV (up to 3 s). Hybrid-
+  normalised so presets are audible and distinct without distorting.
+  Default stays Algorithmic (optional feature).
+
+* NEW DSP - Bass Enhancer. Psychoacoustic low-end restoration:
+  synthesises harmonics of the fundamental so small speakers imply
+  bass they cannot physically reproduce.
+
+* NEW DSP - Binaural beats. Adds a detuned sine pair (L/R): base
+  frequency 100-500 Hz, beat 0.5-40 Hz, level in dB.
+
+* NEW - LFO modulation matrix (per channel). Two LFOs (rate
+  0.05-20 Hz, sine / triangle / square / sample-and-hold, depth)
+  routed through four assignable rows to a curated set of DSP
+  targets (ring-mod frequency, auto-wah centre, reverb mix, chorus
+  depth, saturator drive, bitcrusher rate, volume, pan, vibrato
+  depth...). Applied per block ahead of the stage chain.
+
+* NEW - FX automation recorder. Record captures timestamped
+  sandbox-state snapshots (~30 Hz) during playback; Play replays
+  them through the normal state path; Loop repeats; save / load to
+  a JSON file.
+
+* NEW - Sandbox module manager. Settings > "Audio Sandbox Modules"
+  gives every one of the 21 DSP stages its own checkbox. Unchecked
+  = the stage is hidden from the sandbox UI (accordion + pipeline
+  block) AND globally bypassed on the audio thread.
+
+* NEW - Microphone reverb slider + decimal pitch. The mic FX panel
+  gets its own reverb wet slider, and its pitch control now steps in
+  0.1-semitone increments.
+
+* Settings reorganised. The Channels and General pages group their
+  (now many) options into labelled sub-categories instead of a flat
+  wall of checkboxes.
+
+Audio quality
+-------------
+
+* EBU-R128 loudness normalisation (Q2). Optional (Settings, default
+  off): every sound opens with a single-pass loudnorm to -16 LUFS so
+  a playlist of mixed-loudness clips plays at an even level. Skipped
+  in reverse mode (the per-chunk graph rebuild would restart its
+  convergence).
+
+* 2x-oversampled saturation (Q1). The nonlinear shapers run at double
+  rate (halfband up / down) to keep aliasing out of hot drive
+  settings. Toggle: "HQ oversampling" (default on).
+
+* True-peak limiter (Q3). The limiter sidechain estimates inter-
+  sample peaks via 4x interpolation so masters no longer clip a D/A
+  reconstruction that the sample-peak meter never saw.
+
+Seamless vinyl - the scratch campaign
+-------------------------------------
+
+* Backward scratch is seamless and effectively infinite. A dedicated
+  off-thread back-fill decoder feeds older audio into the ring's
+  oldest end (matched to the channel's live pitch + reverb), so
+  scratching back never runs dry and never allocates unbounded
+  memory.
+
+* Release "re-homes" to the needle. Letting go after a big backward
+  scratch resumes forward playback from exactly where you scratched
+  to (real-turntable behaviour) instead of snapping back to the pre-
+  scratch position - the flywheel spins up on the ring while an async
+  prime-seek re-points the decoder, with no dropout.
+
+* Real-time FX while the vinyl is open. The transparent armed decode-
+  ahead is kept tiny so live pitch / speed / reverb / every effect
+  stays responsive; the full forward-scratch runway is built only
+  during an active gesture.
+
+* Fast-forward is smooth and never jumps backward. The forward scrub-
+  seek rebuilds its runway fast, keeps the effect tails alive across
+  each needle-jump (no more FX cutting out and ramping back), and re-
+  anchors the cursor so a fast forward stroke can no longer snap the
+  position backward.
+
+==============================================================
 GameBaiters Soundboard v2.2.17
 ==============================
 

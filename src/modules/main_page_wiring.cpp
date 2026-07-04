@@ -17,10 +17,13 @@
 #include "channel_state_persistence.h"
 #include "audio_exporter.h"
 #include "export_progress_dialog.h"
+#include "vinyl_popup.h"
 
 #include "../ConfigModel.h"
 #include "../samples.h"
 #include "../SoundInfo.h"
+#include "../MicFx.h"
+#include "../dsp/SlotDsp.h"
 #include "../config_qt.h"
 #include "../main.h"
 #include "../AudioUtils.h"
@@ -35,6 +38,8 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
+#include <QDialog>
+#include <QComboBox>
 #include <QLineEdit>
 #include <QClipboard>
 #include <QApplication>
@@ -57,9 +62,12 @@
 #include <QFrame>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
+#include <QScreen>
 #include <QDateTime>
 #include <cmath>
 #include <memory>
+#include <functional>
 
 namespace {
 
@@ -212,15 +220,34 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     w->setVerticalMeter       (model->getVerticalMeter());
     w->setShowSkipButtons     (model->getShowSkipButtons());
     w->setSpectrogramView     (model->getSpectrogramView());
+    w->setShowVinylButton     (model->getShowVinylButton());
+    w->setMicFxFeatureEnabled (model->getMicFxFeatureEnabled());
+    w->setLoudnessNormalize   (model->getLoudnessNormalize());
+    // Sandbox module kill switch: restore the persisted mask into the
+    // static SlotDsp mask (audio side) + the Settings checkboxes.
+    {
+        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        quint32 mask = st.value(QStringLiteral("sandbox_modules/mask"),
+                                0xFFFFFFFFu).toUInt();
+        mask |= 1u;   // Paulstretch's pipeline slot is structural - keep it on
+        for (int stg = 0; stg < SandboxState::Stage_COUNT; ++stg)
+            SlotDsp::setGlobalStageEnabled(stg, (mask >> stg) & 1u);
+        w->setSandboxModuleMask(SlotDsp::globalStageMask());
+    }
     // Push initial toolbar / channel visibility so the page reflects
     // saved settings right after wiring (no need for user to re-toggle).
     if (page->pauseAllBtn())   page->pauseAllBtn()->setVisible(model->getShowPauseAllButton());
     if (page->stopAllBtn())    page->stopAllBtn ()->setVisible(model->getShowStopAllButton());
     if (page->addChannelBtn()) page->addChannelBtn()->setVisible(!model->getMultiChannelInfinity());
+    page->setMicFxFeatureVisible(model->getMicFxFeatureEnabled());
+    MicFx::instance().setFeatureEnabled(model->getMicFxFeatureEnabled());
+    if (sb_getSampler())
+        sb_getSampler()->setGlobalNormalize(model->getLoudnessNormalize());
     for (auto *ch : page->channels()) {
         ch->setMeterVertical(model->getVerticalMeter());
         ch->setSkipButtonsVisible(model->getShowSkipButtons());
         ch->waveform()->setSpectrogramView(model->getSpectrogramView());
+        ch->setVinylButtonVisible(model->getShowVinylButton());
     }
     w->setResetChVolume(model->getResetChVolume());
     w->setResetChFx(model->getResetChFx());
@@ -570,6 +597,32 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         model->setSpectrogramView(v);
         for (auto *ch : page->channels()) ch->waveform()->setSpectrogramView(v);
     });
+    QObject::connect(w, &SettingsWindow::showVinylButtonChanged, [model, page](bool v){
+        model->setShowVinylButton(v);
+        for (auto *ch : page->channels()) ch->setVinylButtonVisible(v);
+    });
+    QObject::connect(w, &SettingsWindow::micFxFeatureEnabledChanged, [model, page](bool v){
+        model->setMicFxFeatureEnabled(v);
+        // Feature OFF = every related surface disappears AND processing
+        // stops (MicFx forces its master toggle off).
+        page->setMicFxFeatureVisible(v);
+        MicFx::instance().setFeatureEnabled(v);
+    });
+    QObject::connect(w, &SettingsWindow::loudnessNormalizeChanged, [model](bool v){
+        model->setLoudnessNormalize(v);
+        if (Sampler *smp = sb_getSampler()) smp->setGlobalNormalize(v);
+    });
+    QObject::connect(w, &SettingsWindow::sandboxModuleToggled, [](int stage, bool on){
+        // Paulstretch's slot is structural (pinned pipeline index 0);
+        // it can be disabled like the rest but never breaks anything.
+        SlotDsp::setGlobalStageEnabled(stage, on);
+        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        st.setValue(QStringLiteral("sandbox_modules/mask"),
+                    SlotDsp::globalStageMask());
+        // Open sandbox dialogs pick the change up on their next show
+        // (ChannelSandboxDialog::showEvent -> refreshModuleVisibility);
+        // the audio-side bypass is instant via the static mask.
+    });
     QObject::connect(w, &SettingsWindow::resetChVolumeChanged, [model](bool v){ model->setResetChVolume(v); });
     QObject::connect(w, &SettingsWindow::resetChFxChanged, [model](bool v){ model->setResetChFx(v); });
     QObject::connect(w, &SettingsWindow::resetChFileChanged, [model](bool v){ model->setResetChFile(v); });
@@ -658,6 +711,38 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
         };
 
         if (info->isMacro && !info->macroState.isEmpty()) {
+            // Mic FX macro: the payload is a JSON OBJECT tagged
+            // type=micfx (channel macros are a JSON ARRAY). Applies the
+            // frozen mic package - chain state + live pitch - and turns
+            // Mic FX on. Firing it again with the same package already
+            // active toggles the mic OFF (one button = on/off).
+            {
+                QJsonDocument mdoc = QJsonDocument::fromJson(info->macroState);
+                if (mdoc.isObject()) {
+                    QJsonObject mo = mdoc.object();
+                    if (mo.value("type").toString() == QLatin1String("micfx")) {
+                        MicFx &mic = MicFx::instance();
+                        if (!mic.featureEnabled()) return;
+                        SandboxState st = SandboxState::fromJson(
+                            mo.value("state").toObject());
+                        float pitch = static_cast<float>(
+                            mo.value("pitch").toDouble(0.0));
+                        // Toggle-off path: same package, mic already on.
+                        QJsonDocument cur(mic.sandboxState().toJson());
+                        bool samePkg = mic.enabled() &&
+                            qAbs(mic.pitchSemitones() - pitch) < 0.01f &&
+                            cur.object() == mo.value("state").toObject();
+                        if (samePkg) {
+                            mic.setEnabled(false);
+                        } else {
+                            mic.setSandboxState(st);
+                            mic.setPitchSemitones(pitch);
+                            mic.setEnabled(true);
+                        }
+                        return;
+                    }
+                }
+            }
             // Save pre-macro state for restore. Snapshot the LIVE playback
             // position from the sampler (Channel::state() always reports
             // 0.0 because the widget doesn't track elapsed time) so the
@@ -792,6 +877,27 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
         s.macroState = QJsonDocument(arr).toJson(QJsonDocument::Compact);
         if (s.customText.isEmpty())
             s.customText = QObject::tr("Macro %1").arg(idx + 1);
+        model->setSoundInfo(idx, s);
+        pushSoundsToGrid(page, model);
+    });
+
+    // Mic FX macro: freeze the CURRENT microphone package (full chain
+    // state + live pitch) into the button. Triggering applies it and
+    // turns Mic FX on; triggering again with the same package active
+    // toggles the mic off.
+    QObject::connect(grid, &ButtonGrid::createMicMacroRequested, [model, page](int idx){
+        MicFx &mic = MicFx::instance();
+        SoundInfo s;
+        if (auto *cur = model->getSoundInfo(idx)) s = *cur;
+        s.isMacro = true;
+        s.filename.clear();
+        QJsonObject mo;
+        mo["type"]  = QStringLiteral("micfx");
+        mo["state"] = mic.sandboxState().toJson();
+        mo["pitch"] = static_cast<double>(mic.pitchSemitones());
+        s.macroState = QJsonDocument(mo).toJson(QJsonDocument::Compact);
+        if (s.customText.isEmpty())
+            s.customText = QObject::tr("Mic FX");
         model->setSoundInfo(idx, s);
         pushSoundsToGrid(page, model);
     });
@@ -1558,6 +1664,169 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                          [model, isPrimary](bool s){
             if (isPrimary) model->setSyncPitchSpeed(s);
         });
+
+        // Reverb ENGINE settings (gear next to the Reverb slider).
+        // Channel-wide choice, outside the sandbox: algorithmic
+        // (classic Freeverb) vs convolution + IR preset / custom IR.
+        // Edits flow through the normal sandbox-state path so they are
+        // applied live AND persisted with the channel state.
+        //
+        // UI = a small Qt::Popup anchored right above the gear (not a
+        // full dialog): every control applies instantly and clicking
+        // anywhere outside dismisses it. Wrapped in a self-referencing
+        // shared function so the Load-IR flow can reopen it after the
+        // modal file dialog (which force-closes any Qt::Popup).
+        {
+            auto openEnginePopup = std::make_shared<std::function<void()>>();
+            *openEnginePopup = [sampler, slot, ch, openEnginePopup]{
+                Theme::Derived d = Theme::derive(Theme::colors());
+                auto *pop = new QWidget(ch, Qt::Popup | Qt::FramelessWindowHint);
+                pop->setAttribute(Qt::WA_DeleteOnClose);
+                pop->setProperty("isGBSoundboard", true);
+                pop->setObjectName(QStringLiteral("revEnginePopup"));
+                // Explicit surface + transparent labels: an unstyled
+                // widget inside the TS3 host process picks the HOST
+                // stylesheet colors (same leak as the fx sliders).
+                pop->setStyleSheet(QString(
+                    "#revEnginePopup { background-color: %1;"
+                    " border: 1px solid %2; }"
+                    "#revEnginePopup QLabel { background: transparent;"
+                    " color: %3; }")
+                    .arg(d.surface.name(), d.borderStrong.name(),
+                         d.text.name()));
+                pop->setFixedWidth(280);
+
+                auto st = std::make_shared<SandboxState>(ch->sandboxState());
+                auto apply = [sampler, slot, ch, st]{
+                    ch->setSandboxState(*st);
+                    if (sampler) sampler->setSlotSandboxState(slot, *st);
+                    if (ChannelStatePersistence::isEnabled())
+                        ChannelStatePersistence::saveState(ch->channelId(),
+                                                           ch->state());
+                };
+
+                auto *lay = new QVBoxLayout(pop);
+                lay->setContentsMargins(10, 8, 10, 8);
+                lay->setSpacing(6);
+
+                auto *title = new QLabel(QObject::tr("Reverb engine"), pop);
+                {
+                    QFont f = title->font();
+                    f.setBold(true);
+                    title->setFont(f);
+                }
+                lay->addWidget(title);
+
+                auto *grid = new QGridLayout;
+                grid->setHorizontalSpacing(8);
+                grid->setVerticalSpacing(6);
+                grid->addWidget(new QLabel(QObject::tr("Engine:"), pop), 0, 0);
+                auto *engBox = new QComboBox(pop);
+                engBox->addItem(QObject::tr("Algorithmic (classic)"));
+                engBox->addItem(QObject::tr("Convolution (IR)"));
+                engBox->setCurrentIndex(st->reverbConvMode == 1 ? 1 : 0);
+                engBox->setToolTip(QObject::tr(
+                    "Algorithmic = the classic Freeverb engine (cheap).\n"
+                    "Convolution = real impulse-response reverb: denser,\n"
+                    "richer tails at a higher CPU cost. The wet amount is\n"
+                    "this channel's Reverb slider in both engines."));
+                grid->addWidget(engBox, 0, 1);
+                grid->addWidget(new QLabel(QObject::tr("IR preset:"), pop), 1, 0);
+                auto *irBox = new QComboBox(pop);
+                irBox->addItem(QObject::tr("Hall"));
+                irBox->addItem(QObject::tr("Church"));
+                irBox->addItem(QObject::tr("Room"));
+                irBox->addItem(QObject::tr("Spring"));
+                int pr = st->reverbConvPreset;
+                irBox->setCurrentIndex((pr >= 0 && pr <= 3) ? pr : 0);
+                irBox->setEnabled(st->reverbConvIrPath.isEmpty());
+                grid->addWidget(irBox, 1, 1);
+                grid->setColumnStretch(1, 1);
+                lay->addLayout(grid);
+
+                auto *fileRow = new QHBoxLayout;
+                auto *loadBtn = new QPushButton(QObject::tr("Load IR..."), pop);
+                loadBtn->setToolTip(QObject::tr(
+                    "Use any audio file as the impulse response (first 2 s)."));
+                auto *clearBtn = new QPushButton(QObject::tr("Preset IR"), pop);
+                clearBtn->setToolTip(QObject::tr(
+                    "Drop the custom IR file and use the preset above."));
+                fileRow->addWidget(loadBtn);
+                fileRow->addWidget(clearBtn);
+                fileRow->addStretch(1);
+                lay->addLayout(fileRow);
+
+                auto *pathLbl = new QLabel(pop);
+                pathLbl->setStyleSheet(QStringLiteral(
+                    "background: transparent; color: #8aa6c0; font-size: 10px;"));
+                pathLbl->setWordWrap(true);
+                pathLbl->setText(st->reverbConvIrPath.isEmpty()
+                    ? QObject::tr("Using preset IR")
+                    : QObject::tr("IR: %1").arg(st->reverbConvIrPath));
+                lay->addWidget(pathLbl);
+
+                QObject::connect(engBox,
+                                 qOverload<int>(&QComboBox::currentIndexChanged),
+                                 pop, [st, apply](int v){
+                    st->reverbConvMode = v;
+                    apply();
+                });
+                QObject::connect(irBox,
+                                 qOverload<int>(&QComboBox::currentIndexChanged),
+                                 pop, [st, apply](int v){
+                    st->reverbConvPreset = v;
+                    apply();
+                });
+                QObject::connect(loadBtn, &QPushButton::clicked, pop,
+                                 [pop, st, apply, ch, openEnginePopup]{
+                    // The modal file dialog would force-close the popup
+                    // anyway - close it deliberately, run the picker,
+                    // then REOPEN the popup rebuilt from fresh state so
+                    // the user sees the result where they left off.
+                    // (pop must not be touched after close(): it is
+                    // WA_DeleteOnClose and dies inside the dialog's
+                    // nested event loop.)
+                    pop->close();
+                    QString p = QFileDialog::getOpenFileName(ch,
+                        QObject::tr("Load impulse response"), QString(),
+                        QObject::tr("Audio files (*.wav *.flac *.mp3 *.ogg *.m4a);;All files (*.*)"));
+                    if (!p.isEmpty()) {
+                        st->reverbConvIrPath = p;
+                        st->reverbConvMode = 1;   // an IR implies convolution
+                        apply();
+                    }
+                    (*openEnginePopup)();
+                });
+                QObject::connect(clearBtn, &QPushButton::clicked, pop,
+                                 [pop, st, apply, irBox, pathLbl]{
+                    st->reverbConvIrPath.clear();
+                    apply();
+                    irBox->setEnabled(true);
+                    pathLbl->setText(QObject::tr("Using preset IR"));
+                    Q_UNUSED(pop);
+                });
+
+                // Anchor right above the gear, right-aligned to it;
+                // fall back below when there is no room on screen.
+                pop->adjustSize();
+                QRect btn = ch->fx()->reverbEngineBtnGlobalRect();
+                QPoint tl(btn.right() - pop->width(),
+                          btn.top() - pop->height() - 6);
+                QScreen *scr = QGuiApplication::screenAt(btn.center());
+                if (!scr) scr = QGuiApplication::primaryScreen();
+                if (scr) {
+                    QRect av = scr->availableGeometry();
+                    if (tl.x() < av.left()) tl.setX(av.left());
+                    if (tl.x() + pop->width() > av.right())
+                        tl.setX(av.right() - pop->width());
+                    if (tl.y() < av.top()) tl.setY(btn.bottom() + 6);
+                }
+                pop->move(tl);
+                pop->show();
+            };
+            QObject::connect(ch->fx(), &FxPanel::reverbEngineClicked,
+                             ch, [openEnginePopup]{ (*openEnginePopup)(); });
+        }
         QObject::connect(ch->waveform(), &WaveformPlayer::stopClicked,
                          [sampler, slot, ch]{
             // Infinity mode uses the "infinityPendingRemove" property as
@@ -1793,6 +2062,78 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             extremeLog("WaveformPlayer::reverseToggled slot=%d on=%d", slot, on ? 1 : 0);
             if (sampler) sampler->setSlotReverse(slot, on);
         });
+
+        // ---- Tape stop (vinyl brake, D1) ----
+        // One popup per channel, created up front (cheap). The popup's
+        // disc gestures map to the Sampler tape API; a 20 Hz poll keeps
+        // the disc animation in sync with the actual brake phase. The
+        // poll early-outs while the popup is hidden, so idle cost is a
+        // timer tick + one bool.
+        {
+            auto *vinyl = new VinylPopup(ch);
+            auto *phasePoll = new QTimer(vinyl);
+            phasePoll->setInterval(50);
+            QObject::connect(phasePoll, &QTimer::timeout, vinyl,
+                             [sampler, slot, vinyl]{
+                if (!vinyl->isVisible()) return;
+                int phase = sampler ? sampler->tapeState(slot) : 0;
+                vinyl->setTapePhase(phase);
+                bool playing = sampler &&
+                    (sampler->getState(slot) == Sampler::ePLAYING);
+                vinyl->setPlaying(playing || phase == 2);
+            });
+            phasePoll->start();
+            QObject::connect(ch->waveform(), &WaveformPlayer::vinylClicked,
+                             vinyl, [ch, vinyl]{
+                vinyl->popupAt(ch->waveform()->vinylButtonGlobalPos());
+            });
+            // Arm the tape ring ONLY while the vinyl popup is open, and
+            // DISARM on close. Arming builds a ~1 s decode-ahead window
+            // of already-decoded audio, so the play head trails the
+            // decoder by that much - which means live pitch / speed /
+            // reverb edits (applied in the decoder) would be heard ~1 s
+            // late while armed. Keeping the tape armed for the whole
+            // playback (the old play-start arming) imposed that delay on
+            // EVERY sound. Now normal playback has zero tape latency and
+            // instant FX; the window builds the moment the user opens
+            // the disc, a beat before they scratch.
+            QObject::connect(vinyl, &VinylPopup::armChanged, vinyl,
+                             [sampler, slot](bool on){
+                if (sampler) sampler->tapeArm(slot, on);
+            });
+            QObject::connect(vinyl, &VinylPopup::scratchBegan, vinyl,
+                             [sampler, slot]{
+                if (sampler) sampler->tapeScratchBegin(slot);
+            });
+            QObject::connect(vinyl, &VinylPopup::scratchMoved, vinyl,
+                             [sampler, slot](float deltaSec){
+                // True scratch inside the ring; past its walls the
+                // router turns overflow into seek + rebase needle
+                // jumps - the drag traverses the whole file endlessly.
+                if (sampler) sampler->tapeScratchDelta(slot, deltaSec);
+            });
+            QObject::connect(vinyl, &VinylPopup::scratchScrolled, vinyl,
+                             [sampler, slot](float deltaSec){
+                // Wheel: same router, same endless traversal.
+                if (sampler) sampler->tapeScratchDelta(slot, deltaSec);
+            });
+            QObject::connect(vinyl, &VinylPopup::scratchEnded, vinyl,
+                             [sampler, slot](int ms){
+                if (sampler) sampler->tapeScratchEnd(slot, static_cast<float>(ms));
+            });
+            QObject::connect(vinyl, &VinylPopup::oneShotRequested, vinyl,
+                             [sampler, slot](int ms){
+                // Brake runs to a full stop; the audio thread auto-
+                // pauses the slot when the ramp reaches zero.
+                if (sampler) sampler->tapeStop(slot, static_cast<float>(ms));
+            });
+            QObject::connect(vinyl, &VinylPopup::resumeRequested, vinyl,
+                             [sampler, slot](int ms){
+                if (sampler) sampler->tapeRelease(slot, static_cast<float>(ms));
+            });
+            ch->setVinylButtonVisible(model->getShowVinylButton());
+        }
+
         QObject::connect(ch, &Channel::stateChanged,
                          [ch](int id){
             if (ChannelStatePersistence::isEnabled())
@@ -1933,6 +2274,7 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
             ch->setMeterVisible(model->getAudioMeterVisible());
             ch->setExportVisible(model->getAudioExportEnabled());
             ch->setSandboxFeatureEnabled(model->getAudioSandboxEnabled());
+            ch->setVinylButtonVisible(model->getShowVinylButton());
         }
     });
 

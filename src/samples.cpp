@@ -259,7 +259,9 @@ void Sampler::reverseWorkerProc(int slot, uint64_t epoch, bool wantReverse,
 
 	newFile->setCancelToken(cancel.get());
 	if (sound.reverse || wantReverse) newFile->setReverse(true);
-	if (sound.autoNormalize)           newFile->setAutoNormalize(true);
+	if (sound.autoNormalize ||
+	    m_globalNormalize.load(std::memory_order_relaxed))
+		newFile->setAutoNormalize(true);
 	if (pitchBase   != 1.0f) newFile->setPitchFactor(pitchBase);
 	if (speedFactor != 1.0f) newFile->setSpeedFactor(speedFactor);
 	if (reverbMix   >  0.0f) newFile->setReverbMix(reverbMix);
@@ -418,6 +420,10 @@ void Sampler::setSlotSandboxState(int slot, const SandboxState &s)
 	                    s.spatialMode == SandboxState::Spatial_8DPreset);
 	if (wantsLeia3D)
 		sl.dsp->prepareLeia(48000.0);
+	// Convolution-reverb IR build (Q6) has the same "heavy, keep out of
+	// the audio lock" profile: IR synthesis or file decode + partition
+	// FFTs. No-op unless conv mode is selected / the IR changed.
+	sl.dsp->prepareConvReverb(s);
 
 	// Phase 3 - apply the rest of the state under the audio lock. With
 	// Leia already initialised, applyState's own ensureInit call is a
@@ -565,6 +571,19 @@ Sampler::~Sampler()
 	// destructor would call std::terminate(). Signal cancel + join
 	// here so the plugin shuts down cleanly even on the error path.
 	m_shuttingDown.store(true, std::memory_order_release);
+	// Stop + join the vinyl backfill worker (belt-and-braces if
+	// shutdown() was skipped), then close any backfill decoders.
+	m_backfillStop.store(true, std::memory_order_release);
+	m_backfillCv.notify_all();
+	if (m_backfillWorker.joinable())
+		m_backfillWorker.join();
+	for (int i = 0; i < MAX_SLOTS; i++) {
+		if (m_slots[i].backfillFile) {
+			m_slots[i].backfillFile->close();
+			delete m_slots[i].backfillFile;
+			m_slots[i].backfillFile = nullptr;
+		}
+	}
 	for (int i = 0; i < MAX_SLOTS; i++) {
 		if (m_slots[i].reverseWorkerCancel)
 			m_slots[i].reverseWorkerCancel->store(true, std::memory_order_relaxed);
@@ -655,6 +674,19 @@ void Sampler::shutdown()
 	m_seekCv.notify_all();
 	joinThreadBounded(m_seekWorker, 500);
 
+	// Stop the vinyl backfill worker (same pattern as the seek worker).
+	m_backfillStop.store(true, std::memory_order_release);
+	m_backfillCv.notify_all();
+	joinThreadBounded(m_backfillWorker, 500);
+	// Close any lazily-opened backfill decoders.
+	for (int i = 0; i < MAX_SLOTS; i++) {
+		if (m_slots[i].backfillFile) {
+			m_slots[i].backfillFile->close();
+			delete m_slots[i].backfillFile;
+			m_slots[i].backfillFile = nullptr;
+		}
+	}
+
 	// Signal every in-flight worker to cancel its decode loop, then
 	// join them OUTSIDE m_mutex. Joining inside the lock would
 	// deadlock because the worker grabs m_mutex to perform the swap.
@@ -741,8 +773,17 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 	SampleBuffer::Lock sbl(sb.getMutex());
 
 	const bool isStretch = slot && slot->dsp && slot->dsp->isStretchEnabled();
+	// Tape (vinyl) decode-ahead: the tape ring is a WINDOW of decoded
+	// audio around the play head - up to ~2 s of not-yet-heard future
+	// (forward-scratch budget) plus history behind (backward budget).
+	// It INGESTS from the sample buffer ahead of realtime and PRODUCES
+	// a full output block from the head at the play rate, so it must
+	// run even when the buffer momentarily drains (EOF drain, refill
+	// after a needle jump) - the ring keeps producing on its own.
+	const bool tapeActive = slot && slot->dsp && !isStretch
+	                        && slot->dsp->tapeActive();
 
-	if(sb.avail() == 0 && !isStretch)
+	if(sb.avail() == 0 && !isStretch && !tapeActive)
 		return 0;
 
 	if(overLeft)
@@ -766,10 +807,11 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 	int write = 0;
 	int consumed = 0;
 
-	write = isStretch ? count : std::min(count, avail);
+	write = (isStretch || tapeActive) ? count : std::min(count, avail);
 
 	static thread_local std::vector<short> dspTemp;
 	int  stretchConsumed = -1;     // -1 = not on stretch path
+	int  tapeConsumed    = -1;     // -1 = not on tape decode-ahead path
 	bool isCapturePath = slot && (&sb == &slot->sbCapture);
 	// Push the output-domain gain to the DSP block so its EQ analyser
 	// scales POST-chain samples by what the listener actually hears
@@ -792,7 +834,6 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 	else if (slot && slot->dsp)
 	{
 		if ((int)dspTemp.size() < write * 2) dspTemp.resize(write * 2);
-		std::memcpy(dspTemp.data(), in, sizeof(short) * write * 2);
 		float pL = 0.0f, pR = 0.0f;
 		// Cross-slot sidechain: for each *SidechainSlot >= 0 pull the
 		// source's rolling envelope atomic and push into the target
@@ -813,7 +854,30 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 			slot->dsp->m_extCompEnv.store(
 				pullEnv(st.compSidechainSlot), std::memory_order_relaxed);
 		}
-		slot->dsp->process(dspTemp.data(), write, 2, pL, pR, isCapturePath);
+		if (tapeActive)
+		{
+			// Decode-ahead: ingest up to `avail` input frames into the
+			// tape window (bounded internally for CPU + ahead target),
+			// produce a full `write` block from the head. Returns the
+			// frames actually ingested = the amount to consume from sb
+			// (may be < write while building the window, or 0 at EOF /
+			// during a post-seek refill while the ring drains).
+			tapeConsumed = slot->dsp->processTapeBlock(
+				// HOLD ingest while a release prime-seek is in flight: sb
+				// still holds STALE pre-scratch audio (the decoder has not
+				// re-homed to the needle yet). Ingesting it would splice the
+				// old forward position into the ring right after the needle.
+				// The head plays the ring decode-ahead (~1.5 s) meanwhile;
+				// ingest resumes when the worker refills sb from the needle.
+				in,
+				(slot->tapePrimeSeek.load(std::memory_order_relaxed) ? 0 : avail),
+				dspTemp.data(), write, 2, pL, pR, isCapturePath);
+		}
+		else
+		{
+			std::memcpy(dspTemp.data(), in, sizeof(short) * write * 2);
+			slot->dsp->process(dspTemp.data(), write, 2, pL, pR, isCapturePath);
+		}
 		(void)pL; (void)pR;
 		in = dspTemp.data();
 	}
@@ -888,8 +952,13 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 		slot->peakL.store(std::max(slotMaxL, prevL * 0.95f));
 		slot->peakR.store(std::max(slotMaxR, prevR * 0.95f));
 	}
-	consumed = write;
+	// Consume only real input frames. The stretch + tape decode-ahead
+	// paths decouple input (ingested) from output (produced), so they
+	// report their own consume count; the plain path consumes exactly
+	// what it output.
+	consumed = std::min(write, avail);
 	if (stretchConsumed >= 0) consumed = stretchConsumed;
+	if (tapeConsumed    >= 0) consumed = tapeConsumed;
 
 	sb.consume(NULL, consumed, true);
 	return write;
@@ -996,6 +1065,16 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 		if (written > totalWritten)
 			totalWritten = written;
 
+		// Tape stop auto-pause: the vinyl brake reached zero. Freeze the
+		// slot exactly like a user pause; the vinyl popup's release (or
+		// the play button) resumes it. Emitting under m_mutex is safe -
+		// cross-thread signals are queued by Qt.
+		if (slot.dsp && slot.dsp->tapeFullyStopped()) {
+			slot.state = ePAUSED;
+			emit onPausePlaying(s);
+			continue;
+		}
+
 		// Refresh the GUI's lock-free position cache. Computing it here
 		// (audio thread) instead of on demand under m_mutex from the GUI
 		// timer eliminates a 30 Hz x N-channel mutex contention that
@@ -1078,17 +1157,61 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 					availSamples = slot.sbPlayback.avail();
 				}
 				double bufferedSec = availSamples / 48000.0 * sf;
-				posSec = decoderPos - bufferedSec;
-				if (posSec < 0.0) posSec = 0.0;
+				// SCRATCH: the head roams the whole file via backfill, and
+				// the frontier trim pins the head-to-frontier lag ~1.5 s,
+				// so that lag can't express the head's absolute position.
+				// Track it directly instead: anchor at the grab position
+				// and add the tape's net head displacement (output secs ->
+				// input-time via speed). Without this the cursor stayed
+				// frozen while the audio scratched backward across the
+				// file ("stavo a 27 e a 27 sono rimasto").
+				// Head-anchor branch: active during the drag (Scratch) AND
+				// through the release re-home (tapePrimeSeek) - while the
+				// prime-seek is in flight the main decoder is still parked
+				// at the stranded pre-scratch position, so the decoder
+				// formula below would snap the cursor forward. Keep it on
+				// the head until the decoder is re-homed to the needle (the
+				// seek worker clears both the anchor and the flag at commit,
+				// after which the decoder formula equals the head position).
+				if (slot.dsp
+				    && !std::isnan(slot.scratchStartCursorSec)
+				    && (slot.dsp->tapePhase() == TapeStop::Scratch
+				        || slot.tapePrimeSeek.load(std::memory_order_relaxed))) {
+					posSec = slot.scratchStartCursorSec
+					       + (double)slot.dsp->tapeHeadDisplacementSeconds() * sf;
+					double minB = (slot.cropStart > 0.0) ? slot.cropStart : 0.0;
+					if (posSec < minB)   posSec = minB;
+					if (posSec > lenSec) posSec = lenSec;
+				} else {
+					// Tape decode-ahead (Armed / brake / spin-up): the
+					// audible position is decoderPos minus the sb buffer
+					// minus the tape window (head-to-frontier lag).
+					double tapeLagSec = 0.0;
+					if (slot.dsp && slot.dsp->tapeActive())
+						tapeLagSec = (double)slot.dsp->tapeLagSeconds() * sf;
+					posSec = decoderPos - bufferedSec - tapeLagSec;
+					if (posSec < 0.0) posSec = 0.0;
+				}
 			}
 			// Rate-limit + monotonic guard. Direction depends on the
 			// slot's reverse flag - forward play is monotonic up,
 			// reverse play is monotonic down. The per-cycle advance is
 			// clamped so a slider seek can never jump several seconds.
+			//
+			// EXCEPTION: while the tape (vinyl) effect is engaged the
+			// cursor legitimately moves BACKWARD (scratch) and jumps
+			// at drag speed - accept the raw position so the waveform
+			// follows the hand.
 			{
 				double prev = slot.cachedPositionSec.load(std::memory_order_relaxed);
 				double accepted = posSec;
-				if (slot.posCacheValid) {
+				// Only when the tape is genuinely re-timing (scratch /
+				// brake) - the transparent Armed ingest state must not
+				// disable the jitter guards for the whole playback.
+				const bool tapeFree = slot.dsp && slot.dsp->tapeRetiming();
+				if (tapeFree) {
+					slot.posCacheValid = true;
+				} else if (slot.posCacheValid) {
 					constexpr double kMaxPerCycle = 0.20;
 					if (!slot.audioReverse) {
 						if (accepted < prev) accepted = prev;
@@ -1120,6 +1243,39 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 			}
 			if (isStretch && canEnd)
 				canEnd = slot.dsp->stretchCaptureDone();
+
+			// Tape decode-ahead: at EOF the ring still holds up to ~1 s
+			// of decoded-but-unheard audio (the forward window). It must
+			// drain at the play rate before the slot ends, or every
+			// vinyl-armed sound would lose its last second.
+			//
+			// Scratch = the user's hand is ON the record: never end
+			// under it, period (a fast forward hop landing at EOF used
+			// to kill the slot mid-gesture).
+			//
+			// Any other ACTIVE phase (Armed / brake / spin-up) gets a
+			// DEADLINE: the remaining ring is at most lagSeconds long,
+			// so lag + 1 s of wall time covers the drain. The deadline
+			// also guards against a starved head never quite reaching
+			// zero lag (the "stops completely" zombie-slot lock-up).
+			if (canEnd && slot.dsp && slot.dsp->tapeActive()) {
+				if (slot.dsp->tapePhase() == TapeStop::Scratch) {
+					canEnd = false;
+					slot.tapeEndDeferMs = 0;
+				} else if (slot.dsp->tapeLagSeconds() > 0.05f) {
+					int64_t nowMs = std::chrono::duration_cast<
+						std::chrono::milliseconds>(
+							std::chrono::steady_clock::now()
+								.time_since_epoch()).count();
+					if (slot.tapeEndDeferMs == 0)
+						slot.tapeEndDeferMs = nowMs + 1000 +
+							(int64_t)(slot.dsp->tapeLagSeconds() * 1000.0f);
+					if (nowMs < slot.tapeEndDeferMs)
+						canEnd = false;
+				}
+			}
+			if (canEnd)
+				slot.tapeEndDeferMs = 0;
 
 			if (canEnd)
 			{
@@ -1237,7 +1393,16 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 						SampleBuffer::Lock sblc(slot.sbCapture.getMutex());
 						slot.sbCapture.clear();
 					}
-					if (slot.dsp) slot.dsp->reset();
+					if (slot.dsp) {
+						// A loop wrap mid-scratch must not kill the
+						// gesture either (same reason as the seek
+						// worker): keep the tape, rebase onto the
+						// restarted stream.
+						bool scratching = slot.dsp->tapePhase()
+						                  == TapeStop::Scratch;
+						slot.dsp->reset(scratching);
+						if (scratching) slot.dsp->tapeScratchRebase();
+					}
 					slot.stretchBaseTime = 0.0;
 					// Loop restart: drop the rate-limiter anchor + snap
 					// the cache to cropStart so the cursor jumps back to
@@ -1326,6 +1491,25 @@ int Sampler::fetchOutputSamples(short *samples, int count, int channels, const u
 		                    : AudioUtils::linearToDb((double)std::max(curDuck, 1e-4f));
 		double localDb = m_multiMode ? slot.slotDbLocal : m_globalDbSettingLocal;
 		setVolumeDb(localDb + slot.soundDbSetting + duckActiveDb);
+
+		// Vinyl backward-infinite backfill: before producing this block,
+		// prepend any older chunk the worker has ready into the tape's
+		// history end, so a backward scratch never runs out. Non-blocking
+		// (try_lock); if the worker is mid-swap we simply feed next block.
+		if (slot.dsp && slot.backfillActive.load(std::memory_order_relaxed)
+		    && slot.dsp->tapeBackfillWant() > 0
+		    && slot.backfillChunkN.load(std::memory_order_acquire) > 0) {
+			if (slot.backfillMutex.try_lock()) {
+				int n = slot.backfillChunkN.load(std::memory_order_relaxed);
+				if (n > 0 && (int)slot.backfillChunkL.size() >= n) {
+					slot.dsp->tapeFeedBackfill(slot.backfillChunkL.data(),
+					                           slot.backfillChunkR.data(), n);
+				}
+				slot.backfillChunkN.store(0, std::memory_order_release);
+				slot.backfillMutex.unlock();
+				m_backfillCv.notify_all();   // decode the next older chunk
+			}
+		}
 
 		bool isFirstSlot = (totalWritten == 0);
 		int written = fetchSamples(slot.sbPlayback, m_peakMeterPlayback, samples, count, channels, true,
@@ -1680,6 +1864,14 @@ InputFile *Sampler::stopSlotInternal(int slot, bool &emitStop)
 {
 	emitStop = false;
 	PlaybackSlot &s = m_slots[slot];
+	// End any active vinyl backfill session before tearing the slot down,
+	// so the worker stops touching this slot (release-ordered) before the
+	// backfill path / decoder can change under a fresh play.
+	backfillEnd(slot);
+	// Cancel any pending release re-home so its ingest hold / cursor pin
+	// never leaks onto the next sound loaded into this slot.
+	s.tapePrimeSeek.store(false, std::memory_order_relaxed);
+	s.scratchStartCursorSec = std::numeric_limits<double>::quiet_NaN();
 	// Bump the reverse-worker epoch unconditionally so any in-flight
 	// async setSlotReverse worker discards its half-built InputFile
 	// instead of swapping it into the slot AFTER the stop. Also flip
@@ -1887,7 +2079,10 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 	// wins over the per-cell flag when ON.
 	const bool isReverse = (sound.reverse || chanReverse);
 	if (isReverse)           newFile->setReverse(true);
-	if (sound.autoNormalize) newFile->setAutoNormalize(true);
+	// Per-cell flag OR the global "normalize loudness" setting (Q2).
+	if (sound.autoNormalize ||
+	    m_globalNormalize.load(std::memory_order_relaxed))
+		newFile->setAutoNormalize(true);
 	// Pre-set pitch / speed / reverb factors BEFORE open() so the
 	// initial filter-graph build already applies them.
 	{
@@ -1935,6 +2130,15 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 			s.inputFile = newFile;
 			s.soundDbSetting = (double)sound.volume;
 			s.stretchBaseTime = 0.0;
+			// Vinyl backfill decodes older audio from this same file. Just
+			// record the path; the backfill worker owns the decoder and
+			// reopens it lazily when the path differs. Safe to publish
+			// here without touching the decoder: any active backfill was
+			// ended by stopSlotInternal before this fresh play, so the
+			// worker is not reading backfillPath concurrently (the
+			// backfillActive release/acquire orders this write before the
+			// next backfillBegin).
+			s.backfillPath = sound.filename;
 			// Remember the trim start so a looping slot restarts inside the
 			// crop range. getStartTime() is 0.0 when the cell has no crop.
 			s.cropStart = sound.getStartTime();
@@ -1961,6 +2165,9 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 			// first audio-thread cache refresh snaps to the decoder
 			// position instead of being clamped against a stale value.
 			s.posCacheValid = false;
+			// Fresh playback: a leftover tape-stop brake would swallow
+			// the new sound (frozen read head, silence). Snap to Idle.
+			if (s.dsp) s.dsp->tapeSnapReset();
 			// Fresh playback: clear the anti-glitch loop-rate guard so
 			// the first loop boundary is timed cleanly (otherwise a
 			// previous-session high-rate burst could carry over and
@@ -2089,9 +2296,578 @@ void Sampler::unpausePlayback(int slot)
 				resumed.push_back(slot);
 			}
 		}
+		// Resuming a slot frozen by a completed tape stop via the play
+		// button: snap the brake to Idle so audio passes immediately.
+		// (The vinyl popup's own release path calls tapeRelease FIRST,
+		// which moves the phase to SpinUp - not fully-stopped - so the
+		// spin-up ramp is preserved there.)
+		for (int s : resumed)
+		{
+			if (m_slots[s].dsp && m_slots[s].dsp->tapeFullyStopped())
+				m_slots[s].dsp->tapeSnapReset();
+		}
 	}
 	for (int s : resumed)
 		emit onUnpausePlaying(s);
+}
+
+
+//---------------------------------------------------------------
+// Purpose: Tape stop (vinyl brake) commands - D1
+//---------------------------------------------------------------
+void Sampler::tapeStop(int slot, float brakeMs)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	PlaybackSlot &sl = m_slots[slot];
+	if (sl.state.load(std::memory_order_relaxed) != ePLAYING) return;
+	{
+		std::lock_guard<std::mutex> Lock(m_mutex);
+		if (!sl.dsp) {
+			sl.dsp = std::make_unique<SlotDsp>();
+			sl.dsp->setSampleRate(48000.0);
+		}
+	}
+	// Fresh brake episode: a stale end-defer deadline from a previous
+	// episode must not let this one end prematurely at EOF.
+	sl.tapeEndDeferMs = 0;
+	sl.dsp->tapeTrigger(brakeMs);
+}
+
+
+void Sampler::tapeRelease(int slot, float spinMs)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	PlaybackSlot &sl = m_slots[slot];
+	if (!sl.dsp) return;
+	bool wasStopped = sl.dsp->tapeFullyStopped();
+	// Phase moves to SpinUp BEFORE the unpause so the unpause path's
+	// fully-stopped snap-reset doesn't cancel the spin-up ramp.
+	sl.dsp->tapeRelease(spinMs);
+	if (wasStopped && sl.state.load(std::memory_order_relaxed) == ePAUSED)
+		unpausePlayback(slot);
+}
+
+
+int Sampler::tapeState(int slot) const
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return 0;
+	const PlaybackSlot &sl = m_slots[slot];
+	if (!sl.dsp) return 0;
+	return static_cast<int>(sl.dsp->tapePhase());
+}
+
+
+void Sampler::tapeScratchBegin(int slot)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	PlaybackSlot &sl = m_slots[slot];
+	state_e st = sl.state.load(std::memory_order_relaxed);
+	if (st != ePLAYING && st != ePAUSED) return;
+	// A prior gesture's release re-home (if any) is superseded by this new
+	// grab: drop the ingest hold so this gesture ingests normally.
+	sl.tapePrimeSeek.store(false, std::memory_order_relaxed);
+	{
+		std::lock_guard<std::mutex> Lock(m_mutex);
+		if (!sl.dsp) {
+			sl.dsp = std::make_unique<SlotDsp>();
+			sl.dsp->setSampleRate(48000.0);
+		}
+	}
+	// Phase flips to Scratch BEFORE the unpause, so the unpause path's
+	// fully-stopped snap-reset does not wipe the frozen head position -
+	// grabbing a stopped record and dragging it is the whole point.
+	sl.tapeSeekAccum = 0.0f;
+	sl.lastScrubTargetSec = std::numeric_limits<double>::quiet_NaN();
+	sl.lastScrubDir = 0;
+	sl.tapeEndDeferMs = 0;
+	// Anchor the scratch cursor at the current audible file position, so
+	// the cursor follows the head's absolute motion for this gesture.
+	sl.scratchStartCursorSec = sl.cachedPositionSec.load(std::memory_order_relaxed);
+	sl.dsp->tapeScratchBegin();
+	if (st == ePAUSED)
+		unpausePlayback(slot);
+	// Open the backward-infinite backfill session: seed the decode
+	// cursor at the tape ring's current oldest file position and start
+	// the worker fetching older audio on demand.
+	backfillBegin(slot);
+}
+
+
+void Sampler::tapeArm(int slot, bool on)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	PlaybackSlot &sl = m_slots[slot];
+	if (on) {
+		state_e st = sl.state.load(std::memory_order_relaxed);
+		if (st != ePLAYING && st != ePAUSED) return;
+		{
+			std::lock_guard<std::mutex> Lock(m_mutex);
+			if (!sl.dsp) {
+				sl.dsp = std::make_unique<SlotDsp>();
+				sl.dsp->setSampleRate(48000.0);
+			}
+		}
+		sl.dsp->tapeArm(true);
+	} else if (sl.dsp) {
+		sl.dsp->tapeArm(false);
+		backfillEnd(slot);
+	}
+}
+
+
+void Sampler::tapeScratchDelta(int slot, float deltaSeconds)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	PlaybackSlot &sl = m_slots[slot];
+	if (!sl.dsp) return;
+
+	// Smart routing. The tape ring only holds the PAST (what it has
+	// actually ingested), so:
+	//   - backward within the REAL history -> true reverse scratch
+	//     audio; forward while behind live -> true forward scratch;
+	//   - forward AT live (fast-forward into the future) or backward
+	//     beyond the history -> async decoder seek. Seek overflow goes
+	//     through a 0.35 s DEADBAND accumulator: hand jitter at the
+	//     live edge must never fire a seek (each seek used to wipe the
+	//     ring -> the backward drag then read zeros = the "no scratch
+	//     sound" bug).
+	const float lag     = sl.dsp->tapeLagSeconds();
+	const float history = sl.dsp->tapeHistorySeconds();
+
+	auto scrubSeek = [this, &sl, slot](float deltaOutSec) -> bool {
+		double sf = 1.0;
+		{
+			// inputFile is GUI-mutated only via play/stop paths; a raw
+			// read of the speed factor here matches getPosition usage.
+			if (sl.inputFile) sf = (double)sl.inputFile->getSpeedFactor();
+			if (sf <= 0.0) sf = 1.0;
+		}
+		// Accumulate on top of any not-yet-committed seek target so a
+		// fast drag doesn't lose deltas between worker commits.
+		double base = sl.pendingSeekSec.load(std::memory_order_relaxed);
+		if (std::isnan(base)) {
+			base = sl.cachedPositionSec.load(std::memory_order_relaxed);
+			// The worker NaNs pendingSeekSec at batch-COLLECT time,
+			// then runs the slow FFmpeg scan: a hop landing in that
+			// window would chain off the position cache, which still
+			// reads the PRE-seek audio - the new target computed
+			// behind the in-flight one = the "fast forward suddenly
+			// jumps backward" bug. Chain off whichever of {cache,
+			// last committed target} is further along the drag
+			// direction, so the hop sequence stays monotone.
+			if (!std::isnan(sl.lastScrubTargetSec)) {
+				if (deltaOutSec >= 0.0f)
+					base = std::max(base, sl.lastScrubTargetSec);
+				else
+					base = std::min(base, sl.lastScrubTargetSec);
+			}
+		}
+		double target = base + (double)deltaOutSec * sf;
+		// Clamp to the playable range HERE (seek() clamps too, but the
+		// no-op check below needs the clamped value).
+		double start = (sl.cropStart > 0.0) ? sl.cropStart : 0.0;
+		double len   = sl.cachedLengthSec.load(std::memory_order_relaxed);
+		double end   = (sl.cropEnd > 0.0) ? sl.cropEnd : len;
+		if (target < start) target = start;
+		if (end > 0.0 && target > end) target = end;
+		// Parked at a file wall: re-seeking to the same spot fired a
+		// seek + rebase per deadband-worth of drag - at the file START
+		// that was an audible restart-stutter loop ("near the
+		// beginning it does not skip well"). Nothing to move = no-op.
+		if (std::fabs(target - base) < 0.05) return false;
+		seek(target, slot);
+		sl.lastScrubTargetSec = target;
+		return true;
+	};
+
+	float seekDelta = 0.0f;
+	if (deltaSeconds >= 0.0f) {
+		// Forward budget = the decode-ahead window (head-to-frontier),
+		// up to ~2 s of decoded-but-unheard audio. A forward stroke
+		// stays a TRUE scratch across all of it before any seek.
+		float withinRing = std::min(deltaSeconds,
+		                            std::max(0.0f, lag - 0.02f));
+		if (withinRing > 0.0005f) sl.dsp->tapeScratchDelta(withinRing);
+		seekDelta = deltaSeconds - withinRing;
+	} else {
+		// Backward: send the FULL delta straight to the tape and let the
+		// tape's own clamp + the on-demand backfill determine how far it
+		// can go. The backfill worker keeps prepending OLDER audio at the
+		// ring's oldest end, so backward is effectively infinite (down to
+		// the file start); when the backfill can't keep up the tape clamp
+		// simply holds the head at the oldest sample - smooth, never a
+		// jump. Never a seek (you cannot decode backward; a backward
+		// "seek + rebase" glued the head to the FORWARD frontier = jumped
+		// ahead + wiped history = the old "imprecise jumps"). Clamping the
+		// delta to the CURRENT in-ring room here (the old code) under-fed
+		// the tape while the backfill was still catching up, capping
+		// backward at the tiny window the ring held right after the popup
+		// re-armed it - the "only a couple of seconds back" report.
+		(void)history;
+		sl.dsp->tapeScratchDelta(deltaSeconds);
+		seekDelta = 0.0f;
+	}
+
+	// Overflow past the ring walls (forward beyond live / backward
+	// beyond the ingested history) = the user wants to keep going -
+	// the walls must never be dead ends. It becomes an async decoder
+	// seek plus a tape scratchRebase(): the ring history restarts and
+	// the head re-glues to live, so the gesture continues coherently
+	// on the post-seek stream (CDJ-style needle jumps). The rebase is
+	// what the first drag-seek attempt was missing - it kept the stale
+	// ring and the head scrubbed across a splice = garbled audio.
+	// The deadband keeps hand jitter at a wall from firing seeks.
+	if (seekDelta != 0.0f) {
+		sl.tapeSeekAccum += seekDelta;
+		// CAP the banked overflow: one wild 500-px stroke is ~6 s of
+		// tape - uncapped it fired 6-second hops ("salta blocchi
+		// interi"). Bounded at 1.2 s/hop the max traversal is a sane
+		// ~10x realtime and single strokes stay musical.
+		if (sl.tapeSeekAccum >  1.2f) sl.tapeSeekAccum =  1.2f;
+		if (sl.tapeSeekAccum < -1.2f) sl.tapeSeekAccum = -1.2f;
+		// Needle-jump pacing: at most one seek + rebase every 120 ms.
+		// A wild drag used to fire a rebase per 0.25 s of overflow -
+		// faster than the async seek worker could land the seeks, so
+		// the ring got wiped over and over mid-flight = choppy garbage
+		// ("se vado troppo veloce"). Overflow keeps accumulating while
+		// paced, so fast drags produce FEWER, BIGGER hops - a cleaner
+		// CDJ seek texture that still covers the same distance.
+		int64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now().time_since_epoch()).count();
+		int dir = (sl.tapeSeekAccum > 0.0f) ? 1 : -1;
+		// Direction hysteresis: a hop OPPOSITE to the last fired hop
+		// needs 350 ms of separation. Rapid back-and-forth strokes
+		// (the wiggle gesture) then CANCEL inside the accumulator
+		// instead of firing a +hop immediately followed by a -hop -
+		// that pair skipped whole blocks both ways and out-ran the
+		// seek worker. Sustained one-direction drags are unaffected.
+		bool dirOk = (sl.lastScrubDir == 0) || (dir == sl.lastScrubDir)
+		             || (nowMs - sl.lastScrubMs >= 350);
+		if (std::fabs(sl.tapeSeekAccum) >= 0.25f
+		    && nowMs - sl.lastScrubMs >= 120 && dirOk) {
+			if (scrubSeek(sl.tapeSeekAccum)) {
+				sl.dsp->tapeScratchRebase();
+				// Re-anchor the scratch cursor to the seek target so the
+				// head-displacement cursor stays continuous across the
+				// rebase (the rebase re-zeroes the tape's head coordinate;
+				// without moving the anchor forward the cursor would snap
+				// back to the grab position = "forward too fast jumps
+				// back"). scrubSeek stored the committed target here.
+				if (!std::isnan(sl.lastScrubTargetSec))
+					sl.scratchStartCursorSec = sl.lastScrubTargetSec;
+				sl.lastScrubMs = nowMs;
+				sl.lastScrubDir = dir;
+			}
+			// Reset even when the seek was a wall no-op: pulling
+			// against the file start/end must not bank up a huge
+			// phantom jump that fires on the first reverse motion.
+			sl.tapeSeekAccum = 0.0f;
+		}
+	} else {
+		// Direction handled fully in-ring: drop any sub-threshold
+		// jitter so it can't fire a stale seek seconds later.
+		sl.tapeSeekAccum = 0.0f;
+	}
+}
+
+
+// ---------------------------------------------------------------
+// Backward-infinite vinyl backfill orchestration.
+// ---------------------------------------------------------------
+void Sampler::backfillBegin(int slot)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	PlaybackSlot &sl = m_slots[slot];
+	if (!sl.dsp || !sl.inputFile) return;
+	// Reverse mode: the main decoder produces REVERSED audio, but the
+	// backfill decoder plays FORWARD - splicing forward audio into a
+	// reverse-playing tape made a non-reversed burst ("per un attimo
+	// sento l'audio senza reverse"). Backward scratch in reverse stays
+	// ring-limited (no backfill) until a reverse-aware backfill exists.
+	if (sl.audioReverse) {
+		sl.backfillActive.store(false, std::memory_order_relaxed);
+		return;
+	}
+	// File position of the tape's current oldest ring sample = the
+	// audible head position minus the in-ring backward room (converted
+	// output->input seconds via the slot speed). The worker decodes the
+	// chunk ENDING there and prepends it, extending history backward.
+	double sf = (double)sl.inputFile->getSpeedFactor();
+	if (sf <= 0.0) sf = 1.0;
+	double headSec = sl.cachedPositionSec.load(std::memory_order_relaxed);
+	double backSec = (double)sl.dsp->tapeBackwardRoomSeconds() * sf;
+	double oldestSec = headSec - backSec;
+	double lo = (sl.cropStart > 0.0) ? sl.cropStart : 0.0;
+	if (oldestSec < lo) oldestSec = lo;
+	sl.backfillNextFileSec.store(oldestSec, std::memory_order_relaxed);
+	sl.backfillSpeed.store((float)sf, std::memory_order_relaxed);
+	// Match the live FxPanel pitch + reverb so backfilled history is not
+	// dry / un-pitched relative to the forward stream.
+	sl.backfillPitch.store(sl.lastSlotPitchFactor, std::memory_order_relaxed);
+	sl.backfillReverb.store(sl.fxReverbWet, std::memory_order_relaxed);
+	sl.backfillChunkN.store(0, std::memory_order_relaxed);
+	sl.backfillAtStart.store(false, std::memory_order_relaxed);
+	sl.backfillActive.store(true, std::memory_order_relaxed);
+	m_backfillSlot.store(slot, std::memory_order_relaxed);
+	startBackfillWorker();
+	m_backfillCv.notify_all();
+	extremeLog("[BACKFILL] begin slot=%d head=%.3f back=%.3f oldest=%.3f sf=%.2f path='%s'",
+	           slot, headSec, backSec, oldestSec, sf,
+	           sl.backfillPath.toUtf8().constData());
+}
+
+void Sampler::backfillEnd(int slot)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	PlaybackSlot &sl = m_slots[slot];
+	sl.backfillActive.store(false, std::memory_order_relaxed);
+	int expected = slot;
+	m_backfillSlot.compare_exchange_strong(expected, -1,
+	                                        std::memory_order_relaxed);
+}
+
+void Sampler::startBackfillWorker()
+{
+	bool expected = false;
+	if (!m_backfillStarted.compare_exchange_strong(
+			expected, true, std::memory_order_acq_rel))
+		return;
+	m_backfillWorker = std::thread(&Sampler::backfillWorkerProc, this);
+}
+
+namespace {
+// Collects decoded interleaved-stereo shorts into float L/R until it has
+// `want` frames. Extra frames past `want` are dropped.
+struct BackfillCollector : public SampleProducer {
+	std::vector<float> &L, &R;
+	int want;
+	BackfillCollector(std::vector<float> &l, std::vector<float> &r, int w)
+		: L(l), R(r), want(w) {}
+	void produce(const short *samples, int count) override {
+		constexpr float kInv = 1.0f / 32768.0f;
+		for (int i = 0; i < count && (int)L.size() < want; ++i) {
+			L.push_back(samples[i * 2 + 0] * kInv);
+			R.push_back(samples[i * 2 + 1] * kInv);
+		}
+	}
+};
+} // namespace
+
+void Sampler::backfillWorkerProc()
+{
+	// Chunk size (output seconds) fetched per decode. Small enough that
+	// even a fast (12x) backward scratch is fed within a couple of ring
+	// blocks, large enough to amortise the FFmpeg seek.
+	constexpr double kChunkOutSec = 0.5;
+	const int chunkFrames = (int)(kChunkOutSec * 48000.0);
+
+	while (!m_backfillStop.load(std::memory_order_acquire)) {
+		int slot;
+		{
+			std::unique_lock<std::mutex> lk(m_backfillMutex);
+			m_backfillCv.wait_for(lk, std::chrono::milliseconds(15), [this]{
+				return m_backfillStop.load(std::memory_order_acquire)
+				    || m_backfillSlot.load(std::memory_order_relaxed) >= 0;
+			});
+			if (m_backfillStop.load(std::memory_order_acquire)) return;
+			slot = m_backfillSlot.load(std::memory_order_relaxed);
+		}
+		if (slot < 0 || slot >= MAX_SLOTS) continue;
+		PlaybackSlot &sl = m_slots[slot];
+		if (!sl.backfillActive.load(std::memory_order_relaxed)) continue;
+		// Keep ONE older chunk decoded and ready at all times (decoupled
+		// from the tape's want-gate, which the DRAIN checks): a chunk is
+		// then always on hand the instant the head consumes the backward
+		// window, so timing can never starve the scratch. Only idle when
+		// a chunk is already ready or we hit the file start.
+		if (sl.backfillChunkN.load(std::memory_order_relaxed) != 0
+		    || sl.backfillAtStart.load(std::memory_order_relaxed)
+		    || !sl.dsp) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(3));
+			continue;
+		}
+
+		double endSec = sl.backfillNextFileSec.load(std::memory_order_relaxed);
+		double sf = (double)sl.backfillSpeed.load(std::memory_order_relaxed);
+		if (sf <= 0.0) sf = 1.0;
+		double chunkInSec = kChunkOutSec * sf;    // input seconds spanned
+		double startSec = endSec - chunkInSec;
+		double lo = (sl.cropStart > 0.0) ? sl.cropStart : 0.0;
+		if (startSec <= lo) {
+			// Reached the file / crop start: no more history exists.
+			sl.backfillAtStart.store(true, std::memory_order_relaxed);
+			continue;
+		}
+
+		// Lazily (re)open a dedicated decoder on the slot's file. The
+		// worker OWNS backfillFile - no other thread touches it. Reopen
+		// when the desired path differs from the one it is open on. It is
+		// configured with the slot's speed so its output rate matches the
+		// forward stream at the splice; pitch/reverb are left neutral (a
+		// small timbral mismatch under a scratch is inaudible).
+		QString path = sl.backfillPath;      // safe: gated by backfillActive
+		if (path.isEmpty()) {
+			extremeLog("[BACKFILL] slot=%d SKIP: empty path", slot);
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+			continue;
+		}
+		if (sl.backfillFile && sl.backfillOpenPath != path) {
+			sl.backfillFile->close();
+			delete sl.backfillFile;
+			sl.backfillFile = nullptr;
+		}
+		if (!sl.backfillFile) {
+			InputFile *f = CreateInputFileFFmpeg();
+			if (!f) {
+				extremeLog("[BACKFILL] slot=%d FAIL: CreateInputFileFFmpeg null", slot);
+				std::this_thread::sleep_for(std::chrono::milliseconds(20));
+				continue;
+			}
+			f->setSpeedFactor((float)sf);
+			{
+				float pf = sl.backfillPitch.load(std::memory_order_relaxed);
+				float rv = sl.backfillReverb.load(std::memory_order_relaxed);
+				if (pf != 1.0f) f->setPitchFactor(pf);
+				if (rv >  0.0f) f->setReverbMix(rv);
+			}
+			int orc = -1;
+			try { orc = f->open(path.toUtf8()); } catch (...) { orc = -1; }
+			if (orc != 0) {
+				extremeLog("[BACKFILL] slot=%d FAIL: open('%s') ret=%d",
+				           slot, path.toUtf8().constData(), orc);
+				f->close(); delete f;
+				std::this_thread::sleep_for(std::chrono::milliseconds(20));
+				continue;
+			}
+			extremeLog("[BACKFILL] slot=%d opened decoder on '%s'",
+			           slot, path.toUtf8().constData());
+			sl.backfillFile = f;
+			sl.backfillOpenPath = path;
+		} else {
+			sl.backfillFile->setSpeedFactor((float)sf);
+			// Keep pitch + reverb in sync if the user tweaked them since
+			// the decoder was opened (setters early-return when unchanged).
+			sl.backfillFile->setPitchFactor(
+				sl.backfillPitch.load(std::memory_order_relaxed));
+			sl.backfillFile->setReverbMix(
+				sl.backfillReverb.load(std::memory_order_relaxed));
+		}
+
+		std::vector<float> L, R;
+		L.reserve(chunkFrames); R.reserve(chunkFrames);
+		int reads = 0;
+		try {
+			sl.backfillFile->seek(startSec);
+			BackfillCollector col(L, R, chunkFrames);
+			int guard = 0;
+			while ((int)L.size() < chunkFrames && !sl.backfillFile->done()
+			       && guard++ < 4096) {
+				if (m_backfillStop.load(std::memory_order_acquire)) return;
+				if (!sl.backfillActive.load(std::memory_order_relaxed)) break;
+				if (sl.backfillFile->readSamples(&col) <= 0) break;
+				++reads;
+			}
+		} catch (...) {
+			extremeLog("[BACKFILL] slot=%d decode THREW at start=%.3f", slot, startSec);
+			continue;
+		}
+		int n = (int)L.size();
+		(void)reads; (void)endSec;
+		if (n <= 0) {
+			// Nothing decoded (e.g. transient seek failure) - back off a
+			// touch so we don't hammer a failing seek every 3 ms.
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			continue;
+		}
+		if (!sl.backfillActive.load(std::memory_order_relaxed)) continue;
+
+		{
+			std::lock_guard<std::mutex> g(sl.backfillMutex);
+			sl.backfillChunkL.swap(L);
+			sl.backfillChunkR.swap(R);
+			sl.backfillChunkN.store(n, std::memory_order_release);
+		}
+		// Advance the decode cursor back by the chunk we just produced.
+		sl.backfillNextFileSec.store(startSec, std::memory_order_relaxed);
+	}
+}
+
+
+void Sampler::tapeScratchEnd(int slot, float spinMs)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	PlaybackSlot &sl = m_slots[slot];
+	if (!sl.dsp) return;
+
+	backfillEnd(slot);
+
+	double sf = 1.0;
+	if (sl.inputFile) sf = (double)sl.inputFile->getSpeedFactor();
+	if (sf <= 0.0) sf = 1.0;
+
+	// Where is the NEEDLE now, in file seconds? Same anchor the cursor
+	// tracked during the drag: grab position + net head displacement.
+	double needleSec = std::numeric_limits<double>::quiet_NaN();
+	if (!std::isnan(sl.scratchStartCursorSec))
+		needleSec = sl.scratchStartCursorSec
+		          + (double)sl.dsp->tapeHeadDisplacementSeconds() * sf;
+
+	// Is the main decoder STRANDED far ahead of the needle? A backward
+	// scratch that ran past the ~1.5 s decode-ahead makes the frontier
+	// trim slide the ring backward via backfill while the main decoder
+	// stays parked at the pre-scratch position - so decoderPos - buffer -
+	// lag (the normal cursor / playback source) points seconds ahead of
+	// where the needle actually is. Releasing must resume from the needle.
+	bool stranded = false;
+	double frontierFileSec = needleSec;
+	if (!std::isnan(needleSec) && sl.inputFile) {
+		double decoderPos = sl.inputFile->getPosition();
+		int availSamples = 0;
+		{
+			SampleBuffer::Lock sblp(sl.sbPlayback.getMutex());
+			availSamples = sl.sbPlayback.avail();
+		}
+		double bufferedSec = availSamples / 48000.0 * sf;
+		double lagSec = (double)sl.dsp->tapeLagSeconds();
+		double decoderAudible = decoderPos - bufferedSec - lagSec * sf;
+		if (std::fabs(needleSec - decoderAudible) > 0.5) {
+			stranded = true;
+			// The ring's FRONTIER maps to needle + (head->frontier lag).
+			// Re-home the decoder there so, when the head consumes the
+			// decode-ahead it is spinning up through, the fresh decode
+			// continues in file order with no splice.
+			frontierFileSec = needleSec + lagSec * sf;
+			double lo = (sl.cropStart > 0.0) ? sl.cropStart : 0.0;
+			double len = sl.cachedLengthSec.load(std::memory_order_relaxed);
+			double hi = (sl.cropEnd > 0.0) ? sl.cropEnd : len;
+			if (frontierFileSec < lo) frontierFileSec = lo;
+			if (hi > 0.0 && frontierFileSec > hi) frontierFileSec = hi;
+		}
+	}
+
+	// Set the hold BEFORE spinning up so no SpinUp block can ingest the
+	// stale buffer between the two: it keeps the cursor pinned to the head
+	// (scratchStartCursorSec stays valid) and holds tape ingest until the
+	// decoder re-homes.
+	if (stranded)
+		sl.tapePrimeSeek.store(true, std::memory_order_release);
+
+	// Spin the flywheel up on the EXISTING ring (plays forward from the
+	// needle through the decode-ahead - smooth in both cases).
+	sl.dsp->tapeScratchEnd(spinMs);
+
+	if (stranded) {
+		// Re-home the decoder to the ring frontier. The prime-seek's commit
+		// clears the anchor + flag once the sb buffer is refilled from the
+		// needle, at which point the decoder cursor formula equals the head
+		// position (no jump).
+		primeSeekDecoder(slot, frontierFileSec);
+	} else {
+		// Small scratch (or a forward scratch whose decoder already
+		// tracked via scrub-seek): the decoder is valid, so hand the
+		// cursor straight back to the decoder formula.
+		sl.scratchStartCursorSec = std::numeric_limits<double>::quiet_NaN();
+	}
 }
 
 
@@ -2162,6 +2938,38 @@ void Sampler::setSlotCropLive(int slot, double startSec, double endSec)
 
 
 //---------------------------------------------------------------
+// Purpose: Re-home the main decoder to feed the tape ring's frontier
+// after a backward scratch release, WITHOUT disturbing the tape (the
+// flywheel keeps spinning on the ring). Enqueues onto the same async
+// seek worker as seek(), but skips seek()'s tapeSnapReset guard and the
+// worker prime-commit skips the tape reset + cursor reseed. tapePrimeSeek
+// (set by the caller) both pins the cursor to the head and holds tape
+// ingest until this commits.
+//---------------------------------------------------------------
+void Sampler::primeSeekDecoder(int slot, double frontierSec)
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	PlaybackSlot &s = m_slots[slot];
+	{
+		std::lock_guard<std::mutex> Lock(m_mutex);
+		if (s.state == eSILENT || !s.inputFile) {
+			s.tapePrimeSeek.store(false, std::memory_order_relaxed);
+			return;
+		}
+		double lo = (s.cropStart > 0.0) ? s.cropStart : 0.0;
+		if (frontierSec < lo) frontierSec = lo;
+		if (s.cropEnd > 0.0 && frontierSec > s.cropEnd) frontierSec = s.cropEnd;
+	}
+	// Enqueue directly (no snap-reset: the tape must survive so the
+	// flywheel keeps producing while the async scan runs).
+	s.pendingSeekSec.store(frontierSec, std::memory_order_release);
+	extremeLog("[BACKFILL] release re-home slot=%d frontier=%.3fs", slot, frontierSec);
+	startSeekWorker();
+	m_seekCv.notify_all();
+}
+
+
+//---------------------------------------------------------------
 // Purpose: Seek to position for a specific slot
 //---------------------------------------------------------------
 void Sampler::seek(double seconds, int slot)
@@ -2169,6 +2977,9 @@ void Sampler::seek(double seconds, int slot)
 	if (slot < 0 || slot >= MAX_SLOTS)
 		return;
 	PlaybackSlot &s = m_slots[slot];
+	// A user seek supersedes any in-flight release re-home: take the
+	// normal commit path (buffer clear + cursor reseed + tape reset).
+	s.tapePrimeSeek.store(false, std::memory_order_relaxed);
 	{
 		std::lock_guard<std::mutex> Lock(m_mutex);
 		if (s.state == eSILENT) return;
@@ -2188,6 +2999,15 @@ void Sampler::seek(double seconds, int slot)
 	// every call overwrites pendingSeekSec; whatever value the worker
 	// reads when it next iterates is the committed target.
 	s.pendingSeekSec.store(seconds, std::memory_order_release);
+	// A user seek during a tape brake would read stale ring content -
+	// snap the brake to pass-through so the seek lands cleanly.
+	// EXCEPTION: scratch-driven scrub seeks (FFW at the live edge /
+	// rewind past the history) must NOT wipe the ring or drop the
+	// Scratch phase - the gesture is still in flight and the adjacent
+	// stale content is exactly what a needle skimming a record plays.
+	if (s.dsp && s.dsp->tapeActive() &&
+	    s.dsp->tapePhase() != TapeStop::Scratch)
+		s.dsp->tapeSnapReset();
 	extremeLog("Sampler::seek slot=%d target=%.3fs cropStart=%.3f cropEnd=%.3f",
 	           slot, seconds, s.cropStart, s.cropEnd);
 	startSeekWorker();
@@ -2227,7 +3047,7 @@ void Sampler::seekWorkerProc()
 		// Wait for pending work. We snapshot the per-slot atomics in
 		// a small array so the slow FFmpeg scan below runs without
 		// any held lock.
-		struct Work { int slot; double target; InputFile *file; };
+		struct Work { int slot; double target; InputFile *file; bool prime; };
 		std::vector<Work> batch;
 		{
 			std::unique_lock<std::mutex> lk(m_seekMutex);
@@ -2257,7 +3077,11 @@ void Sampler::seekWorkerProc()
 				if (std::isnan(v)) continue;
 				PlaybackSlot &s = m_slots[i];
 				if (s.state == eSILENT || !s.inputFile) continue;
-				batch.push_back({i, v, s.inputFile});
+				// Capture (not clear) the release re-home flag: it must stay
+				// set through the slow scan so the cursor stays pinned to the
+				// head and tape ingest stays held. Cleared at prime-commit.
+				bool prime = s.tapePrimeSeek.load(std::memory_order_acquire);
+				batch.push_back({i, v, s.inputFile, prime});
 			}
 		}
 		for (const Work &w : batch) {
@@ -2273,15 +3097,68 @@ void Sampler::seekWorkerProc()
 			// state with the result of a now-stale scan.
 			std::lock_guard<std::mutex> Lock(m_mutex);
 			PlaybackSlot &s = m_slots[w.slot];
+				// A prime (release re-home) item MUST release the ingest hold
+				// unconditionally - even if we bail below because the slot
+				// rotated mid-scan (stop / new play / reverse swap). Leaving
+				// tapePrimeSeek set would freeze the tape ingest forever =
+				// pitch/speed/all-FX stuck with a huge delay.
+				if (w.prime)
+					s.tapePrimeSeek.store(false, std::memory_order_release);
 			if (m_shuttingDown.load(std::memory_order_relaxed)) return;
 			if (s.state == eSILENT || s.inputFile != w.file) continue;
+				// RELEASE RE-HOME (backward-scratch let-go). The decoder is
+				// now positioned at the ring's frontier file position. The
+				// tape is spinning up on its own ring and IS the audible
+				// source, so DON'T reset the tape (that kills the flywheel)
+				// and DON'T reseed the cursor cache (the head anchor drives
+				// it). Drop the stale pre-scratch buffer, release the ingest
+				// hold + cursor pin, and point the producer at the fresh
+				// position: from here the decoder cursor formula equals the
+				// head, so releasing the disc never snaps the cursor forward.
+				if (w.prime) {
+					{
+						SampleBuffer::Lock sblc(s.sbCapture.getMutex());
+						SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
+						s.sbCapture.consume(NULL, s.sbCapture.avail());
+						s.sbPlayback.consume(NULL, s.sbPlayback.avail());
+					}
+					s.stretchBaseTime = w.target;
+					s.scratchStartCursorSec =
+						std::numeric_limits<double>::quiet_NaN();
+					s.tapePrimeSeek.store(false, std::memory_order_release);
+					s.producerThread.wake();
+					continue;
+				}
 			{
 				SampleBuffer::Lock sblc(s.sbCapture.getMutex());
 				SampleBuffer::Lock sblp(s.sbPlayback.getMutex());
 				s.sbCapture.consume(NULL, s.sbCapture.avail());
 				s.sbPlayback.consume(NULL, s.sbPlayback.avail());
 			}
-			if (s.dsp) s.dsp->reset();
+			if (s.dsp) {
+				// THE scratch-killer: this reset used to include the
+				// tape -> snapReset -> phase forced out of Scratch into
+				// Armed. The very first needle jump ended the gesture:
+				// every later drag delta landed in an Armed tape that
+				// ignores pending motion = "only skips, no scratch",
+				// and scratchEnd() no-ops outside Scratch = the total
+				// lock-up. Mid-gesture the tape must SURVIVE the seek:
+				// keep it, then rebase it onto the post-seek stream
+				// (ring history restarts, head re-glues to live).
+				bool scratching =
+					s.dsp->tapePhase() == TapeStop::Scratch;
+				// MID-SCRATCH needle jump: DON'T reset the DSP stages.
+				// reset() wiped every effect tail (reverb / comp / convRev /
+				// delay / genLoss...) on EACH hop, so the FX snapped to zero
+				// and ramped back in after the splice - "l'audio lampeggia e
+				// gli effetti si attivano in ritardo". Carrying the stage
+				// state across the splice keeps the FX seamless; the tape
+				// rebase alone restarts the ring on the post-seek stream.
+				// Only a NON-scratch seek (waveform click) still resets so
+				// paulstretch / effect tails start clean at the new spot.
+				if (!scratching) s.dsp->reset(false);
+				if (scratching) s.dsp->tapeScratchRebase();
+			}
 			s.stretchBaseTime = w.target;
 			s.cachedPositionSec.store(w.target,
 				std::memory_order_relaxed);

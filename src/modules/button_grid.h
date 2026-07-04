@@ -45,6 +45,9 @@ signals:
     void buttonFileDropped(int idx, const QList<QUrl> &urls);
     void buttonReordered(int fromIdx, int toIdx);
     void createMacroRequested(int idx);
+    // "Save Mic FX package into macro": freeze the CURRENT microphone
+    // effect chain (sandbox state + pitch) into this button.
+    void createMicMacroRequested(int idx);
     void editButtonRequested(int idx);
     void clearButtonRequested(int idx);
     void setHotkeyRequested(int idx);

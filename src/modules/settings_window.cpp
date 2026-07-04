@@ -21,6 +21,8 @@
 #include <QSettings>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QGridLayout>
+#include <QCoreApplication>
 #include "../common.h"
 
 namespace {
@@ -43,6 +45,33 @@ ExpandableSection *makeSection(const QString &title, QLayout *content, QWidget *
     // translated, so it can't be used) — remembers open/collapsed state.
     sec->setPersistenceKey(QStringLiteral("settings_") + key);
     return sec;
+}
+
+// Small muted sub-header that visually groups related rows INSIDE a
+// section: a flat run of 16 checkboxes (the old "Channels" body) is
+// unreadable, three labelled clusters scan instantly.
+QLabel *subHeader(const QString &text, QWidget *parent) {
+    auto *l = new QLabel(text.toUpper(), parent);
+    QFont f = l->font();
+    f.setBold(true);
+    if (f.pointSizeF() > 2.0) f.setPointSizeF(f.pointSizeF() - 1.0);
+    f.setLetterSpacing(QFont::AbsoluteSpacing, 0.8);
+    l->setFont(f);
+    l->setStyleSheet(QStringLiteral(
+        "color: #8aa6c0; background: transparent;"
+        " margin-top: 8px; margin-bottom: 2px;"));
+    return l;
+}
+
+// Indents a row under its sub-header so the hierarchy reads at a
+// glance.
+QHBoxLayout *indented(QLayout *inner) {
+    auto *h = new QHBoxLayout;
+    h->setContentsMargins(0, 0, 0, 0);
+    h->setSpacing(0);
+    h->addSpacing(16);
+    h->addLayout(inner);
+    return h;
 }
 }
 
@@ -103,6 +132,9 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     , m_verticalMeter       (new QCheckBox(tr("Vertical LED visualizer on channels"), this))
     , m_showSkipButtons     (new QCheckBox(tr("Show skip buttons (-10s / -5s / +5s / +10s) on channels"), this))
     , m_spectrogramView     (new QCheckBox(tr("Render channel waveform as a spectrogram-style heatmap"), this))
+    , m_showVinylButton     (new QCheckBox(tr("Show vinyl (tape stop) button on channels"), this))
+    , m_micFxFeature        (new QCheckBox(tr("Enable Mic FX (real-time voice changer)"), this))
+    , m_loudnessNormalize   (new QCheckBox(tr("Normalize loudness of every sound (EBU R128, -16 LUFS)"), this))
     , m_resetChVolume(new QCheckBox(tr("Volume"), this))
     , m_resetChFx(new QCheckBox(tr("Pitch / speed / reverb"), this))
     , m_resetChFile(new QCheckBox(tr("Stop playback + clear loaded audio"), this))
@@ -147,6 +179,9 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     m_showSkipButtons   ->setChecked(true);
     m_verticalMeter     ->setChecked(false);
     m_multiChannelInfinity->setChecked(false);
+    m_showVinylButton   ->setChecked(true);
+    m_micFxFeature      ->setChecked(true);
+    m_loudnessNormalize ->setChecked(false);
 
     // Reset behaviour defaults
     m_resetChVolume->setChecked(true);
@@ -165,8 +200,11 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     auto *generalLay = new QVBoxLayout;
     // Language sub-row (was its own section before — too small for
     // its own ExpandableSection; folded into General).
+    generalLay->addWidget(subHeader(tr("Interface"), this));
     {
         auto *row = new QHBoxLayout;
+        row->setContentsMargins(0, 0, 0, 0);
+        row->addSpacing(16);
         row->addWidget(new QLabel(tr("Interface language:")));
         auto *langCombo = new QComboBox(this);
         langCombo->addItem(tr("Automatic (system language)"), QStringLiteral("auto"));
@@ -189,77 +227,111 @@ SettingsWindow::SettingsWindow(QWidget *parent)
             s.sync();
         });
     }
-    generalLay->addLayout(checkRow(m_globalFx, tr(
+    // -- Audio-wide switches --
+    generalLay->addWidget(subHeader(tr("Audio"), this));
+    generalLay->addLayout(indented(checkRow(m_globalFx, tr(
         "Master switch for the pitch / speed / reverb effects. When OFF\n"
         "every channel hides its FX panel and per-button custom FX are\n"
-        "skipped at playback time."), this));
-    generalLay->addLayout(checkRow(m_earrape, tr(
-        "Limits local audio output so a too-loud sample cannot deafen you."), this));
+        "skipped at playback time."), this)));
+    generalLay->addLayout(indented(checkRow(m_earrape, tr(
+        "Limits local audio output so a too-loud sample cannot deafen you."), this)));
+    generalLay->addLayout(indented(checkRow(m_loudnessNormalize, tr(
+        "Bring every sound to the same perceived loudness (-16 LUFS,\n"
+        "single-pass EBU R128) so loud cells no longer drown quiet\n"
+        "ones. Applies from the NEXT play of each sound. Per-cell\n"
+        "'Normalize' checkboxes keep working when this is off."), this)));
+
+    // -- Feature switches / session --
+    generalLay->addWidget(subHeader(tr("Features"), this));
     // Session-restore is global persistence behaviour — not a per-
     // channel UI option; lifted up to General.
-    generalLay->addLayout(checkRow(m_restoreSession, tr(
-        "Remember channel count, loaded files and all settings on the next open."), this));
+    generalLay->addLayout(indented(checkRow(m_restoreSession, tr(
+        "Remember channel count, loaded files and all settings on the next open."), this)));
+    generalLay->addLayout(indented(checkRow(m_micFxFeature, tr(
+        "Master switch for the Mic FX voice changer. When OFF, the\n"
+        "microphone panel, its toolbar button and all mic processing\n"
+        "disappear completely."), this)));
     generalLay->addWidget(m_multi);
 
     // ============== Channels section ==============
     // Per-channel UI + behaviour. The audio-meter + export-button
     // toggles WERE under "Audio sandbox" but they control the visible
     // widgets on each channel row — not sandbox DSP. Moved here.
+    //
+    // 16 toggles = unreadable as a flat list; clustered under muted
+    // sub-headers (visible elements / waveform / behaviour / toolbar)
+    // so each row is found by its topic at a glance.
     auto *channelsLay = new QVBoxLayout;
-    channelsLay->addLayout(checkRow(m_linkVolumes, tr(
-        "When ON, each new Channel copies settings from the first channel."), this));
-    channelsLay->addLayout(checkRow(m_rememberFx, tr(
-        "When ON, each channel remembers its pitch / speed / reverb between sessions."), this));
-    channelsLay->addLayout(checkRow(m_hideWaveform, tr(
-        "Compact channel view: removes the waveform display from every channel."), this));
-    channelsLay->addLayout(checkRow(m_meterVisible, tr(
-        "Render the dual L/R peak meter on each channel."), this));
-    channelsLay->addLayout(checkRow(m_exportEnabled, tr(
-        "Show an Export button on each channel."), this));
-    channelsLay->addLayout(checkRow(m_adaptWaveform, tr(
+
+    // -- Which widgets are visible on every channel row --
+    channelsLay->addWidget(subHeader(tr("Channel elements"), this));
+    channelsLay->addLayout(indented(checkRow(m_meterVisible, tr(
+        "Render the dual L/R peak meter on each channel."), this)));
+    channelsLay->addLayout(indented(checkRow(m_verticalMeter, tr(
+        "Draw the per-channel L/R LED visualizer as a vertical pair of\n"
+        "bars instead of the default horizontal layout. The channel\n"
+        "height is NOT enlarged - the meter is compacted and the\n"
+        "elements left of the volume slider are re-anchored to close\n"
+        "the empty space that would otherwise appear."), this)));
+    channelsLay->addLayout(indented(checkRow(m_exportEnabled, tr(
+        "Show an Export button on each channel."), this)));
+    channelsLay->addLayout(indented(checkRow(m_showSkipButtons, tr(
+        "Show or hide the -10s / -5s / +5s / +10s skip buttons on\n"
+        "every channel (existing channels + those created later)."), this)));
+    channelsLay->addLayout(indented(checkRow(m_showVinylButton, tr(
+        "Show the vinyl button on every channel's transport row. It\n"
+        "opens the tape-stop popup: hold the disc to brake the audio\n"
+        "like a stopped turntable, click for a one-shot full stop."), this)));
+
+    // -- Waveform display --
+    channelsLay->addWidget(subHeader(tr("Waveform"), this));
+    channelsLay->addLayout(indented(checkRow(m_hideWaveform, tr(
+        "Compact channel view: removes the waveform display from every channel."), this)));
+    channelsLay->addLayout(indented(checkRow(m_spectrogramView, tr(
+        "Switch the per-channel waveform to a spectrogram-style heatmap.\n"
+        "Uses a warm/cool gradient per column derived from the audio\n"
+        "magnitude - a compact energy view."), this)));
+    channelsLay->addLayout(indented(checkRow(m_adaptWaveform, tr(
         "When ON, the waveform display adapts to show the visual effect of\n"
         "active audio sandbox effects (especially Paulstretch stretching).\n"
-        "When OFF, the raw audio waveform is always shown."), this));
-    channelsLay->addLayout(checkRow(m_cropMarkers, tr(
+        "When OFF, the raw audio waveform is always shown."), this)));
+    channelsLay->addLayout(indented(checkRow(m_cropMarkers, tr(
         "When ON, a sound that has a per-cell crop start and/or end point\n"
         "shows coloured markers on the waveform at those positions.\n"
-        "Only the points that are actually set are drawn."), this));
-    channelsLay->addLayout(checkRow(m_rightDragLoop, tr(
+        "Only the points that are actually set are drawn."), this)));
+    channelsLay->addLayout(indented(checkRow(m_rightDragLoop, tr(
         "Hold the right mouse button on a waveform and drag to propose\n"
         "a loop area. A confirmation bubble appears above the cursor;\n"
         "accept it to place Start + End markers and turn Loop ON.\n"
-        "Single right-clicks still open the crop context menu."), this));
-    channelsLay->addLayout(checkRow(m_replayMode, tr(
+        "Single right-clicks still open the crop context menu."), this)));
+
+    // -- Playback / channel behaviour --
+    channelsLay->addWidget(subHeader(tr("Behavior"), this));
+    channelsLay->addLayout(indented(checkRow(m_linkVolumes, tr(
+        "When ON, each new Channel copies settings from the first channel."), this)));
+    channelsLay->addLayout(indented(checkRow(m_rememberFx, tr(
+        "When ON, each channel remembers its pitch / speed / reverb between sessions."), this)));
+    channelsLay->addLayout(indented(checkRow(m_replayMode, tr(
         "When ON, a channel that finished or was stopped keeps its\n"
         "filename + waveform + crop markers; the play button glyph\n"
         "flips to a reload icon and one click replays from the\n"
         "parked cursor position. When OFF, finishing / stopping a\n"
         "sound fully wipes the channel back to the empty state\n"
-        "(identical to clicking the red X next to the filename)."), this));
-    channelsLay->addLayout(checkRow(m_multiChannelInfinity, tr(
+        "(identical to clicking the red X next to the filename)."), this)));
+    channelsLay->addLayout(indented(checkRow(m_multiChannelInfinity, tr(
         "When ON, clicking an audio plays it on the default channel;\n"
         "any additional click spawns a NEW temporary channel per audio,\n"
         "which is automatically removed when playback stops.\n"
         "Loop / reverse channels are NEVER auto-removed - they only go\n"
         "away when the user clicks the red stop button on the channel.\n"
-        "While this mode is ON, the '+ Add channel' button is hidden."), this));
-    channelsLay->addLayout(checkRow(m_showPauseAllButton, tr(
-        "Show or hide the 'Pause all' button in the main toolbar."), this));
-    channelsLay->addLayout(checkRow(m_showStopAllButton, tr(
-        "Show or hide the 'Stop all' button in the main toolbar."), this));
-    channelsLay->addLayout(checkRow(m_verticalMeter, tr(
-        "Draw the per-channel L/R LED visualizer as a vertical pair of\n"
-        "bars instead of the default horizontal layout. The channel\n"
-        "height is NOT enlarged - the meter is compacted and the\n"
-        "elements left of the volume slider are re-anchored to close\n"
-        "the empty space that would otherwise appear."), this));
-    channelsLay->addLayout(checkRow(m_showSkipButtons, tr(
-        "Show or hide the -10s / -5s / +5s / +10s skip buttons on\n"
-        "every channel (existing channels + those created later)."), this));
-    channelsLay->addLayout(checkRow(m_spectrogramView, tr(
-        "Switch the per-channel waveform to a spectrogram-style heatmap.\n"
-        "Uses a warm/cool gradient per column derived from the audio\n"
-        "magnitude - a compact energy view."), this));
+        "While this mode is ON, the '+ Add channel' button is hidden."), this)));
+
+    // -- Main toolbar --
+    channelsLay->addWidget(subHeader(tr("Main toolbar"), this));
+    channelsLay->addLayout(indented(checkRow(m_showPauseAllButton, tr(
+        "Show or hide the 'Pause all' button in the main toolbar."), this)));
+    channelsLay->addLayout(indented(checkRow(m_showStopAllButton, tr(
+        "Show or hide the 'Stop all' button in the main toolbar."), this)));
 
     // ============== Button grid section ==============
     // Spinboxes moved to MainPage's bottom row. The QFormLayout below
@@ -406,6 +478,37 @@ SettingsWindow::SettingsWindow(QWidget *parent)
             sset.remove(QStringLiteral("leia/custom_sofa_path"));
             loadSofaPath();
         });
+    }
+    // ---- Sandbox module kill-switches ----
+    // One checkbox per DSP stage. Unchecked = the module is BYPASSED in
+    // every channel AND removed from the sandbox UI (accordion panel +
+    // pipeline block). Grid of 3 columns to stay compact.
+    {
+        auto *modBox = new QGroupBox(tr("Sandbox modules (uncheck = hide + disable everywhere)"), this);
+        auto *grid = new QGridLayout(modBox);
+        grid->setContentsMargins(8, 6, 8, 6);
+        grid->setHorizontalSpacing(14);
+        grid->setVerticalSpacing(2);
+        for (int st = 0; st < SandboxState::Stage_COUNT; ++st) {
+            auto *cb = new QCheckBox(
+                QCoreApplication::translate("DspStages",
+                                            SandboxState::stageName(st)),
+                modBox);
+            cb->setChecked(true);
+            m_moduleChecks[st] = cb;
+            grid->addWidget(cb, st / 3, st % 3);
+            connect(cb, &QCheckBox::toggled, this, [this, st](bool on){
+                emit sandboxModuleToggled(st, on);
+            });
+        }
+        auto *modRow = new QHBoxLayout;
+        modRow->addWidget(modBox, 1);
+        modRow->addWidget(new HelpBubble(tr(
+            "Full control over the effect catalogue: unchecked modules\n"
+            "stop processing in EVERY channel and vanish from the Audio\n"
+            "Sandbox window (pipeline block + parameter panel). Their\n"
+            "saved settings are preserved and come back when re-enabled."), this));
+        sandboxLay->addLayout(modRow);
     }
     // ---- Reset all sandbox settings ----
     m_resetAllSandboxBtn->setStyleSheet(
@@ -658,6 +761,9 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_verticalMeter,        &QCheckBox::toggled, this, &SettingsWindow::verticalMeterChanged);
     connect(m_showSkipButtons,      &QCheckBox::toggled, this, &SettingsWindow::showSkipButtonsChanged);
     connect(m_spectrogramView,      &QCheckBox::toggled, this, &SettingsWindow::spectrogramViewChanged);
+    connect(m_showVinylButton,      &QCheckBox::toggled, this, &SettingsWindow::showVinylButtonChanged);
+    connect(m_micFxFeature,         &QCheckBox::toggled, this, &SettingsWindow::micFxFeatureEnabledChanged);
+    connect(m_loudnessNormalize,    &QCheckBox::toggled, this, &SettingsWindow::loudnessNormalizeChanged);
 
     connect(m_resetChVolume,      &QCheckBox::toggled, this, &SettingsWindow::resetChVolumeChanged);
     connect(m_resetChFx,          &QCheckBox::toggled, this, &SettingsWindow::resetChFxChanged);
@@ -704,6 +810,9 @@ bool SettingsWindow::showStopAllButton()      const { return m_showStopAllButton
 bool SettingsWindow::verticalMeter()          const { return m_verticalMeter->isChecked();        }
 bool SettingsWindow::showSkipButtons()        const { return m_showSkipButtons->isChecked();      }
 bool SettingsWindow::spectrogramView()        const { return m_spectrogramView->isChecked();      }
+bool SettingsWindow::showVinylButton()        const { return m_showVinylButton->isChecked();      }
+bool SettingsWindow::micFxFeatureEnabled()    const { return m_micFxFeature->isChecked();         }
+bool SettingsWindow::loudnessNormalize()      const { return m_loudnessNormalize->isChecked();    }
 
 bool SettingsWindow::resetChVolume()          const { return m_resetChVolume->isChecked();      }
 bool SettingsWindow::resetChFx()              const { return m_resetChFx->isChecked();          }
@@ -745,6 +854,18 @@ void SettingsWindow::setShowStopAllButton(bool on)     { QSignalBlocker b(m_show
 void SettingsWindow::setVerticalMeter(bool on)         { QSignalBlocker b(m_verticalMeter);        m_verticalMeter->setChecked(on);        }
 void SettingsWindow::setShowSkipButtons(bool on)       { QSignalBlocker b(m_showSkipButtons);      m_showSkipButtons->setChecked(on);      }
 void SettingsWindow::setSpectrogramView(bool on)       { QSignalBlocker b(m_spectrogramView);      m_spectrogramView->setChecked(on);      }
+void SettingsWindow::setShowVinylButton(bool on)       { QSignalBlocker b(m_showVinylButton);      m_showVinylButton->setChecked(on);      }
+void SettingsWindow::setMicFxFeatureEnabled(bool on)   { QSignalBlocker b(m_micFxFeature);         m_micFxFeature->setChecked(on);         }
+void SettingsWindow::setLoudnessNormalize(bool on)     { QSignalBlocker b(m_loudnessNormalize);    m_loudnessNormalize->setChecked(on);    }
+
+void SettingsWindow::setSandboxModuleMask(quint32 mask)
+{
+    for (int st = 0; st < SandboxState::Stage_COUNT; ++st) {
+        if (!m_moduleChecks[st]) continue;
+        QSignalBlocker b(m_moduleChecks[st]);
+        m_moduleChecks[st]->setChecked((mask >> st) & 1u);
+    }
+}
 
 void SettingsWindow::setResetChVolume(bool on)         { QSignalBlocker b(m_resetChVolume);      m_resetChVolume->setChecked(on);      }
 void SettingsWindow::setResetChFx(bool on)             { QSignalBlocker b(m_resetChFx);          m_resetChFx->setChecked(on);          }

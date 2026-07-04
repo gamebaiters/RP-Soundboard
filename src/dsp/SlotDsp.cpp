@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <chrono>
 
+// All 21 stages enabled by default; Settings > "sandbox modules"
+// clears bits to hide + bypass entire modules process-wide.
+std::atomic<uint32_t> SlotDsp::s_globalStageMask{0xFFFFFFFFu};
+
 namespace {
 // Tiny RAII timer that adds elapsed ns to a pair of atomic counters at
 // destruction. Used to wrap SlotDsp::process and produceStretchedShort
@@ -48,6 +52,20 @@ inline short clampToShort(float x) {
     if (x > 32767.0f)  return 32767;
     if (x < -32768.0f) return -32768;
     return static_cast<short>(x);
+}
+// TPDF quantization dither (Q5): ±1 LSB triangular noise added right
+// before the float -> int16 conversion. Decorrelates the truncation
+// error so quiet reverb/shimmer tails and fade-outs quantize to a
+// benign noise floor instead of harmonic grit. This is the ONLY
+// float->16-bit point in the whole pipeline (the exporter consumes
+// the same s16 stream), so chain-level dither covers live playback
+// AND file export identically. Two LCG steps per sample - negligible.
+inline float tpdfDither(uint32_t &rng) {
+    rng = rng * 1664525u + 1013904223u;
+    float a = static_cast<float>(rng >> 17) * (1.0f / 32768.0f);
+    rng = rng * 1664525u + 1013904223u;
+    float b = static_cast<float>(rng >> 17) * (1.0f / 32768.0f);
+    return a - b;
 }
 // Anti-denormal injection. IIR cascades (EQ biquads + Reverb combs +
 // Positional shadow filters) decay state values toward zero on silent
@@ -111,6 +129,19 @@ void SlotDsp::setSampleRate(double sr) {
         p.gate.setSampleRate(m_fs);
         p.trans.setSampleRate(m_fs);
         p.dyneq.setSampleRate(m_fs);
+        p.voicefx.setSampleRate(m_fs);
+        p.bassEnh.setSampleRate(m_fs);
+        p.binaural.setSampleRate(m_fs);
+        p.convRev.setSampleRate(m_fs);
+        p.tape.setSampleRate(m_fs);
+        p.lfo.setSampleRate(m_fs);
+        p.failsafe.setSampleRate(m_fs);
+        // Fixed brickwall config: -1 dBFS true-peak, 1 ms lookahead,
+        // fast-ish release. Engaged per-sample only when the state's
+        // failsafeEnabled flag is on.
+        p.failsafe.setParams(-1.0f, 1.0f, 80.0f,
+                             Limiter::LimiterMode, 100.0f, -120.0f);
+        p.failsafe.setTruePeak(true);
     };
     initPath(m_play);
     initPath(m_cap);
@@ -120,8 +151,8 @@ void SlotDsp::setSampleRate(double sr) {
     m_peakDecay = static_cast<float>(std::exp(-1.0 / (tau * m_fs)));
 }
 
-void SlotDsp::reset() {
-    auto resetPath = [](PathState &p){
+void SlotDsp::reset(bool keepTape) {
+    auto resetPath = [keepTape](PathState &p){
         p.eq.reset();
         p.comp.reset();
         p.sat.reset();
@@ -141,6 +172,20 @@ void SlotDsp::reset() {
         p.gate.reset();
         p.trans.reset();
         p.dyneq.reset();
+        p.voicefx.reset();
+        p.bassEnh.reset();
+        p.binaural.reset();
+        p.convRev.reset();
+        // keepTape: a scrub-seek commit lands MID-GESTURE - resetting
+        // the tape here kicked it out of Scratch (sticky-arm snapReset
+        // -> Armed), the pending hand motion was silently ignored and
+        // the drag degraded to bare skips / a full lock-up. The caller
+        // rebases the tape onto the post-seek stream instead.
+        if (!keepTape) p.tape.reset();
+        p.lfo.reset();
+        p.failsafe.reset();
+        p.lfoGainL = p.lfoGainR = 1.0f;
+        p.lfoForce = 0;
         p.rotPhase = 0.0;
         p.rotBlockCounter = 0;
         std::fill(std::begin(p.dopplerBufL), std::end(p.dopplerBufL), 0.0f);
@@ -194,6 +239,8 @@ void SlotDsp::refreshReverbWet() {
     if (combined > 1.0f) combined = 1.0f;
     m_play.reverb.setWet(combined);
     m_cap.reverb.setWet(combined);
+    m_play.convRev.setWet(combined);
+    m_cap.convRev.setWet(combined);
 }
 
 void SlotDsp::recomputeActive() {
@@ -220,7 +267,11 @@ void SlotDsp::recomputeActive() {
                        s.gateEnabled ||
                        s.deesserEnabled ||
                        s.transEnabled ||
-                       s.dyneqEnabled;
+                       s.dyneqEnabled ||
+                       (s.vfxEnabled) ||
+                       s.bassEnhEnabled ||
+                       s.binauralEnabled ||
+                       s.lfoEnabled[0] || s.lfoEnabled[1];
     bool sandboxActive = s.enabled && (spatialActive || eqActive || reverbActive ||
                                         s.headSway || s.stretchEnabled || newFxActive);
     m_active = sandboxActive || m_fxReverbWet > 0.001f;
@@ -284,6 +335,167 @@ void SlotDsp::prepareLeia(double fs) {
     // time Leia is selected; subsequent calls are a few atomic loads.
     m_play.leia.ensureInit(fs);
     m_cap.leia.ensureInit(fs);
+}
+
+void SlotDsp::prepareConvReverb(const SandboxState &s) {
+    if (s.reverbConvMode != 1) return;
+    // prepare() no-ops when the requested IR is already loaded, so
+    // calling this on every state push is cheap after the first build.
+    m_play.convRev.prepare(s.reverbConvPreset, s.reverbConvIrPath);
+    m_cap.convRev.prepare(s.reverbConvPreset, s.reverbConvIrPath);
+}
+
+void SlotDsp::tapeTrigger(float brakeMs) {
+    m_play.tape.trigger(brakeMs);
+    m_cap.tape.trigger(brakeMs);
+}
+
+void SlotDsp::tapeRelease(float spinMs) {
+    m_play.tape.release(spinMs);
+    m_cap.tape.release(spinMs);
+}
+
+void SlotDsp::tapeSnapReset() {
+    m_play.tape.snapReset();
+    m_cap.tape.snapReset();
+}
+
+void SlotDsp::tapeArm(bool on) {
+    m_play.tape.arm(on);
+    m_cap.tape.arm(on);
+}
+
+void SlotDsp::tapeScratchBegin() {
+    m_play.tape.scratchBegin();
+    m_cap.tape.scratchBegin();
+}
+
+void SlotDsp::tapeScratchDelta(float deltaSeconds) {
+    m_play.tape.scratchDelta(deltaSeconds);
+    m_cap.tape.scratchDelta(deltaSeconds);
+}
+
+void SlotDsp::tapeScratchRebase() {
+    m_play.tape.scratchRebase();
+    m_cap.tape.scratchRebase();
+}
+
+void SlotDsp::tapeScratchEnd(float spinMs) {
+    m_play.tape.scratchEnd(spinMs);
+    m_cap.tape.scratchEnd(spinMs);
+}
+
+void SlotDsp::applyLfoRoutes(PathState &p, int frames) {
+    p.lfo.advance(frames);
+
+    // Baselines every block; routes stack on top. Pan/Volume default
+    // to unity when no route targets them this block.
+    float gainL = 1.0f, gainR = 1.0f;
+    uint32_t force = 0;
+    const SandboxState &s = m_state;
+
+    for (int i = 0; i < 4; ++i) {
+        int target = s.lfoRouteTarget[i];
+        if (target == LfoMatrix::Target_None) continue;
+        int li = (s.lfoRouteLfo[i] != 0) ? 1 : 0;
+        if (!s.lfoEnabled[li]) continue;
+        float v = p.lfo.value(li) * s.lfoRouteAmount[i];
+
+        switch (target) {
+        case LfoMatrix::Target_RingFreq:
+            p.voicefx.modRingFreq(std::min(2000.0f, std::max(20.0f,
+                s.vfxRingFreq * std::pow(2.0f, v))));
+            break;
+        case LfoMatrix::Target_WahSweep:
+            p.voicefx.modWahBias(v);
+            break;
+        case LfoMatrix::Target_TremRate:
+            p.voicefx.modTremRate(std::min(20.0f, std::max(0.05f,
+                s.vfxTremRate * std::pow(2.0f, v))));
+            break;
+        case LfoMatrix::Target_VibDepth:
+            p.voicefx.modVibDepth(std::min(1.0f, std::max(0.0f,
+                s.vfxVibDepth + v)));
+            break;
+        case LfoMatrix::Target_ChorusMix:
+            p.chorus.setParams(s.chorusRate, s.chorusDepth, s.chorusBaseDelay,
+                               s.chorusVoices,
+                               std::min(1.0f, std::max(0.0f, s.chorusMix + v)));
+            force |= 1u << SandboxState::Stage_Chorus;
+            break;
+        case LfoMatrix::Target_ReverbWet: {
+            float w = s.reverbWet + m_fxReverbWet + v;
+            if (w < 0.0f) w = 0.0f;
+            if (w > 1.0f) w = 1.0f;
+            p.reverb.setWet(w);
+            p.convRev.setWet(w);
+            force |= 1u << SandboxState::Stage_Reverb;
+            break;
+        }
+        case LfoMatrix::Target_SatDrive:
+            p.sat.setParams(std::min(10.0f, std::max(1.0f,
+                                s.saturatorDrive * std::pow(2.0f, v))),
+                            std::max(0.35f, s.saturatorMix),
+                            s.saturatorTone,
+                            static_cast<Saturator::Mode>(s.saturatorMode));
+            force |= 1u << SandboxState::Stage_Saturator;
+            break;
+        case LfoMatrix::Target_CrushRate:
+            p.bitcrusher.setParams(s.bitcrusherBitDepth,
+                std::min(48000.0f, std::max(500.0f,
+                    s.bitcrusherRate * std::pow(4.0f, v))));
+            break;
+        case LfoMatrix::Target_Pan: {
+            // Balance-style pan: attenuate the far side only, unity at
+            // centre - never boosts, so it can't clip the chain.
+            float pan = std::min(1.0f, std::max(-1.0f, v));
+            if (pan > 0.0f) gainL *= 1.0f - pan;
+            else            gainR *= 1.0f + pan;
+            break;
+        }
+        case LfoMatrix::Target_Volume: {
+            float g = std::min(1.0f, std::max(0.0f, 1.0f + v));
+            gainL *= g;
+            gainR *= g;
+            break;
+        }
+        case LfoMatrix::Target_DelayFeedback:
+            p.delay.setParams(s.delayTimeMs,
+                std::min(0.95f, std::max(0.0f, s.delayFeedback + 0.5f * v)),
+                s.delayMix, s.delayDamping, s.delayPingPong);
+            break;
+        default:
+            break;
+        }
+    }
+
+    // Smooth block-rate gain moves a touch to avoid zipper (~1 block).
+    p.lfoGainL += 0.5f * (gainL - p.lfoGainL);
+    p.lfoGainR += 0.5f * (gainR - p.lfoGainR);
+    p.lfoForce = force;
+}
+
+void SlotDsp::clearLfoRoutes(PathState &p) {
+    // LFO matrix just went inactive: restore the base parameters the
+    // routes were riding on so the chain snaps back to slider truth.
+    if (p.lfoForce == 0 && p.lfoGainL == 1.0f && p.lfoGainR == 1.0f)
+        return;
+    const SandboxState &s = m_state;
+    p.chorus.setParams(s.chorusRate, s.chorusDepth, s.chorusBaseDelay,
+                       s.chorusVoices, s.chorusMix);
+    p.sat.setParams(s.saturatorDrive, s.saturatorMix, s.saturatorTone,
+                    static_cast<Saturator::Mode>(s.saturatorMode));
+    p.bitcrusher.setParams(s.bitcrusherBitDepth, s.bitcrusherRate);
+    p.delay.setParams(s.delayTimeMs, s.delayFeedback, s.delayMix,
+                      s.delayDamping, s.delayPingPong);
+    float w = s.reverbWet + m_fxReverbWet;
+    if (w < 0.0f) w = 0.0f;
+    if (w > 1.0f) w = 1.0f;
+    p.reverb.setWet(w);
+    p.convRev.setWet(w);
+    p.voicefx.setParams(s);
+    p.lfoGainL = p.lfoGainR = 1.0f;
+    p.lfoForce = 0;
 }
 
 void SlotDsp::applyState(const SandboxState &s) {
@@ -359,7 +571,16 @@ void SlotDsp::applyState(const SandboxState &s) {
         p.limiter.setParams(s.limiterCeiling, s.limiterLookahead, s.limiterRelease,
                             static_cast<Limiter::Mode>(s.limiterMode),
                             s.limiterRatio, s.limiterGateThresh);
+        p.limiter.setTruePeak(s.truePeakMode);
         p.bitcrusher.setParams(s.bitcrusherBitDepth, s.bitcrusherRate);
+        p.voicefx.setParams(s);
+        p.bassEnh.setParams(s.bassEnhFreq, s.bassEnhDrive, s.bassEnhMix,
+                            s.hqOversampling);
+        p.binaural.setParams(s.binauralBaseHz, s.binauralBeatHz,
+                             s.binauralLevelDb);
+        p.lfo.setParams(s);
+        if (!(s.lfoEnabled[0] || s.lfoEnabled[1]))
+            p.lfoGainL = p.lfoGainR = 1.0f;
         p.genLoss.setGenerations(s.genLossGenerations);
         p.deesser.setParams(s.deesserFreqHz, s.deesserQ, s.deesserThresholdDb,
                             s.deesserRangeDb, s.deesserAttackMs, s.deesserReleaseMs);
@@ -520,7 +741,12 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
         }
         break;
     case SandboxState::Stage_Saturator:
-        if (m_state.saturatorEnabled && m_state.saturatorMix > 0.001f) p.sat.processStereo(l, r);
+        // lfoForce: an LFO route is riding this stage's mix/drive - the
+        // base slider may be at 0 but the modulation must be audible.
+        if (m_state.saturatorEnabled &&
+            (m_state.saturatorMix > 0.001f ||
+             ((p.lfoForce >> SandboxState::Stage_Saturator) & 1u)))
+            p.sat.processStereo(l, r);
         break;
     case SandboxState::Stage_Spatial:
         switch (m_state.spatialMode) {
@@ -670,7 +896,10 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
         }
         break;
     case SandboxState::Stage_Chorus:
-        if (m_state.chorusEnabled && m_state.chorusMix > 0.001f) p.chorus.processStereo(l, r);
+        if (m_state.chorusEnabled &&
+            (m_state.chorusMix > 0.001f ||
+             ((p.lfoForce >> SandboxState::Stage_Chorus) & 1u)))
+            p.chorus.processStereo(l, r);
         break;
     case SandboxState::Stage_Flanger:
         if (m_state.flangerEnabled && m_state.flangerMix > 0.001f) p.flanger.processStereo(l, r);
@@ -685,7 +914,16 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
         if (m_state.delayEnabled && m_state.delayMix > 0.001f) p.delay.processStereo(l, r);
         break;
     case SandboxState::Stage_Reverb:
-        if ((m_state.reverbWet + m_fxReverbWet) > 0.001f) p.reverb.process(l, r);
+        if ((m_state.reverbWet + m_fxReverbWet) > 0.001f ||
+            ((p.lfoForce >> SandboxState::Stage_Reverb) & 1u)) {
+            // Convolution engine when selected AND its IR is built;
+            // otherwise the algorithmic Freeverb path (also the
+            // fallback while an IR is still loading).
+            if (m_state.reverbConvMode == 1 && p.convRev.ready())
+                p.convRev.process(l, r);
+            else
+                p.reverb.process(l, r);
+        }
         break;
     case SandboxState::Stage_Limiter:
         if (m_state.limiterEnabled) p.limiter.processStereo(l, r);
@@ -720,6 +958,18 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
     case SandboxState::Stage_DynEq:
         if (m_state.dyneqEnabled) p.dyneq.processStereo(l, r);
         break;
+    case SandboxState::Stage_VoiceFx:
+        if (m_state.vfxEnabled) p.voicefx.processStereo(l, r);
+        break;
+    case SandboxState::Stage_BassEnh:
+        if (m_state.bassEnhEnabled) p.bassEnh.processStereo(l, r);
+        break;
+    case SandboxState::Stage_Binaural:
+        // The generator handles its own enable fade internally so
+        // toggling never clicks; call gated on the enable to keep the
+        // disabled cost at a single branch.
+        if (m_state.binauralEnabled) p.binaural.processStereo(l, r, true);
+        break;
     }
 }
 
@@ -729,7 +979,16 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
     PathState &p = isCapture ? m_cap : m_play;
     constexpr float kInv = 1.0f / 32768.0f;
 
-    if (!m_active) {
+    // Tape stop is a transport effect: it must run even when the
+    // sandbox chain is otherwise bypassed. A RE-TIMING phase (brake /
+    // scratch / spin-up) forces the full path; the transparent Armed
+    // state (history ingest only - now active for the whole playback
+    // once the vinyl feature arms the slot) stays on the cheap bypass
+    // path and just feeds the ring inline.
+    const bool tapeOn = p.tape.active();
+    const bool tapeArmedOnly = tapeOn && (p.tape.phase() == TapeStop::Armed);
+
+    if (!m_active && (!tapeOn || tapeArmedOnly)) {
         const float outGain = m_outputGain.load(std::memory_order_relaxed);
         for (int i = 0; i < frames; ++i) {
             float l = (channels >= 2)
@@ -738,6 +997,25 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
             float r = (channels >= 2)
                           ? interleaved[i * channels + 1] * kInv
                           : l;
+            if (tapeOn) {
+                p.tape.processStereo(l, r);
+                // Armed is transparent (no write-back needed), but if
+                // the phase flips mid-block (brake / scratch just
+                // engaged from the GUI) the samples ARE re-timed -
+                // write them back so the engage is sample-accurate
+                // instead of snapping at the next block boundary.
+                if (p.tape.phase() != TapeStop::Armed) {
+                    if (channels >= 2) {
+                        interleaved[i * channels + 0] =
+                            clampToShort(l * 32767.0f);
+                        interleaved[i * channels + 1] =
+                            clampToShort(r * 32767.0f);
+                    } else {
+                        interleaved[i] =
+                            clampToShort((l + r) * 0.5f * 32767.0f);
+                    }
+                }
+            }
             // Feed analyser with the OUTPUT-domain signal: bypass path
             // emits (l, r) unchanged, then Sampler scales by volume *
             // intensity before mixing into the TS3 buffer. Multiplying
@@ -759,6 +1037,18 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
     }
 
     const float outGain = m_outputGain.load(std::memory_order_relaxed);
+    const uint32_t stageMask = s_globalStageMask.load(std::memory_order_relaxed);
+
+    // LFO matrix: one block tick, cheap live-setter pushes.
+    if (m_state.enabled &&
+        (m_state.lfoEnabled[0] || m_state.lfoEnabled[1]))
+        applyLfoRoutes(p, frames);
+    else
+        clearLfoRoutes(p);
+
+    const bool lfoGainOn = (p.lfoGainL != 1.0f || p.lfoGainR != 1.0f);
+    const bool failsafeOn = m_state.enabled && m_state.failsafeEnabled;
+
     for (int i = 0; i < frames; ++i) {
         float l = (channels >= 2)
                       ? interleaved[i * channels + 0] * kInv
@@ -774,6 +1064,7 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
         for (int si = 0; si < SandboxState::Stage_COUNT; ++si) {
             int stage = m_state.pipelineOrder[si];
             if (!m_state.enabled && stage != SandboxState::Stage_Reverb) continue;
+            if (!((stageMask >> stage) & 1u)) continue;   // globally disabled
             applyStage(stage, p, l, r);
         }
 
@@ -781,6 +1072,22 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
         if (m_state.enabled && m_state.monoEnabled) {
             float m = (l + r) * 0.5f; l = m; r = m;
         }
+
+        // LFO-matrix Pan / Volume routes.
+        if (lfoGainOn) {
+            l *= p.lfoGainL;
+            r *= p.lfoGainR;
+        }
+
+        // Tape stop (vinyl brake / scratch) - post-chain transport.
+        if (tapeOn) p.tape.processStereo(l, r);
+
+        // Failsafe anti-clip: true-peak brickwall at -1 dBFS. Catches
+        // EQ boosts, resonant filters, stacked effects - guarantees
+        // the signal reaches the output stage without ever clipping
+        // (softLimit below then only shaves what physics still slips
+        // through the 1 ms lookahead).
+        if (failsafeOn) p.failsafe.processStereo(l, r);
 
         l = softLimit(l);
         r = softLimit(r);
@@ -813,16 +1120,118 @@ void SlotDsp::process(short *interleaved, int frames, int channels,
         // just an unconditional -0.45 dB level drop whenever the chain
         // was active - audible as "enabling the sandbox makes it
         // quieter" even with neutral settings.
+        static thread_local uint32_t s_ditherRng = 0x9E3779B9u;
         if (channels >= 2) {
-            interleaved[i * channels + 0] = clampToShort(l * 32767.0f);
-            interleaved[i * channels + 1] = clampToShort(r * 32767.0f);
+            interleaved[i * channels + 0] =
+                clampToShort(l * 32767.0f + tpdfDither(s_ditherRng));
+            interleaved[i * channels + 1] =
+                clampToShort(r * 32767.0f + tpdfDither(s_ditherRng));
         } else {
-            interleaved[i] = clampToShort((l + r) * 0.5f * 32767.0f);
+            interleaved[i] =
+                clampToShort((l + r) * 0.5f * 32767.0f + tpdfDither(s_ditherRng));
         }
     }
 
     peakL = m_peakL;
     peakR = m_peakR;
+}
+
+int SlotDsp::processTapeBlock(const short *in, int inFrames,
+                              short *out, int outFrames, int channels,
+                              float &peakL, float &peakR, bool isCapture) {
+    ScopedCpuTimer t(m_cpuNs, m_cpuFrames, outFrames);
+    PathState &p = isCapture ? m_cap : m_play;
+    constexpr float kInv = 1.0f / 32768.0f;
+    const float outGain = m_outputGain.load(std::memory_order_relaxed);
+    const uint32_t stageMask = s_globalStageMask.load(std::memory_order_relaxed);
+
+    // LFO matrix once per output block.
+    if (m_state.enabled &&
+        (m_state.lfoEnabled[0] || m_state.lfoEnabled[1]))
+        applyLfoRoutes(p, outFrames);
+    else
+        clearLfoRoutes(p);
+    const bool lfoGainOn = (p.lfoGainL != 1.0f || p.lfoGainR != 1.0f);
+    const bool failsafeOn = m_state.enabled && m_state.failsafeEnabled;
+
+    // ---- INGEST: run the pre-tape chain per input frame, feed the ring
+    // AHEAD of the head. Bounded by the tape's own ahead target and a
+    // 3x-block CPU cap so building the window never overruns the audio
+    // callback (the window then fills over ~1 s of playback).
+    int ingest = p.tape.ingestBudget();
+    if (ingest > inFrames)      ingest = inFrames;
+    // CPU cap: normally 3x the block so building the window never overruns
+    // the callback. But the ARMED decode-ahead is kept tiny (low FX
+    // latency), so a fast FORWARD scratch at the start of a gesture had no
+    // runway and seek-stormed (choppy fast-forward). While actively
+    // scratching AND the forward runway is still short, allow a much bigger
+    // ingest burst so the decode-ahead rebuilds within ~150 ms - fast
+    // enough to outrun a forward stroke. Reverts to 3x once the runway is
+    // built (bounds the DSP burst to the ramp-up only). Backward scratch is
+    // unaffected (it consumes history behind the head, not this ahead).
+    int cap = outFrames * 3;
+    if (p.tape.phase() == TapeStop::Scratch && p.tape.lagSeconds() < 0.6f)
+        cap = outFrames * 8;
+    if (ingest > cap) ingest = cap;
+    if (ingest < 0)   ingest = 0;
+    for (int i = 0; i < ingest; ++i) {
+        float l = (channels >= 2) ? in[i * channels + 0] * kInv : in[i] * kInv;
+        float r = (channels >= 2) ? in[i * channels + 1] * kInv : l;
+        float dither = antiDenormDither(i);
+        l += dither; r -= dither;
+        for (int si = 0; si < SandboxState::Stage_COUNT; ++si) {
+            int stage = m_state.pipelineOrder[si];
+            if (!m_state.enabled && stage != SandboxState::Stage_Reverb) continue;
+            if (!((stageMask >> stage) & 1u)) continue;
+            applyStage(stage, p, l, r);
+        }
+        if (m_state.enabled && m_state.monoEnabled) {
+            float m = (l + r) * 0.5f; l = m; r = m;
+        }
+        if (lfoGainOn) { l *= p.lfoGainL; r *= p.lfoGainR; }
+        p.tape.ingest(l, r);
+    }
+
+    // ---- PRODUCE: read the head at the tape rate, apply output-domain
+    // limiter, meter + convert. Failsafe + softLimit sit here (post-
+    // tape) exactly as in process(): they bound what the listener
+    // actually hears, including scratched / braked audio.
+    static thread_local uint32_t s_ditherRng = 0x51E3A7B9u;
+    for (int i = 0; i < outFrames; ++i) {
+        float l = 0.0f, r = 0.0f;
+        p.tape.produce(l, r);
+
+        if (failsafeOn) p.failsafe.processStereo(l, r);
+        l = softLimit(l);
+        r = softLimit(r);
+
+        if (!isCapture)
+            p.eq.feedAnalysis(l * outGain, r * outGain);
+
+        float al = std::fabs(l), ar = std::fabs(r);
+        m_peakL = (m_peakL > al) ? m_peakL * m_peakDecay : al;
+        m_peakR = (m_peakR > ar) ? m_peakR * m_peakDecay : ar;
+        if (!isCapture) {
+            float peak = (al > ar) ? al : ar;
+            float cur = m_sidechainEnv.load(std::memory_order_relaxed);
+            float ncur = (peak > cur) ? peak : cur * 0.9995f;
+            m_sidechainEnv.store(ncur, std::memory_order_relaxed);
+        }
+
+        if (channels >= 2) {
+            out[i * channels + 0] =
+                clampToShort(l * 32767.0f + tpdfDither(s_ditherRng));
+            out[i * channels + 1] =
+                clampToShort(r * 32767.0f + tpdfDither(s_ditherRng));
+        } else {
+            out[i] =
+                clampToShort((l + r) * 0.5f * 32767.0f + tpdfDither(s_ditherRng));
+        }
+    }
+
+    peakL = m_peakL;
+    peakR = m_peakR;
+    return ingest;
 }
 
 void SlotDsp::produceStretchedShort(short *out, int frames, int channels,
@@ -844,6 +1253,18 @@ void SlotDsp::produceStretchedShort(short *out, int frames, int channels,
     }
 
     const float outGain = m_outputGain.load(std::memory_order_relaxed);
+    const uint32_t stageMask = s_globalStageMask.load(std::memory_order_relaxed);
+    const bool tapeOn = p.tape.active();
+
+    if (m_state.enabled &&
+        (m_state.lfoEnabled[0] || m_state.lfoEnabled[1]))
+        applyLfoRoutes(p, frames);
+    else
+        clearLfoRoutes(p);
+
+    const bool lfoGainOn = (p.lfoGainL != 1.0f || p.lfoGainR != 1.0f);
+    const bool failsafeOn = m_state.enabled && m_state.failsafeEnabled;
+
     for (int i = 0; i < frames; ++i) {
         float l = tmpL[i];
         float r = tmpR[i];
@@ -855,6 +1276,7 @@ void SlotDsp::produceStretchedShort(short *out, int frames, int channels,
         for (int si = 0; si < SandboxState::Stage_COUNT; ++si) {
             int stage = m_state.pipelineOrder[si];
             if (!m_state.enabled && stage != SandboxState::Stage_Reverb) continue;
+            if (!((stageMask >> stage) & 1u)) continue;   // globally disabled
             applyStage(stage, p, l, r);
         }
 
@@ -862,6 +1284,15 @@ void SlotDsp::produceStretchedShort(short *out, int frames, int channels,
         if (m_state.enabled && m_state.monoEnabled) {
             float m = (l + r) * 0.5f; l = m; r = m;
         }
+
+        if (lfoGainOn) {
+            l *= p.lfoGainL;
+            r *= p.lfoGainR;
+        }
+
+        if (tapeOn) p.tape.processStereo(l, r);
+
+        if (failsafeOn) p.failsafe.processStereo(l, r);
 
         l = softLimit(l);
         r = softLimit(r);
@@ -877,12 +1308,16 @@ void SlotDsp::produceStretchedShort(short *out, int frames, int channels,
         m_peakR = (m_peakR > ar) ? m_peakR * m_peakDecay : ar;
 
         // See process(): softLimit already bounds to [-1, +1], no
-        // extra headroom scaling needed.
+        // extra headroom scaling needed. Same TPDF dither as process().
+        static thread_local uint32_t s_ditherRng = 0x7F4A7C15u;
         if (channels >= 2) {
-            out[i * channels + 0] = clampToShort(l * 32767.0f);
-            out[i * channels + 1] = clampToShort(r * 32767.0f);
+            out[i * channels + 0] =
+                clampToShort(l * 32767.0f + tpdfDither(s_ditherRng));
+            out[i * channels + 1] =
+                clampToShort(r * 32767.0f + tpdfDither(s_ditherRng));
         } else {
-            out[i] = clampToShort((l + r) * 0.5f * 32767.0f);
+            out[i] =
+                clampToShort((l + r) * 0.5f * 32767.0f + tpdfDither(s_ditherRng));
         }
     }
 

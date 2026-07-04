@@ -19,6 +19,10 @@ public:
     int  reverb()  const;
     bool sync()    const;
 
+    // Global rect of the reverb-engine gear: the wiring anchors the
+    // engine mini-popup right above it.
+    QRect reverbEngineBtnGlobalRect() const;
+
     // Range goes ±100 so the 3^(v/100) factor reaches 3.0x at +100 and
     // 0.33x (= 1/3x) at -100 -- the natural "+/-3x" feel users expect.
     static constexpr int kPitchMin  = -100;
@@ -46,6 +50,11 @@ signals:
     void reverbChanged(int v);
     void syncChanged(bool on);
     void resetClicked();
+    // Small gear next to the Reverb slider: opens the reverb-ENGINE
+    // settings (algorithmic vs convolution + IR choice). The engine is
+    // channel-wide, so it lives here beside the wet slider, not inside
+    // the audio sandbox.
+    void reverbEngineClicked();
 
 private slots:
     void onPitchMoved(int v);
@@ -62,5 +71,6 @@ private:
     QLabel      *m_reverbLabel;
     QToolButton *m_sync;
     QToolButton *m_reset;
+    QToolButton *m_reverbEngineBtn = nullptr;
     bool         m_internalSync;
 };

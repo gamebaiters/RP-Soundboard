@@ -51,6 +51,15 @@ void WaveformPlayer::setSkipButtonsVisible(bool on) {
     if (m_fwd10)  m_fwd10->setVisible(on);
 }
 
+void WaveformPlayer::setVinylButtonVisible(bool on) {
+    if (m_vinylBtn) m_vinylBtn->setVisible(on);
+}
+
+QPoint WaveformPlayer::vinylButtonGlobalPos() const {
+    if (!m_vinylBtn) return QPoint();
+    return m_vinylBtn->mapToGlobal(QPoint(0, m_vinylBtn->height()));
+}
+
 void WaveformPlayer::setSpectrogramView(bool on) {
     if (m_wave) m_wave->setDisplayMode(on ? SoundView::Mode_Spectrogram
                                           : SoundView::Mode_Waveform);
@@ -186,6 +195,17 @@ WaveformPlayer::WaveformPlayer(QWidget *parent)
     transport->addSpacing(4);
     transport->addWidget(m_loop);
     transport->addWidget(m_reverse);
+    m_vinylBtn = new QPushButton(this);
+    m_vinylBtn->setIcon(IconFactory::vinyl());
+    m_vinylBtn->setIconSize(QSize(20, 20));
+    m_vinylBtn->setMinimumWidth(32);
+    m_vinylBtn->setMinimumHeight(28);
+    m_vinylBtn->setToolTip(tr(
+        "Vinyl deck: opens the turntable popup.\n"
+        "Drag the disc to scratch, click it for a one-shot full stop."));
+    transport->addWidget(m_vinylBtn);
+    connect(m_vinylBtn, &QPushButton::clicked, this,
+            [this]{ emit vinylClicked(); });
     transport->addSpacing(8);
     transport->addWidget(m_clearBtn);
     transport->addSpacing(6);   // breathing room before the filename label

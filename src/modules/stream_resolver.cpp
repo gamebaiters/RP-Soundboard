@@ -23,6 +23,11 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <sys/stat.h>     // chmod - restore the exec bit TS3's extractor strips
+#endif
+#ifdef __APPLE__
+#include <sys/xattr.h>    // removexattr - clear the Gatekeeper quarantine flag
 #endif
 
 // common.h MUST precede plugin.h: it pulls the TeamSpeak SDK typedefs
@@ -138,8 +143,21 @@ QString StreamResolver::ytDlpPath()
 	const QString exe = dir + "yt-dlp";
 	const QString fallback = "yt-dlp";
 #endif
-	if (QFileInfo::exists(exe))
+	if (QFileInfo::exists(exe)) {
+#if !defined(_WIN32)
+		// TS3 extracts the .ts3_plugin zip WITHOUT preserving Unix permissions,
+		// so the bundled yt-dlp lands non-executable and QProcess fails to start
+		// (this is why streaming "wasn't included" on macOS/Linux). Restore the
+		// exec bit on demand, and on macOS also clear the Gatekeeper quarantine
+		// flag so the unsigned binary is allowed to run.
+		const QByteArray p = exe.toUtf8();
+		::chmod(p.constData(), 0755);
+#ifdef __APPLE__
+		::removexattr(p.constData(), "com.apple.quarantine", 0);
+#endif
+#endif
 		return exe;
+	}
 	return fallback; // last-ditch: let the OS resolve it on PATH
 }
 

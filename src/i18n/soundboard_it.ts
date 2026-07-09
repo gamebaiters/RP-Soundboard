@@ -4078,8 +4078,12 @@ lo slider Riverbero di questo canale in entrambi i motori.</translation>
     </message>
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="3657"/>
+        <source>Network error — this stream could not be played. Try again in a moment.</source>
+        <translation>Errore di rete — impossibile riprodurre questo stream. Riprova tra un momento.</translation>
+    </message>
+    <message>
         <source>Network error — couldn&apos;t stream from that point. Restarting from the beginning.</source>
-        <translation>Errore di rete — impossibile riprodurre da quel punto. Riavvio dall&apos;inizio.</translation>
+        <translation type="vanished">Errore di rete — impossibile riprodurre da quel punto. Riavvio dall&apos;inizio.</translation>
     </message>
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="3808"/>
@@ -5298,59 +5302,59 @@ Il click destro singolo apre comunque il menu contestuale di taglio.</translatio
 <context>
     <name>StreamResolver</name>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="188"/>
-        <location filename="../modules/stream_resolver.cpp" line="453"/>
+        <location filename="../modules/stream_resolver.cpp" line="206"/>
+        <location filename="../modules/stream_resolver.cpp" line="471"/>
         <source>Not a valid link.</source>
         <translation>Link non valido.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="259"/>
-        <location filename="../modules/stream_resolver.cpp" line="429"/>
-        <location filename="../modules/stream_resolver.cpp" line="482"/>
-        <location filename="../modules/stream_resolver.cpp" line="569"/>
+        <location filename="../modules/stream_resolver.cpp" line="277"/>
+        <location filename="../modules/stream_resolver.cpp" line="447"/>
+        <location filename="../modules/stream_resolver.cpp" line="500"/>
+        <location filename="../modules/stream_resolver.cpp" line="587"/>
         <source>Streaming engine unavailable.</source>
         <translation>Motore di streaming non disponibile.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="286"/>
-        <location filename="../modules/stream_resolver.cpp" line="298"/>
+        <location filename="../modules/stream_resolver.cpp" line="304"/>
         <location filename="../modules/stream_resolver.cpp" line="316"/>
+        <location filename="../modules/stream_resolver.cpp" line="334"/>
         <source>Couldn&apos;t load this link.</source>
         <translation>Impossibile caricare questo link.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="407"/>
+        <location filename="../modules/stream_resolver.cpp" line="425"/>
         <source>Checking for updates…</source>
         <translation>Ricerca aggiornamenti…</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="441"/>
+        <location filename="../modules/stream_resolver.cpp" line="459"/>
         <source>Up to date.</source>
         <translation>Già aggiornato.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="443"/>
+        <location filename="../modules/stream_resolver.cpp" line="461"/>
         <source>Update failed.</source>
         <translation>Aggiornamento non riuscito.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="492"/>
-        <location filename="../modules/stream_resolver.cpp" line="517"/>
+        <location filename="../modules/stream_resolver.cpp" line="510"/>
+        <location filename="../modules/stream_resolver.cpp" line="535"/>
         <source>Couldn&apos;t load this playlist.</source>
         <translation>Impossibile caricare questa playlist.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="530"/>
+        <location filename="../modules/stream_resolver.cpp" line="548"/>
         <source>A download is already in progress.</source>
         <translation>È già in corso un download.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="580"/>
+        <location filename="../modules/stream_resolver.cpp" line="598"/>
         <source>Download complete.</source>
         <translation>Download completato.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="580"/>
+        <location filename="../modules/stream_resolver.cpp" line="598"/>
         <source>Download failed.</source>
         <translation>Download non riuscito.</translation>
     </message>

@@ -2500,8 +2500,10 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 				m_netReadFailLogged = true;   // once per stall streak (cleared on good read)
 				char eb[128] = {0};
 				av_strerror(rfr, eb, sizeof(eb));
-				logInfo("[stream] av_read_frame failed @%.1fs: %d (%s)",
-				        m_filePosition.load(std::memory_order_relaxed), rfr, eb);
+				// Not an error — the recovery below re-seeks / scans and playback
+				// resumes. Logged once per streak for diagnostics only.
+				logInfo("[stream] read paused @%.1fs (%s) - recovering",
+				        m_filePosition.load(std::memory_order_relaxed), eb);
 			}
 			break;   // EOF or a (possibly transient) network read error
 		}
@@ -2681,7 +2683,10 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 					std::chrono::duration<double>(now - m_netProgressTime).count();
 				if (stuckSec > kNetStuckGiveUpSec)
 				{
-					m_netFailed.store(true, std::memory_order_relaxed);  // GUI toast
+					// NOTE: a byte-range seek failing here is NORMAL on some files —
+					// the scan fallback below recovers it silently, so DON'T flag a
+					// failure. m_netFailed (the "network error" toast) is set only on
+					// the real give-up path, so no error is shown when method 2 works.
 					const std::string url = m_openUrl;
 					// Restart target = the TRUE beginning (0). NOT m_minFilePosition
 					// — a seek reopen sets that to the (failing) seek target, so
@@ -2716,6 +2721,7 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 					{
 						logInfo("[stream] giving up @%.1fs - network stall unrecoverable", curPos);
 						m_netGaveUp = true;
+						m_netFailed.store(true, std::memory_order_relaxed);  // real error → GUI toast
 						m_netBuffering.store(false, std::memory_order_relaxed);
 						m_done = true;
 						av_packet_free(&packet);

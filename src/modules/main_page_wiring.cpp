@@ -3655,8 +3655,8 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 bool failed = sampler->getSlotNetFailed(i);
                 if (failed && !(*failActive)[i]) {
                     showStreamErrorBubble(ch, QObject::tr(
-                        "Network error — couldn't stream from that point. "
-                        "Restarting from the beginning."));
+                        "Network error — this stream could not be played. "
+                        "Try again in a moment."));
                 }
                 (*failActive)[i] = failed;
                 // Skip the cursor refresh while a debounced seek is

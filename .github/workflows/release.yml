@@ -467,10 +467,14 @@ jobs:
               cp -r deploy/plugins/rp_soundboard/* stage/plugins/rp_soundboard/
           fi
           # Bundle the streaming engine (yt-dlp). Standalone macOS binary
-          # (no Python), placed under the name the plugin looks for.
+          # (no Python), placed under the name the plugin looks for. Ad-hoc
+          # signed so Gatekeeper allows it; the plugin also clears the quarantine
+          # flag + restores the exec bit at runtime (TS3's zip extractor drops
+          # both), so streaming works out of the box.
           curl -fsSL -o stage/plugins/rp_soundboard/yt-dlp_macos \
               https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos
           chmod +x stage/plugins/rp_soundboard/yt-dlp_macos
+          codesign --force -s - stage/plugins/rp_soundboard/yt-dlp_macos 2>/dev/null || true
 
           echo "--- Bundled binaries ---"
           ls -la stage/plugins/

@@ -1,3 +1,22 @@
+GameBaiters Soundboard v2.3.2
+=============================
+
+Patch for the streaming release.
+
+* FIX - Link streaming now works on macOS (and Linux). TeamSpeak's
+  plugin-zip extractor drops the Unix executable bit (and macOS adds a
+  quarantine flag) from the bundled streaming engine, so it could not
+  start. The plugin now restores the exec bit and clears the quarantine
+  flag on demand, and the macOS build ad-hoc signs the engine.
+
+* FIX - No more false "network error" when a seek recovers. Some videos
+  reject the fast byte-range seek; the player silently falls back to a
+  sequential scan that lands on the exact spot. That fallback is normal,
+  so the error notice now appears ONLY when the stream genuinely cannot
+  be played - not every time the second method kicks in. Related log
+  lines were reworded so a routine retry no longer looks like a crash.
+
+
 GameBaiters Soundboard v2.3.1
 =============================
 

@@ -11,6 +11,7 @@
 #include "main.h"
 #include "modules/theme.h"
 #include "modules/version_history_dialog.h"
+#include "modules/stream_resolver.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -120,7 +121,7 @@ AboutQt::AboutQt(QWidget *parent) :
            "<span style='font-size:10px; color:#888;'>"
            "Uses FFmpeg (LGPLv2.1) &mdash; source: "
            "<a style='color:#6cb4ee;' href='https://ffmpeg.org/download.html'>"
-           "ffmpeg.org</a> tag n6.1.1</span>"));
+           "ffmpeg.org</a> tag n8.1.1</span>"));
     root->addWidget(credits);
 
     root->addSpacing(8);
@@ -178,6 +179,72 @@ AboutQt::AboutQt(QWidget *parent) :
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->show();
     });
+
+    root->addSpacing(6);
+
+    // --- Live streaming engine (yt-dlp) ------------------------------------
+    // Shows the bundled yt-dlp version, lets the user update it, and credits
+    // it. yt-dlp only RESOLVES links (it prints the direct media URL); the
+    // audio is streamed by our own FFmpeg, never downloaded whole.
+    {
+        auto *streamInfo = new QLabel(this);
+        streamInfo->setObjectName("aboutStream");
+        streamInfo->setTextFormat(Qt::RichText);
+        streamInfo->setOpenExternalLinks(true);
+        streamInfo->setWordWrap(true);
+        streamInfo->setStyleSheet(
+            "#aboutStream { background: rgba(0,0,0,70); border-radius: 6px;"
+            " padding: 10px; color: #cfcfcf; font-size: 11px; }");
+        streamInfo->setText(tr(
+            "<b style='color:#e8e8e8;'>Live streaming</b><br>"
+            "Link streaming is powered by "
+            "<a style='color:#6cb4ee;' href='https://github.com/yt-dlp/yt-dlp'>"
+            "yt-dlp</a>, kept up to date below."));
+        root->addWidget(streamInfo);
+
+        auto *verLabel = new QLabel(tr("Streaming engine: checking\xE2\x80\xA6"), this);
+        verLabel->setStyleSheet("font-size: 11px; color: #cfcfcf; padding: 2px 2px;");
+        auto *statusLabel = new QLabel(this);
+        statusLabel->setStyleSheet("font-size: 10px; color: #8a8a8a;");
+        statusLabel->setWordWrap(true);
+        auto *updBtn = new QPushButton(tr("Update streaming engine"), this);
+        updBtn->setCursor(Qt::PointingHandCursor);
+        updBtn->setStyleSheet(
+            "QPushButton { background-color: #3a3a3a; color: white;"
+            " border: 1px solid #1f1f1f; border-radius: 5px;"
+            " padding: 5px 12px; font-weight: bold; }"
+            "QPushButton:hover { background-color: #4a4a4a; }"
+            "QPushButton:disabled { color: #888; }");
+
+        auto *engineRow = new QHBoxLayout;
+        engineRow->addWidget(verLabel, 1);
+        engineRow->addWidget(updBtn, 0);
+        root->addLayout(engineRow);
+        root->addWidget(statusLabel);
+
+        StreamResolver &R = StreamResolver::instance();
+        connect(&R, &StreamResolver::versionReady, this, [verLabel](const QString &v){
+            verLabel->setText(v.isEmpty()
+                ? AboutQt::tr("Streaming engine: not available")
+                : AboutQt::tr("Streaming engine: yt-dlp %1").arg(v));
+        });
+        connect(&R, &StreamResolver::updateStatus, this, [statusLabel](const QString &s){
+            statusLabel->setText(s);
+        });
+        connect(&R, &StreamResolver::updateFinished, this,
+                [statusLabel, updBtn](bool ok, const QString &m){
+            statusLabel->setText(m);
+            statusLabel->setStyleSheet(ok ? "font-size:10px; color:#3fb950;"
+                                          : "font-size:10px; color:#c64545;");
+            updBtn->setEnabled(true);
+            StreamResolver::instance().queryVersion();   // refresh version line
+        });
+        connect(updBtn, &QPushButton::clicked, this, [updBtn]{
+            updBtn->setEnabled(false);
+            StreamResolver::instance().updateEngine();
+        });
+        R.queryVersion();
+    }
 
     root->addSpacing(4);
 

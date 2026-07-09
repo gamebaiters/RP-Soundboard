@@ -54,6 +54,12 @@ public:
     bool showVinylButton() const;
     bool micFxFeatureEnabled() const;
     bool loudnessNormalize() const;
+    bool streamingEnabled() const;
+    bool channelNameLinkDetect() const;
+    QString streamQuality() const;        // "best" | "balanced" | "data"
+    bool vadWhilePlaying() const;
+    bool duckWhenTalking() const;
+    int  duckAmount() const;              // percent 0..90
 
     // Reset behaviour flags
     bool resetChVolume() const;
@@ -100,6 +106,13 @@ public slots:
     void setShowVinylButton(bool on);
     void setMicFxFeatureEnabled(bool on);
     void setLoudnessNormalize(bool on);
+    void setStreamingEnabled(bool on);
+    void setChannelNameLinkDetect(bool on);
+    void setStreamAutoplay(bool on);
+    void setStreamQuality(const QString &q);
+    void setVadWhilePlaying(bool on);
+    void setDuckWhenTalking(bool on);
+    void setDuckAmount(int pct);
     // Sandbox module kill-switch: push the current global stage mask
     // into the checkboxes (bit set = module enabled).
     void setSandboxModuleMask(quint32 mask);
@@ -165,6 +178,13 @@ signals:
     void showVinylButtonChanged(bool);
     void micFxFeatureEnabledChanged(bool);
     void loudnessNormalizeChanged(bool);
+    void streamingEnabledChanged(bool);
+    void channelNameLinkDetectChanged(bool);
+    void streamAutoplayChanged(bool);
+    void streamQualityChanged(const QString &);
+    void vadWhilePlayingChanged(bool);
+    void duckWhenTalkingChanged(bool);
+    void duckAmountChanged(int);
     // A sandbox module was enabled/disabled process-wide (stage =
     // SandboxState::DspStage value).
     void sandboxModuleToggled(int stage, bool enabled);
@@ -242,6 +262,14 @@ private:
     QCheckBox   *m_showVinylButton      = nullptr;
     QCheckBox   *m_micFxFeature         = nullptr;
     QCheckBox   *m_loudnessNormalize    = nullptr;
+    QCheckBox   *m_streamingEnabled     = nullptr;
+    QCheckBox   *m_channelLinkDetect    = nullptr;
+    QCheckBox   *m_streamAutoplay       = nullptr;
+    class QComboBox *m_streamQuality    = nullptr;
+    QCheckBox   *m_vadWhilePlaying      = nullptr;
+    QCheckBox   *m_duckWhenTalking      = nullptr;
+    class QSlider *m_duckAmount         = nullptr;
+    QLabel      *m_duckAmountLabel      = nullptr;
 
     // One checkbox per DSP stage (index = DspStage). Unchecked =
     // module bypassed everywhere AND hidden from the sandbox UI.

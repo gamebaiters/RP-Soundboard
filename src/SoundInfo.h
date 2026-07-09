@@ -71,6 +71,33 @@ public:
 	// memes from drowning out quiet stings without per-cell volume
 	// tweaking.
 	bool autoNormalize;
+
+	// --- URL / YouTube live-streaming cell (v2.3.1) ---------------------
+	// When true, `filename` holds a CANONICAL page URL (youtube.com/watch,
+	// youtu.be, or any http[s] media page) rather than a local path. At play
+	// time StreamResolver turns it into a fresh direct CDN URL (googlevideo
+	// URLs expire ~6 h) which is streamed by FFmpeg — never downloaded whole.
+	bool isStreamUrl;
+	// When true (and isStreamUrl), `filename` is a PLAYLIST page URL. Triggering
+	// the cell opens the whole playlist into a channel (playlist panel + autoplay
+	// chaining) instead of playing a single video. Persisted.
+	bool isPlaylist = false;
+	// Cached human title + total length from the last resolve, so the cell can
+	// show a proper label/timeline before a re-resolve completes. Persisted.
+	QString streamTitle;
+	double  streamDurationSec;
+
+	// --- TRANSIENT resolved-play parameters (NOT serialized) ------------
+	// The wiring fills these on the SoundInfo COPY it hands to the Sampler for
+	// an actual stream play: `filename` is swapped to the resolved direct URL
+	// and these carry the CDN request context down to InputFileFFmpeg::open.
+	// Empty on ordinary local-file cells.
+	QString netUserAgent;
+	QString netHeaders;   // CRLF-joined, no User-Agent
+	// True when the resolved source is a LIVE stream (is_live): no waveform, no
+	// seek/reverse/vinyl/paulstretch, link-only save. Set by the wiring from
+	// ResolvedStream::isLive on the play copy. Transient.
+	bool    isLive = false;
 };
 
 #endif // rpsbsrc__SoundInfo_H__

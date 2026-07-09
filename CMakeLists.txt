@@ -248,11 +248,11 @@ set_target_properties(rp_soundboard_fx PROPERTIES
 # Special platform dependent compile options
 if (MSVC)
 	target_sources(rp_soundboard_fx PRIVATE "src/windows/resource.h" "src/windows/Resource.rc")
-	target_link_libraries(rp_soundboard_fx wsock32 ws2_32 secur32) # some windows stuff
+	target_link_libraries(rp_soundboard_fx wsock32 ws2_32 secur32 crypt32 ncrypt) # windows sockets + schannel TLS (FFmpeg https): secur32=SSPI, crypt32=cert store, ncrypt=CNG key storage (tls_gen_self_signed)
 	target_compile_options(rp_soundboard_fx PRIVATE /MP) # multiprocessor compiling
 elseif(MINGW)
 	target_sources(rp_soundboard_fx PRIVATE "src/windows/resource.h" "src/windows/Resource.rc")
-	target_link_libraries(rp_soundboard_fx wsock32 ws2_32 secur32) # some windows stuff
+	target_link_libraries(rp_soundboard_fx wsock32 ws2_32 secur32 crypt32 ncrypt) # windows sockets + schannel TLS (FFmpeg https): secur32=SSPI, crypt32=cert store, ncrypt=CNG key storage (tls_gen_self_signed)
 	# MinGW doesn't use /MP, maybe -j in make
 else()
 	if(APPLE)

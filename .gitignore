@@ -17,3 +17,8 @@ build_local/
 ffmpeg/include/
 ffmpeg/lib_win_x64/
 ffmpeg/bin_win_x64/
+
+# Bundled streaming engine (fetched fresh by CI + build_local; never committed)
+deploy/plugins/rp_soundboard/yt-dlp
+deploy/plugins/rp_soundboard/yt-dlp.exe
+deploy/plugins/rp_soundboard/yt-dlp_macos

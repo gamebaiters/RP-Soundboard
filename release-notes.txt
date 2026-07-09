@@ -1,3 +1,113 @@
+GameBaiters Soundboard v2.3.1
+=============================
+
+The streaming release. Paste a YouTube (or any http/https media) link
+and it plays LIVE through the whole 14-effect DSP chain - nothing is
+downloaded to disk, everything is resolved and streamed on demand.
+Whole playlists, a real live voice changer for your own microphone
+with shareable presets, smooth talk-over ducking, and a big pass over
+the About / How-to help. Powered by a bundled, self-updating yt-dlp
+that never needs any setup.
+
+Highlights
+----------
+
+* NEW - Live link streaming (YouTube & any URL). Paste a link and it
+  streams live through the full effect chain. Three ways to load one:
+  paste it straight as a CHANNEL NAME (the name turns green, the video
+  title shows on the waveform, the real name returns on stop); save it
+  to a grid button ("Save link..." or drag a URL onto a cell); or drop
+  a URL onto a channel to play at once. Normal videos get a full
+  waveform with seek / reverse / crop / download, exactly like a local
+  file; true live broadcasts show a purple "LIVE" notice (no seek).
+  Nothing is ever left on disk - every play resolves on demand.
+
+* NEW - Playlists. Paste or save a playlist link and choose "Whole
+  playlist" or "Just this video". Whole opens a panel listing every
+  track: click a track to load it, tick Autoplay to advance to the
+  next automatically, reopen the panel any time from the channel's
+  list button. A whole playlist can also be saved onto a grid button
+  (right-click a channel that has one, or drop a playlist link on a
+  button) so one click reopens the entire playlist later.
+
+* NEW - Save the audio to a file. On a normal video the channel's
+  export turns into a green "Save audio" download, and the cell
+  right-click offers "Download ... audio here" straight into a button.
+  Live streams are link-only.
+
+* NEW - Microphone voice changer (Mic FX presets + sharing). The mic
+  channel gains real voice presets with icon buttons - Save (floppy),
+  Delete (bin), Share (copy to clipboard) and Paste (apply a shared
+  one) - plus "Save Mic FX package into macro" so one button toggles a
+  whole voice on and off.
+
+* NEW - Voice & transmission (Settings). "Use voice activation while a
+  sound plays" sends the soundboard continuously but only transmits
+  YOUR voice when you actually speak. "Lower the soundboard when I
+  talk" ducks the soundboard SMOOTHLY while you speak and lifts it
+  back when you stop, with an adjustable dip amount.
+
+* NEW - Settings > Streaming. Pick the audio quality (Best / Balanced
+  / Data saver) and toggle "Auto-play files loaded from a link" (off
+  by default: a link loads paused and ready).
+
+* NEW - Self-managing streaming engine. yt-dlp is bundled per platform,
+  hidden (no console flashes), and silently auto-updated on every
+  startup. The About dialog shows its version with its own "Update
+  streaming engine" button and attribution; a start/close cleaner
+  guarantees no temp files or ghost processes are ever left behind.
+
+* NEW - How-to & About refresh. The in-app guide gains full sections on
+  live streaming / playlists and the microphone voice changer (with
+  emoji signposting), fully translated to Italian. The About streaming
+  blurb was trimmed and the FFmpeg attribution corrected.
+
+Streaming reliability
+---------------------
+
+* Forward-seek on a YouTube VOD now lands where you click. The seek was
+  reworked to a format-level seek (what "ffmpeg -ss" does) and, for the
+  odd file whose byte-range seek the CDN rejects, the decoder reopens at
+  the start and sequentially fast-forwards to the target - so the seek
+  always lands, instead of the channel silently vanishing.
+
+* Network stalls are survived, not fatal. A brief "buffering" strip
+  shows while a dropped connection reconnects; only a genuinely dead
+  URL gives up, and then it restarts from the beginning and shows a
+  transient "network error" notice rather than disappearing.
+
+* Seek spam no longer freezes TeamSpeak. Rapid waveform clicks collapse
+  to the LAST target (earlier loads are dropped); the network open runs
+  off the GUI thread so the whole client stays responsive.
+
+* No self-inflicted throttling. Recovery reopens are paced so a half-
+  dead CDN node is not hammered with range requests (which used to make
+  googlevideo throttle the whole session).
+
+Fixes
+-----
+
+* Playlist panel no longer vanishes the instant it opens (a phantom
+  rename event was unloading it); pasting a second playlist link now
+  replaces the first instead of re-showing the old one.
+
+* Autoplay now respects order - clicking the first track no longer
+  skips straight to the third (each load's stop event was advancing the
+  cursor).
+
+* Loading strip and playlist / cancel buttons render correctly (no more
+  mismatched background colour or garbled glyphs).
+
+* Closing the vinyl / scratch popup after skipping no longer jumps the
+  audio forward a few seconds before it closes.
+
+* Clearing a channel name to empty restores the default "Channel N"
+  name instead of leaving it blank.
+
+* About dialog no longer shows stray braces after the FFmpeg line (a
+  corrupted Italian translation string).
+
+
 GameBaiters Soundboard v2.3.0
 =============================
 

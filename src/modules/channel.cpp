@@ -19,6 +19,81 @@ extern const QString &getButtonMime();
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QCheckBox>
+#include <QProgressBar>
+#include <QToolButton>
+#include <QTimer>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPixmap>
+#include <QIcon>
+
+// Indeterminate "loading" bar painted by hand. A QProgressBar in marquee mode
+// draws an opaque groove using the native style's palette, which reads as a
+// different colour than the themed channel background. This widget paints a
+// TRANSPARENT track (nothing) + a single moving azure segment, so the "bar
+// background" IS the channel — it can never mismatch. No Q_OBJECT needed
+// (no new signals/slots; the QTimer uses a lambda).
+class ChannelLoadingBar : public QWidget {
+public:
+    explicit ChannelLoadingBar(QWidget *parent = nullptr) : QWidget(parent) {
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setFixedHeight(6);
+        setAttribute(Qt::WA_NoSystemBackground);   // never fill a background
+        m_timer = new QTimer(this);
+        m_timer->setInterval(30);   // ~33 Hz
+        QObject::connect(m_timer, &QTimer::timeout, this, [this]{
+            m_phase += 0.028; if (m_phase > 1.0) m_phase -= 1.0; update();
+        });
+    }
+protected:
+    void showEvent(QShowEvent *) override { m_timer->start(); }
+    void hideEvent(QHideEvent *) override { m_timer->stop(); }
+    void paintEvent(QPaintEvent *) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        const double w = width(), h = height();
+        // Paint the EXACT themed channel background as the track first, so the
+        // bar can never read as a different colour than the surrounding channel
+        // (same principle as the EQ slider groove fix: use the derived theme
+        // colour explicitly, never rely on the native style / parent show-through
+        // which produced a mismatched dark strip). Clipped to a rounded rect so
+        // it tucks under the moving segment cleanly.
+        const QColor track = Theme::derivedCached().surface;
+        // Flat-fill the ENTIRE rect (incl. corners) with the channel surface so
+        // no pixel is ever left unpainted — WA_NoSystemBackground means anything
+        // we don't draw keeps stale/dark backing-store content (that was the
+        // dark strip). Azure segment then rides on top.
+        p.fillRect(QRectF(0.0, 0.0, w, h), track);
+        const double segW = w * 0.35;
+        const double x = -segW + m_phase * (w + segW);   // slides left->right, loops
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0x3f, 0xa7, 0xff));            // azure (matches the label)
+        p.drawRoundedRect(QRectF(x, 0.0, segW, h), h / 2.0, h / 2.0);
+    }
+private:
+    QTimer *m_timer;
+    double  m_phase = 0.0;
+};
+
+// A tiny painted "list" icon (three lines) for the reopen-playlist button —
+// drawn instead of a Unicode glyph so it renders identically on every host /
+// font (a ☰ glyph showed as tofu / mojibake on the TS3 client font).
+static QIcon makeListIcon()
+{
+    QPixmap pm(16, 16);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    QPen pen(QColor(0xc8, 0xc8, 0xc8));
+    pen.setWidthF(2.0);
+    pen.setCapStyle(Qt::RoundCap);
+    p.setPen(pen);
+    for (int i = 0; i < 3; ++i) {
+        int y = 4 + i * 4;
+        p.drawLine(3, y, 13, y);
+    }
+    p.end();
+    return QIcon(pm);
+}
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -84,6 +159,7 @@ Channel::Channel(int channelId, QWidget *parent)
     m_removeBtn->setFlat(true);
 
     m_titleEdit->setText(tr("Channel %1").arg(channelId + 1));
+    m_baseName = m_titleEdit->text();
     m_titleEdit->setFrame(false);
     m_titleEdit->setMinimumWidth(120);
 
@@ -168,14 +244,56 @@ Channel::Channel(int channelId, QWidget *parent)
     titleRow->setSpacing(4);
     titleRow->addWidget(m_removeBtn, 0, Qt::AlignVCenter);
     titleRow->addWidget(m_titleEdit, 1);
+    // Reopen-playlist button: hidden until a playlist is loaded into this
+    // channel; clicking it re-shows the (closed) playlist panel.
+    m_playlistBtn = new QToolButton(this);
+    m_playlistBtn->setIcon(makeListIcon());     // painted, not a font glyph
+    m_playlistBtn->setIconSize(QSize(16, 16));
+    m_playlistBtn->setToolTip(tr("Show playlist"));
+    m_playlistBtn->setAutoRaise(true);
+    m_playlistBtn->setVisible(false);
+    titleRow->addWidget(m_playlistBtn, 0, Qt::AlignVCenter);
     titleRow->addWidget(m_exportBtn, 0, Qt::AlignVCenter);
     titleRow->addWidget(m_sandboxEnableCheck, 0, Qt::AlignVCenter);
     titleRow->addWidget(m_sandboxBtn, 0, Qt::AlignVCenter);
+
+    // Indeterminate marquee + Cancel, shown only while a link is resolving.
+    // Custom transparent-track bar so it can never mismatch the channel colour.
+    m_loadingBar = new ChannelLoadingBar(m_frame);
+    m_loadingBar->setToolTip(tr("Loading link…"));
+    m_loadCancelBtn = new QToolButton(m_frame);
+    m_loadCancelBtn->setText(QString::fromUtf8("\xC3\x97"));  // × (fromUtf8: MSVC-safe)
+    m_loadCancelBtn->setToolTip(tr("Cancel"));
+    m_loadCancelBtn->setAutoRaise(true);
+    m_loadingRow = new QWidget(m_frame);
+    // The row gets the channel surface as its OWN background (themed in
+    // refreshTheme). A styled child (the blue label) inside the stylesheet-
+    // styled #channelFrame otherwise renders on a default-dark backing, which
+    // read as the mismatched dark "loading" strip. Objectname-scoped so the
+    // rule never leaks to children.
+    m_loadingRow->setObjectName(QStringLiteral("channelLoadingRow"));
+    m_loadingRow->setStyleSheet(QString("#channelLoadingRow { background-color: %1; }")
+                                .arg(Theme::derivedCached().surface.name()));
+    auto *loadRowLay = new QHBoxLayout(m_loadingRow);
+    loadRowLay->setContentsMargins(0, 0, 0, 0);
+    loadRowLay->setSpacing(6);
+    auto *loadingText = new QLabel(tr("Loading link…"), m_loadingRow);
+    // background: transparent so the label sits on the row surface, not a dark box.
+    loadingText->setStyleSheet("color: #3fa7ff; font-weight: bold; background: transparent;");
+    loadRowLay->addWidget(loadingText, 0);
+    loadRowLay->addWidget(m_loadingBar, 1);
+    loadRowLay->addWidget(m_loadCancelBtn, 0);
+    m_loadingRow->setVisible(false);
+    connect(m_loadCancelBtn, &QToolButton::clicked, this,
+            [this]{ emit streamLoadCancelRequested(m_id); });
+    connect(m_playlistBtn, &QToolButton::clicked, this,
+            [this]{ emit playlistReopenRequested(m_id); });
 
     auto *frameLayout = new QVBoxLayout(m_frame);
     frameLayout->setContentsMargins(8,4,8,8);
     frameLayout->setSpacing(4);
     frameLayout->addLayout(titleRow);
+    frameLayout->addWidget(m_loadingRow);
     frameLayout->addWidget(m_wave);
     frameLayout->addLayout(controls);
 
@@ -327,7 +445,42 @@ void Channel::setSandboxFeatureEnabled(bool on) {
 }
 
 void Channel::setExportVisible(bool on) {
-    if (m_exportBtn) m_exportBtn->setVisible(on);
+    m_exportVisibleSetting = on;
+    // While a downloadable stream is loaded the button is force-shown as a
+    // download control; don't let the global setting hide it.
+    if (m_exportBtn && !m_exportIsDownload) m_exportBtn->setVisible(on);
+}
+
+void Channel::setExportIsDownload(bool on) {
+    if (!m_exportBtn) return;
+    m_exportIsDownload = on;
+    if (on) {
+        // A VOD stream is loaded: make the "save to file" action obvious with a
+        // polished green download pill (gradient + rounded + hover/pressed).
+        m_exportBtn->setText(QString::fromUtf8("\xE2\xAC\x87")  // ⬇
+                             + QStringLiteral("  ") + tr("Save audio"));
+        m_exportBtn->setToolTip(tr("Download this video's audio to a file"));
+        m_exportBtn->setCursor(Qt::PointingHandCursor);
+        m_exportBtn->setMinimumWidth(104);
+        m_exportBtn->setStyleSheet(
+            "QPushButton {"
+            "  padding: 3px 14px; color: #ffffff; border: none; border-radius: 11px;"
+            "  font-weight: bold; letter-spacing: 0.3px;"
+            "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+            "               stop:0 #35c169, stop:1 #1f9a4d);"
+            "}"
+            "QPushButton:hover {"
+            "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+            "               stop:0 #43d179, stop:1 #23ab56); }"
+            "QPushButton:pressed { background: #178a41; padding-top: 4px; }");
+        m_exportBtn->setVisible(true);
+    } else {
+        m_exportBtn->setText(tr("Export audio"));
+        m_exportBtn->setToolTip(tr("Export this channel's audio with all DSP effects applied to a WAV file"));
+        m_exportBtn->setCursor(Qt::ArrowCursor);
+        m_exportBtn->setStyleSheet("QPushButton { padding: 2px 10px; }");
+        m_exportBtn->setVisible(m_exportVisibleSetting);
+    }
 }
 
 void Channel::pushTitleToSandboxDialog() {
@@ -376,6 +529,12 @@ void Channel::refreshTheme() {
             " border-radius: 3px; }")
             .arg(d.text.name(), d.surfaceAlt.name(), d.borderStrong.name()));
     }
+    if (m_loadingRow) {
+        // Match the channel background exactly so the loading strip is invisible
+        // against the channel (only the moving azure segment + blue label show).
+        m_loadingRow->setStyleSheet(QString(
+            "#channelLoadingRow { background-color: %1; }").arg(d.surface.name()));
+    }
     if (m_fx)     m_fx->refreshTheme();
     if (m_volume) m_volume->refreshTheme();
 }
@@ -395,9 +554,92 @@ void Channel::setWaveformVisible(bool on) {
 }
 
 void Channel::setTitle(const QString &t) {
+    // t is always the REAL channel name (persistence / rename). Remember it as
+    // the restore target; if a stream link is currently shown, keep showing the
+    // green link but update the name we'll fall back to.
+    m_baseName = t;
+    if (m_streamLinkActive) return;
+    // Keep the dedup anchor in lock-step with the displayed text: any later
+    // editingFinished (e.g. a focus-out caused by a dialog opening) reads the
+    // SAME text and is swallowed, instead of firing a phantom titleChanged that
+    // would look like a user rename and unload a just-opened playlist panel.
+    m_lastEmittedTitle = t;
     if (m_titleEdit->text() == t) return;
     QSignalBlocker b(m_titleEdit);
     m_titleEdit->setText(t);
+}
+
+void Channel::showStreamLink(const QString &link) {
+    m_streamLinkActive = true;
+    m_lastEmittedTitle = link;   // sync dedup anchor (see setTitle)
+    QSignalBlocker b(m_titleEdit);
+    m_titleEdit->setText(link);
+    // Green + bold so the user sees the link was recognised as a live stream.
+    m_titleEdit->setStyleSheet(QString(
+        "QLineEdit { background: transparent; color: #3fb950; border: none;"
+        " font-weight: bold; padding: 2px 4px; }"));
+}
+
+void Channel::restoreName() {
+    if (!m_streamLinkActive) return;
+    m_streamLinkActive = false;
+    // Sync the dedup anchor to the restored name: opening the playlist panel
+    // (or any dialog) steals focus from the title edit, firing a phantom
+    // editingFinished with this base name. Without this, that phantom looked
+    // like a user rename and instantly unloaded the just-opened playlist.
+    m_lastEmittedTitle = m_baseName;
+    QSignalBlocker b(m_titleEdit);
+    m_titleEdit->setText(m_baseName);
+    refreshTheme();   // reapply the themed (non-green) title stylesheet
+}
+
+void Channel::setStreamLoading(bool on) {
+    if (m_loadingRow) m_loadingRow->setVisible(on);
+}
+
+void Channel::setPlaylistAvailable(bool on) {
+    if (m_playlistBtn) m_playlistBtn->setVisible(on);
+}
+
+void Channel::showDiscoveryBubble(const QString &text) {
+    if (m_discoveryBubble) return;   // already shown once
+    // SpeechBubble renders as a broken thin line in the TS3 host, so build a
+    // plain self-contained card: a rounded, readable panel anchored just below
+    // the channel title, dismissed by its "Got it" button or after a while.
+    auto *card = new QFrame(this);
+    card->setObjectName(QStringLiteral("ytDiscoveryCard"));
+    card->setAttribute(Qt::WA_DeleteOnClose);
+    card->setFrameShape(QFrame::StyledPanel);
+    card->setStyleSheet(QStringLiteral(
+        "#ytDiscoveryCard { background: #fff6d5; border: 1px solid #e6b800;"
+        " border-radius: 8px; }"
+        "#ytDiscoveryCard QLabel { color: #3a2f00; background: transparent; }"
+        "#ytDiscoveryCard QPushButton { background: #e6b800; color: #3a2f00;"
+        " border: none; border-radius: 4px; padding: 3px 10px; font-weight: bold; }"
+        "#ytDiscoveryCard QPushButton:hover { background: #f0c500; }"));
+    auto *lay = new QVBoxLayout(card);
+    lay->setContentsMargins(10, 8, 10, 8);
+    lay->setSpacing(6);
+    auto *lbl = new QLabel(text, card);
+    lbl->setWordWrap(true);
+    lay->addWidget(lbl);
+    auto *btnRow = new QHBoxLayout;
+    btnRow->addStretch(1);
+    auto *ok = new QPushButton(tr("Got it"), card);
+    btnRow->addWidget(ok);
+    lay->addLayout(btnRow);
+    connect(ok, &QPushButton::clicked, card, &QWidget::close);
+
+    m_discoveryBubble = card;
+    card->setFixedWidth(qMax(240, width() - 20));
+    card->adjustSize();
+    // Anchor under the title row (top of the channel frame).
+    int y = m_frame ? (m_frame->y() + 30) : 30;
+    card->move(10, y);
+    card->show();
+    card->raise();
+    // Auto-dismiss after 15 s so it never lingers if the user ignores it.
+    QTimer::singleShot(15000, card, &QWidget::close);
 }
 
 QString Channel::title() const {
@@ -405,7 +647,14 @@ QString Channel::title() const {
 }
 
 void Channel::onTitleEditFinished() {
-    emit titleChanged(m_id, m_titleEdit->text());
+    // QLineEdit::editingFinished fires TWICE for one edit (once on Enter, once
+    // on the focus-out it triggers) — which double-loaded a pasted link and
+    // opened the playlist dialog twice. Only emit when the text actually
+    // changed since the last emit.
+    const QString t = m_titleEdit->text();
+    if (t == m_lastEmittedTitle) return;
+    m_lastEmittedTitle = t;
+    emit titleChanged(m_id, t);
 }
 
 ChannelState Channel::state() const {

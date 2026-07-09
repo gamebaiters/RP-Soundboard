@@ -70,6 +70,14 @@ public:
 	void setSpeedFactor(float factor);
 	void setIntensityFactor(float factor);
 	void setReverbMix(float mix);
+	// Master duck gain (0..1) applied to the SOUNDBOARD contribution in every
+	// fetchSamples mix (capture + playback), leaving mic/host audio untouched.
+	// Driven by the "lower soundboard when I talk" voice setting. Atomic; the
+	// audio thread reads it lock-free.
+	void setMasterDuckGain(float g) { m_masterDuckGain.store(g, std::memory_order_relaxed); }
+	// TARGET soundboard gain for ducking (0..1). fetchSamples ramps the actual
+	// gain toward this per-sample so talking never produces an abrupt step.
+	void setDuckTarget(float t) { m_duckTarget.store(t, std::memory_order_relaxed); }
 	float getPitchFactor() const { return m_pitchFactor; }
 	float getSpeedFactor() const { return m_speedFactor; }
 	float getIntensityFactor() const { return m_intensityFactor; }
@@ -119,9 +127,28 @@ public:
 	// scan, no mutex. GUI timers gate their per-channel iteration on
 	// this so they idle to zero when nothing is playing.
 	bool   anyPlaying() const;
+
+	// Like playSoundInSlot but runs the (potentially blocking) open() on a
+	// background worker so a NETWORK stream never freezes the GUI thread. The
+	// FX / volume values are captured by the CALLER on the GUI thread and passed
+	// in (no widget access on the worker). After a successful open the worker
+	// applies them + optionally pauses. Signals still fire (queued) to the GUI.
+	// The worker is tracked like the reverse workers (bounded-joined at
+	// shutdown), so it can never become a ghost or a use-after-free.
+	void   playSoundInSlotAsync(int slot, const SoundInfo &sound,
+	                            int volLocal, int volRemote,
+	                            float pitchFactor, float speedFactor, float reverbMix,
+	                            bool applyFx, bool autoPlay);
 	// Crop range (seconds) currently applied to a slot. endSec < 0 means
 	// no end point. Both 0 / negative means the slot has no crop.
 	void getSlotCrop(int slot, double &startSec, double &endSec) const;
+	// True while a network stream in this slot is recovering from a stall
+	// (feeding silence). Lock-free read of the cached mirror; drives the GUI
+	// "buffering" notice.
+	bool getSlotNetBuffering(int slot) const;
+	// True (one-shot-ish) when a network stream in this slot declared a stall at
+	// the seek target unrecoverable. Lock-free; drives the "network error" toast.
+	bool getSlotNetFailed(int slot) const;
 	// Live-update the slot's crop range (e.g. from the waveform context
 	// menu). Affects loop restart point and the marker overlay; does
 	// not retrigger the decoder, so the new end point only takes effect
@@ -217,6 +244,13 @@ private:
 		// every platform we ship (x86-64, ARM64).
 		std::atomic<double> cachedPositionSec{0.0};
 		std::atomic<double> cachedLengthSec{0.0};
+		// Lock-free mirror of inputFile->isNetBuffering(), refreshed by the
+		// audio thread alongside the position cache. GUI poll reads it to show
+		// a "buffering" notice while a network stream recovers from a stall.
+		std::atomic<bool>   cachedNetBuffering{false};
+		// Lock-free mirror of inputFile->netFailed() — GUI shows a transient
+		// "network error" toast on the rising edge.
+		std::atomic<bool>   cachedNetFailed{false};
 		// Anchor flag for the cursor rate-limiter inside fetchInputSamples.
 		// False after a play / seek / loop-restart so the first cycle
 		// snaps the cache to the fresh truth; true thereafter so jumps
@@ -438,6 +472,8 @@ private:
 	std::atomic<bool> m_muteMyself;
 	std::atomic<bool> m_earrapeProtection;
 	std::atomic<bool> m_globalNormalize{false};
+	std::atomic<float> m_masterDuckGain{1.0f};   // current (smoothed) duck gain
+	std::atomic<float> m_duckTarget{1.0f};       // target duck gain (ramped to)
 	float m_pitchFactor;
 	float m_speedFactor;
 	float m_intensityFactor;

@@ -134,6 +134,9 @@ ConfigModel::ConfigModel()
 	m_spectrogramView = false;
 	m_showVinylButton = true;
 	m_micFxFeatureEnabled = true;
+	m_streamingEnabled = true;
+	m_channelNameLinkDetect = true;
+	m_streamAutoplay = false;
 	m_loudnessNormalize = false;
 
 	m_resetChVolume = true;
@@ -222,6 +225,12 @@ void ConfigModel::readConfig(const QString &file)
 	m_spectrogramView     = settings.value("spectrogram_view",      false).toBool();
 	m_showVinylButton     = settings.value("show_vinyl_button",     true).toBool();
 	m_micFxFeatureEnabled = settings.value("micfx_feature_enabled", true).toBool();
+	m_streamingEnabled      = settings.value("streaming_enabled",         true).toBool();
+	m_channelNameLinkDetect = settings.value("channel_name_link_detect",  true).toBool();
+	m_streamAutoplay        = settings.value("stream_autoplay",           false).toBool();
+	m_vadWhilePlaying       = settings.value("vad_while_playing",         false).toBool();
+	m_duckWhenTalking       = settings.value("duck_when_talking",         false).toBool();
+	m_duckAmountPercent     = settings.value("duck_amount_percent",       40).toInt();
 	m_loudnessNormalize   = settings.value("loudness_normalize",    false).toBool();
 	m_resetChVolume       = settings.value("reset_ch_volume", true).toBool();
 	m_resetChFx           = settings.value("reset_ch_fx", true).toBool();
@@ -326,6 +335,12 @@ void ConfigModel::writeConfigImmediate(const QString &file)
 	settings.setValue("spectrogram_view",      m_spectrogramView);
 	settings.setValue("show_vinyl_button",     m_showVinylButton);
 	settings.setValue("micfx_feature_enabled", m_micFxFeatureEnabled);
+	settings.setValue("streaming_enabled",         m_streamingEnabled);
+	settings.setValue("channel_name_link_detect",  m_channelNameLinkDetect);
+	settings.setValue("stream_autoplay",           m_streamAutoplay);
+	settings.setValue("vad_while_playing",         m_vadWhilePlaying);
+	settings.setValue("duck_when_talking",         m_duckWhenTalking);
+	settings.setValue("duck_amount_percent",       m_duckAmountPercent);
 	settings.setValue("loudness_normalize",    m_loudnessNormalize);
 	settings.setValue("reset_ch_volume", m_resetChVolume);
 	settings.setValue("reset_ch_fx", m_resetChFx);
@@ -923,6 +938,12 @@ void ConfigModel::setShowSkipButtons(bool on)      { m_showSkipButtons      = on
 void ConfigModel::setSpectrogramView(bool on)      { m_spectrogramView      = on; writeConfig(); }
 void ConfigModel::setShowVinylButton(bool on)      { m_showVinylButton      = on; writeConfig(); }
 void ConfigModel::setMicFxFeatureEnabled(bool on)  { m_micFxFeatureEnabled  = on; writeConfig(); }
+void ConfigModel::setStreamingEnabled(bool on)        { m_streamingEnabled       = on; writeConfig(); }
+void ConfigModel::setChannelNameLinkDetect(bool on)   { m_channelNameLinkDetect  = on; writeConfig(); }
+void ConfigModel::setStreamAutoplay(bool on)          { m_streamAutoplay         = on; writeConfig(); }
+void ConfigModel::setVadWhilePlaying(bool on)         { m_vadWhilePlaying        = on; writeConfig(); }
+void ConfigModel::setDuckWhenTalking(bool on)         { m_duckWhenTalking        = on; writeConfig(); }
+void ConfigModel::setDuckAmountPercent(int pct)       { m_duckAmountPercent      = pct; writeConfig(); }
 void ConfigModel::setLoudnessNormalize(bool on)    { m_loudnessNormalize    = on; writeConfig(); }
 
 void ConfigModel::setResetChVolume(bool on) { m_resetChVolume = on; writeConfig(); }

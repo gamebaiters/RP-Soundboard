@@ -505,6 +505,16 @@ void SoundView::setSound( const SoundInfo &sound )
 	m_drawnBins = 0;
 	m_playbackPosition = 0.0;
 	m_active = true;
+	// A fresh sound is never live until the wiring flags it (onStartPlaying).
+	m_liveStream = false;
+	m_networkNotice = false;
+	// A network VOD (normal YouTube video) STILL gets a full waveform — only
+	// true LIVE streams (setLiveStream) skip it. The analyser decodes the
+	// remote file; draw the bins PROGRESSIVELY as they arrive (network is slow).
+	const bool isNetwork = sound.isStreamUrl
+		|| sound.filename.startsWith("http://")
+		|| sound.filename.startsWith("https://");
+	m_streamProgressive = isNetwork;
 	if(filenameDiffers && !sound.filename.isEmpty())
 	{
 		// Per-view analyser (lazy): each SoundView owns its own thread
@@ -610,6 +620,21 @@ void SoundView::setShowCropMarkers(bool on)
 	update();
 }
 
+void SoundView::setLiveStream(bool on)
+{
+	if (m_liveStream == on)
+		return;
+	m_liveStream = on;
+	if (on) {
+		// Endless source: kill the analyser (it would read the live stream
+		// forever) and stop the poll timer. Nothing to visualise.
+		if (m_vis) m_vis->stop(false);
+		if (m_timer) m_timer->stop();
+		m_active = true;   // still "loaded" so the notice paints
+	}
+	update();
+}
+
 
 //---------------------------------------------------------------
 // Purpose:
@@ -664,16 +689,34 @@ void SoundView::drawWaves(QPainter *painter)
 	if (!m_active)
 		return;
 
+	// LIVE stream ONLY: no waveform (endless, unseekable). Everything else —
+	// local files AND normal network VODs — draws a real waveform below.
+	if (m_liveStream) {
+		painter->save();
+		QFont f = painter->font();
+		f.setBold(true);
+		painter->setFont(f);
+		painter->setPen(QColor(0xb0, 0x6f, 0xff));   // purple
+		painter->drawText(rect(), Qt::AlignCenter,
+			tr("● LIVE — no waveform for live streams"));
+		painter->restore();
+		return;
+	}
+
 	const bool analysing =
 		m_vis && (m_vis->isRunning() || !m_analysisReady);
 
-	if (analysing) {
+	if (analysing && !m_streamProgressive) {
 		// Draw nothing here — the progress bar is painted by the
 		// dedicated overlay block in paintEvent (after all other
 		// layers) so it sits on top of the dimmed background AND any
 		// existing crop / ghost decoration cleanly.
 		return;
 	}
+	// Stream progressive path: fall through and draw whatever bins the
+	// analyser has produced so far. preparePaths() lays each processed
+	// bin at a fixed 1/1024 x-position, so the waveform grows left→right
+	// as decoding proceeds instead of freezing on a blank stripe.
 
 	if (m_displayMode == Mode_Spectrogram && m_vis) {
 		// Spectrogram-lite: reuse the analyser's peak min/max bins as a

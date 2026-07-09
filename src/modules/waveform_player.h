@@ -36,6 +36,10 @@ public:
 public slots:
     void setSound(const SoundInfo &info);
     void setFilename(const QString &name);
+    // Like setFilename but for an INTERNET source: shows a blue globe prefix
+    // before the (video) title so the user sees at a glance it is streamed
+    // from the network rather than a local file. Rich-text label.
+    void setStreamLabel(const QString &title);
     void setPosition(double seconds, double total);  // updates time label
     // Show / hide the -10s / -5s / +5s / +10s skip buttons for this
     // channel. Driven by the global "Show skip buttons" setting.
@@ -60,6 +64,18 @@ public slots:
     void setReplayReady(bool ready);
     void setLooping(bool on);
     void setReversed(bool on);
+    // Live-stream mode: reverse + vinyl (tape-stop) cannot work on a network
+    // stream (reverse needs the whole file buffered; backward scratch needs
+    // random-access history). Disable + force-off those controls while a stream
+    // is loaded; loop stays available (it re-seeks the URL to the start).
+    void setStreamMode(bool on);
+    // LIVE-stream mode. A live stream has no length and is not seekable, so
+    // reverse, vinyl (tape-stop) and the skip buttons are force-disabled and the
+    // waveform is replaced by a purple notice (SoundView::setLiveStream). Finite
+    // (VOD) network videos do NOT use this — they keep the full transport +
+    // progressive waveform. on==false restores the normal transport.
+    void setLiveStream(bool on);
+    bool isLiveStream() const { return m_liveStream; }
     // Toggle ONLY the waveform visualisation (the SoundView). Filename,
     // time label and transport buttons stay so the user can still
     // play / pause / seek even in the compact "no waveform" mode.
@@ -140,6 +156,7 @@ private:
     bool         m_replayReady = false;
     bool         m_looping;
     bool         m_reversed;
+    bool         m_liveStream = false;
     QString      m_fullPath;   // unstripped path, returned by filename()
     // Mirror of the crop range so setPosition() can render the time
     // label in crop-relative form ("X / cropDur") instead of full-file

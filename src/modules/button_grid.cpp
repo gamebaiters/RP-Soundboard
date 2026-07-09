@@ -116,13 +116,16 @@ void ButtonGrid::applyButtonAppearance(int idx) {
     // cascade resolves the qApp themed rule for audio/macro on first
     // polish; setting it after setStyleSheet retriggers re-eval and the
     // ancestor selector wins.
-    b->setProperty("buttonVariant", QVariant(QString(s.isMacro ? "macro" : "audio")));
+    b->setProperty("buttonVariant", QVariant(QString(
+        s.isMacro ? "macro" : (s.isStreamUrl ? "stream" : "audio"))));
 
     QString label;
     if (!s.customText.isEmpty()) {
         label = s.customText;
     } else if (s.isMacro) {
         label = tr("(macro)");
+    } else if (s.isStreamUrl) {
+        label = s.streamTitle.isEmpty() ? tr("(link)") : s.streamTitle;
     } else if (s.filename.isEmpty()) {
         label = tr("(empty)");
     } else {
@@ -133,6 +136,7 @@ void ButtonGrid::applyButtonAppearance(int idx) {
     b->setText(label);
 
     b->setMacroDecoration(s.isMacro);
+    b->setStreamDecoration(s.isStreamUrl && !s.isMacro);
     if (s.customColorEnabled())
         b->setBackgroundColor(s.customColor);
     else
@@ -197,6 +201,9 @@ void ButtonGrid::showContextMenu(int idx, const QPoint &globalPos) {
         if (!empty)
             aEdit = menu.addAction(tr("Edit..."));
     }
+    QAction *aSaveLink = nullptr;
+    if (!isMacro)
+        aSaveLink = menu.addAction(tr("Save link..."));
     auto *aClear  = menu.addAction(tr("Clear"));
     aClear->setEnabled(!empty || isMacro);
     auto *aHotkey = menu.addAction(tr("Set hotkey..."));
@@ -206,10 +213,54 @@ void ButtonGrid::showContextMenu(int idx, const QPoint &globalPos) {
         aMicMacro = menu.addAction(tr("Save Mic FX package into macro"));
     }
 
+    // Per-channel YouTube actions: for EACH channel that currently holds a
+    // resolved video, offer "save link" (+ "download audio" for non-live).
+    // Two channels with videos -> two groups of actions, etc.
+    QVector<StreamChannelInfo> streams;
+    if (m_streamProvider && !isMacro) streams = m_streamProvider();
+    struct StreamAction { QAction *save; QAction *download; QAction *playlist; StreamChannelInfo info; };
+    QVector<StreamAction> streamActions;
+    if (!streams.isEmpty()) {
+        menu.addSeparator();
+        for (const StreamChannelInfo &sc : streams) {
+            StreamAction sa; sa.info = sc;
+            sa.save = sa.download = sa.playlist = nullptr;
+            const QString who = sc.channelName.isEmpty()
+                ? tr("Channel %1").arg(sc.slot + 1) : sc.channelName;
+            // A single video loaded -> offer save-link (+ download for VOD).
+            if (!sc.pageUrl.isEmpty()) {
+                sa.save = menu.addAction(tr("Save %1's link here").arg(who));
+                sa.download = sc.isLive ? nullptr
+                    : menu.addAction(tr("Download %1's audio here…").arg(who));
+            }
+            // A whole playlist loaded -> offer save-whole-playlist.
+            if (sc.isPlaylist && !sc.playlistUrl.isEmpty())
+                sa.playlist = menu.addAction(tr("Save %1's whole playlist here").arg(who));
+            streamActions.push_back(sa);
+        }
+    }
+
     QAction *chosen = menu.exec(globalPos);
+    if (chosen) {
+        for (const StreamAction &sa : streamActions) {
+            if (chosen == sa.save) {
+                emit saveStreamLinkToButton(idx, sa.info.pageUrl, sa.info.title);
+                return;
+            }
+            if (sa.download && chosen == sa.download) {
+                emit downloadStreamToButton(idx, sa.info.pageUrl, sa.info.title);
+                return;
+            }
+            if (sa.playlist && chosen == sa.playlist) {
+                emit savePlaylistToButton(idx, sa.info.playlistUrl, sa.info.playlistTitle);
+                return;
+            }
+        }
+    }
     if      (chosen && chosen == aChoose) emit chooseFileRequested(idx);
     else if (chosen && chosen == aEdit)   emit editButtonRequested(idx);
     else if (chosen && chosen == aRename) emit renameMacroRequested(idx);
+    else if (chosen && chosen == aSaveLink) emit saveLinkRequested(idx);
     else if (chosen && chosen == aClear)  emit clearButtonRequested(idx);
     else if (chosen && chosen == aHotkey) emit setHotkeyRequested(idx);
     else if (chosen && chosen == aMacro)  emit createMacroRequested(idx);

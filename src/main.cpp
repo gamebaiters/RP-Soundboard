@@ -12,6 +12,7 @@
 
 #include <cstdio>
 #include <cmath>
+#include <algorithm>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -58,6 +59,7 @@
 #include "modules/whats_new_dialog.h"
 #include "modules/log_viewer_dialog.h"
 #include "modules/audio_exporter.h"
+#include "modules/stream_resolver.h"
 #include <QApplication>
 
 extern "C" void rpsb_close_debug_log();
@@ -95,6 +97,30 @@ HowToDialog *howToDialog = NULL;
 std::atomic<Sampler*> g_samplerAtomic{nullptr};
 Sampler *sampler = NULL;
 TalkStateManager *tsMgr = NULL;
+
+// --- Voice behaviour while a sound plays (v2.3.1) ------------------------
+// (1) vadWhilePlaying: gate the USER'S mic by voice activity so his voice is
+//     only sent when he actually talks, while the soundboard is transmitted
+//     continuously on top. (2) duckWhenTalking: lower the soundboard by
+//     g_duckAmount (0..1) whenever the user talks, so his voice stays audible.
+static std::atomic<bool>  g_vadWhilePlaying{false};
+static std::atomic<bool>  g_duckWhenTalking{false};
+static std::atomic<float> g_duckAmount{0.4f};
+
+void sb_setVoiceBehaviour(bool vadWhilePlaying, bool duckWhenTalking, float duckAmount)
+{
+	g_vadWhilePlaying.store(vadWhilePlaying);
+	g_duckWhenTalking.store(duckWhenTalking);
+	if (duckAmount < 0.0f) duckAmount = 0.0f;
+	if (duckAmount > 0.95f) duckAmount = 0.95f;
+	g_duckAmount.store(duckAmount);
+	// When ducking is turned off, release the soundboard to unity (both the
+	// target and the current smoothed gain) so it never stays dipped.
+	if (!duckWhenTalking && sampler) {
+		sampler->setDuckTarget(1.0f);
+		sampler->setMasterDuckGain(1.0f);
+	}
+}
 
 bool hotkeysTemporarilyDisabled = false;
 
@@ -239,6 +265,48 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 		return;
 	}
 
+	// Voice behaviour: mic VAD gating + soundboard ducking. `samples` here is
+	// the user's mic (post Mic-FX) BEFORE the soundboard is mixed in below, so
+	// we can measure the mic level and gate/duck accordingly.
+	{
+		const bool vadOpt  = g_vadWhilePlaying.load(std::memory_order_relaxed);
+		const bool duckOpt = g_duckWhenTalking.load(std::memory_order_relaxed);
+		if ((vadOpt || duckOpt) && s->anyPlaying() && sampleCount > 0)
+		{
+			// Block RMS of the first channel (mic is mono into TS3 anyway).
+			double sumsq = 0.0;
+			for (int i = 0; i < sampleCount; ++i) {
+				const double v = samples[i * channels];
+				sumsq += v * v;
+			}
+			const double rms = std::sqrt(sumsq / (double)sampleCount);
+
+			// Envelope + hold so the gate/duck doesn't chatter on word gaps.
+			static double s_env = 0.0;
+			static int    s_hold = 0;
+			s_env = (rms > s_env) ? rms : (s_env * 0.90 + rms * 0.10);
+			const double kTalkThresh = 500.0;   // ~ -36 dBFS on int16
+			const int    kHoldBlocks = 12;       // ~240 ms at 20 ms/block
+			bool talking = s_env > kTalkThresh;
+			if (talking) s_hold = kHoldBlocks;
+			else if (s_hold > 0) { --s_hold; talking = true; }
+
+			if (duckOpt) {
+				// Only set the TARGET — fetchSamples ramps the actual gain
+				// toward it per-sample, so the dip/recovery is smooth (no step).
+				const float target = talking ? (1.0f - g_duckAmount.load(std::memory_order_relaxed)) : 1.0f;
+				s->setDuckTarget(target);
+			}
+
+			if (vadOpt && !talking) {
+				// User is silent: drop the mic so ONLY the soundboard is sent
+				// (soundboard is mixed in by fetchInputSamples right after).
+				std::fill_n(samples, (size_t)sampleCount * channels, (short)0);
+				*edited |= 0x1;
+			}
+		}
+	}
+
 	int written = s->fetchInputSamples(samples, sampleCount, channels, NULL);
 	if(written > 0)
 		*edited |= 0x1;
@@ -342,6 +410,10 @@ CAPI void sb_init()
 
 	InitFFmpegLibrary();
 
+	// Wipe any leftover stream scratch files from a previous session BEFORE
+	// anything runs — a 10-hour video must never accumulate on disk.
+	StreamResolver::cleanTempDir();
+
 	QTimer::singleShot(10, []{
 		configModel = new ConfigModel();
 		configModel->readConfig();
@@ -398,6 +470,16 @@ CAPI void sb_init()
 
 		updateChecker = new UpdateChecker();
 		updateChecker->startCheck(false, configModel);
+
+		// Pre-warm the streaming engine: run yt-dlp --version now (background,
+		// off the GUI thread) so the OS caches the binary and the FIRST real
+		// link resolve doesn't pay the cold PyInstaller/disk-read start cost.
+		StreamResolver::instance().queryVersion();
+		// Silent auto-update on EVERY startup: run `yt-dlp -U` in the background
+		// (hidden process, tracked in m_aux → killed on shutdown, never a ghost).
+		// No UI is attached at init, so a failure is just logged. Keeps the
+		// resolver current with YouTube changes without any user action.
+		StreamResolver::instance().updateEngine();
 	});
 }
 
@@ -425,6 +507,12 @@ CAPI void sb_kill()
 	// zombie - the user-reported "soundboard process stays open and
 	// TS3 pops a crash dialog when I force-kill it" bug.
 	AudioExporter::cancelAllAndWait(500);
+
+	// Kill any running yt-dlp child (a live resolve or an in-flight self-update)
+	// BEFORE Qt/plugin teardown so it can never become a ghost process or hang
+	// the unload. Resolves are quick (yt-dlp only prints the URL, it never
+	// downloads the video), but a slow network / stuck update must not linger.
+	StreamResolver::instance().shutdown();
 
 	// Tear down the TalkStateManager active server FIRST so the watchdog
 	// timer stops and any in-flight queued setTalkTransMode calls skip

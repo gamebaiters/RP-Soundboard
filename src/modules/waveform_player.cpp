@@ -274,6 +274,36 @@ void WaveformPlayer::setReversed(bool on) {
     m_reverse->setChecked(on);
 }
 
+void WaveformPlayer::setStreamMode(bool on) {
+    // Reverse + vinyl ARE available on streams: the tape ring keeps the recent
+    // seconds in RAM (smooth within the window) and the streaming-reverse /
+    // backfill paths seek the direct URL over HTTP range for anything older
+    // (may stutter - fine for a stream). So this is intentionally a no-op; the
+    // controls stay enabled. Kept as a hook in case a future build wants to
+    // surface a "stream" affordance on the transport.
+    Q_UNUSED(on);
+}
+
+void WaveformPlayer::setLiveStream(bool on) {
+    m_liveStream = on;
+    m_wave->setLiveStream(on);
+    // A live stream can't be reversed, scratched or seeked. Force those off and
+    // grey them out; loop stays (it just re-opens the URL). VOD videos never
+    // reach here so their transport is untouched.
+    if (on && m_reversed) {
+        m_reversed = false;
+        m_wave->setReverse(false);
+        QSignalBlocker b(m_reverse);
+        m_reverse->setChecked(false);
+    }
+    if (m_reverse)  m_reverse->setEnabled(!on);
+    if (m_vinylBtn) m_vinylBtn->setEnabled(!on);
+    if (m_back10)   m_back10->setEnabled(!on);
+    if (m_back5)    m_back5->setEnabled(!on);
+    if (m_fwd5)     m_fwd5->setEnabled(!on);
+    if (m_fwd10)    m_fwd10->setEnabled(!on);
+}
+
 void WaveformPlayer::setSound(const SoundInfo &info) {
     m_wave->setSound(info);
     setFilename(info.filename);
@@ -293,8 +323,27 @@ void WaveformPlayer::setFilename(const QString &name) {
     QString display = name;
     int slash = qMax(name.lastIndexOf('/'), name.lastIndexOf('\\'));
     if (slash >= 0) display = name.mid(slash + 1);
+    m_filenameLabel->setTextFormat(Qt::PlainText);
     m_filenameLabel->setText(display.isEmpty() ? tr("(no file)") : display);
     m_filenameLabel->setToolTip(name);
+    refreshClearButton();
+}
+
+void WaveformPlayer::setStreamLabel(const QString &title) {
+    if (m_errorActive) {
+        m_errorActive = false;
+        m_filenameLabel->setStyleSheet(QString());
+    }
+    m_fullPath = title;
+    // Blue globe prefix (azure) + the escaped title. Rich text so the prefix
+    // can be coloured independently of the theme text colour. fromUtf8 for the
+    // emoji avoids the MSVC narrow-literal encoding trap.
+    const QString globe = QString::fromUtf8("\xF0\x9F\x8C\x90");   // 🌐
+    m_filenameLabel->setTextFormat(Qt::RichText);
+    m_filenameLabel->setText(
+        "<span style='color:#3fa7ff; font-weight:bold;'>" + globe + "</span> "
+        + title.toHtmlEscaped());
+    m_filenameLabel->setToolTip(tr("Internet stream") + ": " + title);
     refreshClearButton();
 }
 

@@ -53,6 +53,23 @@ public:
     void            setRemovable(bool on);
     void            setTitle(const QString &title);
     QString         title() const;
+    // URL-as-name streaming (v2.3.1): while a link is loaded as a live stream
+    // in this channel, show the pasted link IN GREEN as the channel name
+    // WITHOUT losing the real name. restoreName() puts the real name back on
+    // stop / when another sound loads. The real name (m_baseName) is the one
+    // that persists - the link is never saved, so a restart shows the name.
+    void            showStreamLink(const QString &link);
+    void            restoreName();
+    bool            showingStreamLink() const { return m_streamLinkActive; }
+    // Indeterminate "resolving link…" indicator: a thin marquee bar shown under
+    // the title row while StreamResolver is working, hidden on resolved/failed.
+    void            setStreamLoading(bool on);
+    // Show / hide the "reopen playlist" button (a playlist was loaded here).
+    void            setPlaylistAvailable(bool on);
+    // One-time discovery hint above the channel name pointing at the paste-a-
+    // YouTube-link feature. Self-dismisses on click; the caller gates it on a
+    // QSettings one-shot flag so it only ever shows once, on one channel.
+    void            showDiscoveryBubble(const QString &text);
     // Hide / show the per-channel FX panel + its separator. Driven by
     // the global "Enable custom FX" master switch.
     void            setFxVisible(bool on);
@@ -98,6 +115,9 @@ public:
     // audio sandbox feature" setting).
     void                setSandboxFeatureEnabled(bool on);
     void                setExportVisible(bool on);
+    // Switch the channel's Export button into a prominent green "Save audio"
+    // download control (VOD stream loaded) or back to the normal Export button.
+    void                setExportIsDownload(bool on);
     // Notify the sandbox dialog (if open) that the channel title
     // changed, so the dialog window title stays in sync.
     void                pushTitleToSandboxDialog();
@@ -117,6 +137,10 @@ signals:
     void addChannelRequested(int afterChannelId);
     void removeChannelRequested(int channelId);
     void titleChanged(int channelId, const QString &title);
+    // User clicked the Cancel (✕) button on the resolving marquee.
+    void streamLoadCancelRequested(int channelId);
+    // User clicked the "reopen playlist" (☰) button.
+    void playlistReopenRequested(int channelId);
     // Drag a SoundButton from the grid onto this Channel = load that
     // sound into this slot. Wiring stops current playback, plays new,
     // immediately pauses so the user can hit play when ready.
@@ -151,8 +175,21 @@ private:
     QPushButton    *m_addBtn;
     QPushButton    *m_removeBtn;
     QLineEdit      *m_titleEdit;
+    // The real channel name (persisted). While m_streamLinkActive the title
+    // edit displays the green link instead, but m_baseName holds the name to
+    // restore.
+    QString         m_baseName;
+    // Last title emitted via titleChanged, used to swallow the duplicate
+    // editingFinished (Enter + focus-out) that double-loaded pasted links.
+    QString         m_lastEmittedTitle;
+    bool            m_streamLinkActive = false;
     class QFrame   *m_fxSeparator = nullptr;
     class QFrame   *m_frame = nullptr;
+    QWidget            *m_loadingBar = nullptr;   // custom marquee while resolving
+    QWidget            *m_loadingRow = nullptr;    // marquee + cancel row
+    class QToolButton  *m_loadCancelBtn = nullptr;
+    class QToolButton  *m_playlistBtn = nullptr;   // reopen playlist panel
+    QWidget            *m_discoveryBubble = nullptr;  // one-time YT hint card
 
     // Sandbox per-channel
     SandboxState                  m_sandbox;
@@ -162,4 +199,6 @@ private:
     ChannelSandboxDialog         *m_sandboxDialog = nullptr;
     QPushButton                  *m_exportBtn = nullptr;
     bool                          m_sandboxFeatureEnabled = true;
+    bool                          m_exportVisibleSetting = false;
+    bool                          m_exportIsDownload = false;
 };

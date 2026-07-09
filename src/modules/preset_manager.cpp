@@ -92,3 +92,25 @@ void PresetManager::deleteSandboxPreset(const QString &name) {
     }
     saveSection("sandbox_presets", presets);
 }
+
+QVector<PresetManager::Preset> PresetManager::loadMicPresets() {
+    return loadSection("mic_presets");
+}
+
+void PresetManager::saveMicPreset(const QString &name, const QString &data) {
+    auto presets = loadMicPresets();
+    bool found = false;
+    for (auto &p : presets) {
+        if (p.name == name) { p.data = data; found = true; break; }
+    }
+    if (!found) presets.append({name, data});
+    saveSection("mic_presets", presets);
+}
+
+void PresetManager::deleteMicPreset(const QString &name) {
+    auto presets = loadMicPresets();
+    for (int i = 0; i < presets.size(); ++i) {
+        if (presets[i].name == name) { presets.removeAt(i); break; }
+    }
+    saveSection("mic_presets", presets);
+}

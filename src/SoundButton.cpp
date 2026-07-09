@@ -29,6 +29,7 @@ SoundButton::SoundButton(QWidget *parent) :
 	pressing(false),
 	dragging(false),
 	macroDecoration(false),
+	streamDecoration(false),
 	hasOwnStyle(false),
 	tooltipPrimed(false)
 {
@@ -141,6 +142,13 @@ void SoundButton::setMacroDecoration(bool on)
 	applyBackgroundColor(backgroundColor);
 }
 
+void SoundButton::setStreamDecoration(bool on)
+{
+	if (streamDecoration == on) return;
+	streamDecoration = on;
+	applyBackgroundColor(backgroundColor);
+}
+
 void SoundButton::applyBackgroundColor(const QColor &color)
 {
 	// Qt 5.15.2 QColor() default-ctor: isValid()=false yet alpha()==255.
@@ -153,6 +161,18 @@ void SoundButton::applyBackgroundColor(const QColor &color)
 			"  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
 			"      stop:0 #6a1b9a, stop:1 #4a148c);"
 			"  border: 2px solid #ffd54f;"
+			"  border-radius: 6px;"
+			"  padding: 2px 4px;"
+			"  font-weight: bold;");
+		hasOwnStyle = true;
+	} else if (streamDecoration) {
+		// Live-stream (URL / YouTube) cells: distinct teal gradient + cyan
+		// border so saved links read differently from local-file cells.
+		setStyleSheet(
+			"  color: #eafcff;"
+			"  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+			"      stop:0 #0f6f7a, stop:1 #0a4a52);"
+			"  border: 2px solid #2fd3e6;"
 			"  border-radius: 6px;"
 			"  padding: 2px 4px;"
 			"  font-weight: bold;");
@@ -201,7 +221,11 @@ void SoundButton::setSoundFilePath(const QString &path)
 void SoundButton::enterEvent(QEvent *evt)
 {
 	if (!tooltipPrimed && !soundFilePath.isEmpty()) {
-		QString tip = FileMetadata::tooltipFor(soundFilePath);
+		// A URL cell is a live network stream, not a local file - probing it
+		// with FileMetadata would report "File not found". Show a stream note.
+		const bool isUrl = soundFilePath.startsWith("http://", Qt::CaseInsensitive)
+		                || soundFilePath.startsWith("https://", Qt::CaseInsensitive);
+		QString tip = isUrl ? tr("Network stream") : FileMetadata::tooltipFor(soundFilePath);
 		if (!tip.isEmpty()) setToolTip(tip);
 		// Mark primed even on probe failure so we do not hammer FFmpeg
 		// on every hover for a truly unreadable file. FileMetadata's

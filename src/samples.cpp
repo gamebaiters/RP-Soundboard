@@ -656,6 +656,43 @@ static void joinThreadBounded(std::thread &t, int timeoutMs)
 #endif
 }
 
+
+void Sampler::playSoundInSlotAsync(int slot, const SoundInfo &sound,
+	int volLocal, int volRemote,
+	float pitchFactor, float speedFactor, float reverbMix,
+	bool applyFx, bool autoPlay)
+{
+	std::thread th([this, slot, sound, volLocal, volRemote,
+	                pitchFactor, speedFactor, reverbMix, applyFx, autoPlay]{
+		if (m_shuttingDown.load(std::memory_order_acquire)) return;
+		// The heavy network open() happens here, OFF the GUI thread.
+		if (!playSoundInSlot(slot, sound, false)) return;
+		if (m_shuttingDown.load(std::memory_order_acquire)) return;
+		setSlotVolumeLocal(slot, volLocal);
+		setSlotVolumeRemote(slot, volRemote);
+		if (applyFx) {
+			setSlotPitchFactor(slot, pitchFactor);
+			setSlotSpeedFactor(slot, speedFactor);
+			setSlotReverbMix  (slot, reverbMix);
+		} else {
+			setSlotPitchFactor(slot, 1.0f);
+			setSlotSpeedFactor(slot, 1.0f);
+			setSlotReverbMix  (slot, 0.0f);
+		}
+		if (!autoPlay) pausePlayback(slot);
+	});
+	// Track it like the reverse workers: shutdown bounded-joins these, so a
+	// stuck network open() can never become a ghost thread or a UAF. Trim the
+	// list when it grows so finished workers don't accumulate over a session.
+	std::lock_guard<std::mutex> rl(m_retiredMutex);
+	m_retiredWorkers.push_back(std::move(th));
+	if (m_retiredWorkers.size() > 12) {
+		for (auto &t : m_retiredWorkers)
+			joinThreadBounded(t, 100);
+		m_retiredWorkers.clear();
+	}
+}
+
 void Sampler::shutdown()
 {
 	// Flip the global shutdown flag FIRST (no lock). Any reverse
@@ -800,6 +837,16 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 			samples[i*channels+ciRight] = 0;
 
 	const float volGain = m_volumeFactor;
+	// Mic-driven ducking. The gain is smoothed PER-SAMPLE toward its target so
+	// the soundboard eases up/down instead of stepping once per 20 ms block
+	// (which read as a "scatto"/click). Asymmetric attack/release: duck down
+	// gently (~70 ms), recover slowly (~280 ms) so it doesn't pump. Only the
+	// soundboard contribution is scaled — never the mic/host samples in `out`.
+	float       duck       = m_masterDuckGain.load(std::memory_order_relaxed);
+	const float duckTarget = m_duckTarget.load(std::memory_order_relaxed);
+	// Per-sample one-pole coefficients at 48 kHz: coef = dt / tau.
+	const float kDuckAttack  = 0.00030f;   // ~70 ms toward a lower target
+	const float kDuckRelease = 0.000074f;  // ~280 ms back toward unity
 	const float intensity = m_intensityFactor;
 	const int avail = sb.avail();
 	const short* in = sb.getBufferData();
@@ -886,7 +933,9 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 	{
 		for (int i = 0; i < write; i++)
 		{
-			float sbSample = volGain * intensity * (float(in[i * 2]) + float(in[i * 2 + 1])) * 0.5f;
+			duck += (duckTarget - duck) * ((duckTarget < duck) ? kDuckAttack : kDuckRelease);
+			const float sbGain = volGain * duck;
+			float sbSample = sbGain * intensity * (float(in[i * 2]) + float(in[i * 2 + 1])) * 0.5f;
 			float a = std::fabs(sbSample) * (1.0f / 32768.0f);
 			if (a > slotMaxL) slotMaxL = a;
 			if (a > slotMaxR) slotMaxR = a;
@@ -913,8 +962,10 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 	{
 		for (int i = 0; i < write; i++)
 		{
-			float sbL = volGain * intensity * float(in[i * 2]);
-			float sbR = volGain * intensity * float(in[i * 2 + 1]);
+			duck += (duckTarget - duck) * ((duckTarget < duck) ? kDuckAttack : kDuckRelease);
+			const float sbGain = volGain * duck;
+			float sbL = sbGain * intensity * float(in[i * 2]);
+			float sbR = sbGain * intensity * float(in[i * 2 + 1]);
 			float aL = std::fabs(sbL) * (1.0f / 32768.0f);
 			float aR = std::fabs(sbR) * (1.0f / 32768.0f);
 			if (aL > slotMaxL) slotMaxL = aL;
@@ -944,6 +995,8 @@ int Sampler::fetchSamples(SampleBuffer &sb, PeakMeter &pm, short *samples, int c
 			out[i * channels + ciRight] = (short)resR;
 		}
 	}
+	// Persist the per-sample-smoothed duck gain for the next block.
+	m_masterDuckGain.store(duck, std::memory_order_relaxed);
 
 	// Capture-path peak: reflects remote volume, not local slider.
 	if (isCapturePath && slot) {
@@ -1228,6 +1281,12 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 				slot.cachedPositionSec.store(accepted, std::memory_order_relaxed);
 			}
 			slot.cachedLengthSec.store(lenSec, std::memory_order_relaxed);
+			slot.cachedNetBuffering.store(
+				slot.inputFile && slot.inputFile->isNetBuffering(),
+				std::memory_order_relaxed);
+			slot.cachedNetFailed.store(
+				slot.inputFile && slot.inputFile->netFailed(),
+				std::memory_order_relaxed);
 		}
 
 		// Check if this slot's file is done
@@ -1553,6 +1612,12 @@ int Sampler::fetchOutputSamples(short *samples, int count, int channels, const u
 			}
 			slot.cachedPositionSec.store(accepted, std::memory_order_relaxed);
 			slot.cachedLengthSec.store(lenSec, std::memory_order_relaxed);
+			slot.cachedNetBuffering.store(
+				slot.inputFile && slot.inputFile->isNetBuffering(),
+				std::memory_order_relaxed);
+			slot.cachedNetFailed.store(
+				slot.inputFile && slot.inputFile->netFailed(),
+				std::memory_order_relaxed);
 		}
 
 		// Check if this preview slot's file is done
@@ -2091,6 +2156,15 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 		if (speedFactor != 1.0f) newFile->setSpeedFactor(speedFactor);
 		if (reverbMix > 0.0f)    newFile->setReverbMix(reverbMix);
 	}
+	// Network-stream cell (v2.3.1): hand the resolver's User-Agent + extra
+	// headers + duration hint down BEFORE open() so the CDN request matches
+	// what the resolver was granted and getLength() has a fallback. For a
+	// stream play `sound.filename` is already the resolved direct URL.
+	if (!sound.netUserAgent.isEmpty() || !sound.netHeaders.isEmpty())
+		newFile->setNetworkHeaders(sound.netUserAgent.toUtf8().constData(),
+		                           sound.netHeaders.toUtf8().constData());
+	if (sound.streamDurationSec > 0.0)
+		newFile->setStreamDurationHint(sound.streamDurationSec);
 
 	int openRet = -1;
 	try {
@@ -2138,6 +2212,11 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 			// worker is not reading backfillPath concurrently (the
 			// backfillActive release/acquire orders this write before the
 			// next backfillBegin).
+			// Vinyl backward-scratch backfill reopens + seeks this path off-
+			// thread. For a stream that is HTTP range requests on the direct
+			// URL: the tape ring already holds the recent seconds in RAM
+			// (smooth scratch within the window); beyond it the backfill seeks
+			// the network (may stutter - acceptable for a stream).
 			s.backfillPath = sound.filename;
 			// Remember the trim start so a looping slot restarts inside the
 			// crop range. getStartTime() is 0.0 when the cell has no crop.
@@ -2409,8 +2488,19 @@ void Sampler::tapeArm(int slot, bool on)
 		}
 		sl.dsp->tapeArm(true);
 	} else if (sl.dsp) {
+		// Capture the audible NEEDLE position (head) BEFORE disarming. While the
+		// tape is active the cached cursor already subtracts the ring lag, so it
+		// IS the head. Once disarmed the passthrough plays the decoder frontier,
+		// which sits `tapeLagSeconds` AHEAD of the head — that lag grows to
+		// seconds after a backward scrub, so closing the vinyl popup then snapped
+		// the audio + cursor forward by "a few seconds". Re-home the decoder to
+		// the needle so playback simply continues from where it visibly was.
+		const double headSec = sl.cachedPositionSec.load(std::memory_order_relaxed);
+		const double lagSec  = sl.dsp ? (double)sl.dsp->tapeLagSeconds() : 0.0;
 		sl.dsp->tapeArm(false);
 		backfillEnd(slot);
+		if (headSec >= 0.0 && lagSec > 0.3)
+			seek(headSec, slot);   // no forward jump on close
 	}
 }
 
@@ -2897,6 +2987,26 @@ double Sampler::getLength(int slot)
 	PlaybackSlot &s = m_slots[slot];
 	if (s.state.load(std::memory_order_relaxed) == eSILENT) return 0.0;
 	return s.cachedLengthSec.load(std::memory_order_relaxed);
+}
+
+
+//---------------------------------------------------------------
+// Purpose: buffering (stall-recovery) state for a slot — lock-free
+//---------------------------------------------------------------
+bool Sampler::getSlotNetBuffering(int slot) const
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return false;
+	const PlaybackSlot &s = m_slots[slot];
+	if (s.state.load(std::memory_order_relaxed) == eSILENT) return false;
+	return s.cachedNetBuffering.load(std::memory_order_relaxed);
+}
+
+bool Sampler::getSlotNetFailed(int slot) const
+{
+	if (slot < 0 || slot >= MAX_SLOTS) return false;
+	const PlaybackSlot &s = m_slots[slot];
+	if (s.state.load(std::memory_order_relaxed) == eSILENT) return false;
+	return s.cachedNetFailed.load(std::memory_order_relaxed);
 }
 
 

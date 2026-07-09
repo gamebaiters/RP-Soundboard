@@ -51,6 +51,24 @@ public:
 	virtual int open(const char *filename, double startPosSeconds = 0.0, double playTimeSeconds = -1.0) = 0;
 	virtual int close() = 0;
 	virtual bool done() const = 0;
+	// True while a network stream is mid-recovery after a stall (e.g. right
+	// after a forward seek): the slot is alive but feeding silence while the
+	// HTTP range request reconnects. Drives a "buffering" UI notice. Non-
+	// network / local files always return false.
+	virtual bool isNetBuffering() const { return false; }
+	// True (one-shot-ish) when a network stall at the seek target was declared
+	// unrecoverable — the GUI shows a transient "network error" notice while the
+	// decoder falls back to restarting the stream from the beginning. Cleared by
+	// a good read / a fresh seek. Non-network files always return false.
+	virtual bool netFailed() const { return false; }
+	// Signal that a NEWER seek has superseded whatever the decoder is currently
+	// doing. Lock-free (never blocks): bumps an epoch that an FFmpeg interrupt
+	// callback watches, so an in-flight blocking network open/read/seek for a
+	// now-stale target aborts within milliseconds instead of running to
+	// completion. Called on the GUI thread from Sampler::seek BEFORE the seek is
+	// even enqueued, so rapid seek-spam only ever completes the LAST target.
+	// No-op for local files.
+	virtual void supersedeIo() {}
 	virtual int seek(double seconds) = 0;
 	virtual double getPosition() const = 0;
 	virtual double getLength() const = 0;
@@ -95,6 +113,17 @@ public:
 	// so loud cells don't drown quiet ones. EBU R128 single-pass mode
 	// (good enough for live playback; not the offline two-pass quality).
 	virtual void setAutoNormalize(bool on) { (void)on; }
+	// Set BEFORE open() on a network (http/https) target: the User-Agent and
+	// extra HTTP headers (CRLF-joined, e.g. "Cookie: …\r\nOrigin: …") the
+	// stream resolver reported. Passed into avformat_open_input's AVDictionary
+	// so the CDN request matches what the resolver was granted. No-op / ignored
+	// for local files. nullptr or empty = use built-in defaults.
+	virtual void setNetworkHeaders(const char *userAgent, const char *headers) { (void)userAgent; (void)headers; }
+	// Set BEFORE open(): fallback total duration (seconds) for a stream whose
+	// container has no reliable duration (some webm/opus). Used by getLength()
+	// only when FFmpeg could not determine it, so the waveform/timeline still
+	// has a total length. <0 = no hint.
+	virtual void setStreamDurationHint(double seconds) { (void)seconds; }
 };
 
 extern InputFile *CreateInputFileFFmpeg(InputFileOptions options = InputFileOptions());

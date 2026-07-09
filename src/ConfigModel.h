@@ -242,6 +242,33 @@ public:
 	void setMicFxFeatureEnabled(bool on);
 	inline bool getLoudnessNormalize() const { return m_loudnessNormalize; }
 	void setLoudnessNormalize(bool on);
+	// Master switch for URL / YouTube live streaming. OFF disables ALL of it:
+	// resolve-on-play, the button "Save link", drag-a-URL, and channel-name
+	// link detection. Default ON.
+	inline bool getStreamingEnabled() const { return m_streamingEnabled; }
+	void setStreamingEnabled(bool on);
+	// Sub-switch: detect a link pasted AS A CHANNEL NAME and load it as a
+	// stream. OFF = a pasted link stays a plain channel name. Ignored when the
+	// master streaming switch is OFF. Default ON.
+	inline bool getChannelNameLinkDetect() const { return m_channelNameLinkDetect; }
+	void setChannelNameLinkDetect(bool on);
+	// Sub-switch: auto-start playback of a file loaded from a link (channel-name
+	// paste / single video). OFF = the link loads paused, ready to play. Default
+	// OFF (keeps the "load then press play" behaviour).
+	inline bool getStreamAutoplay() const { return m_streamAutoplay; }
+	void setStreamAutoplay(bool on);
+
+	// Voice behaviour while a sound plays. (1) VAD-while-playing: gate the
+	// user's own mic by voice activity so it's only sent when he talks, while
+	// the soundboard transmits continuously. Default OFF.
+	inline bool getVadWhilePlaying() const { return m_vadWhilePlaying; }
+	void setVadWhilePlaying(bool on);
+	// (2) Duck the soundboard when the user talks. Default OFF.
+	inline bool getDuckWhenTalking() const { return m_duckWhenTalking; }
+	void setDuckWhenTalking(bool on);
+	// How much to lower the soundboard while talking, 0..90 percent. Default 40.
+	inline int getDuckAmountPercent() const { return m_duckAmountPercent; }
+	void setDuckAmountPercent(int pct);
 
 	inline bool getResetChVolume() const { return m_resetChVolume; }
 	void setResetChVolume(bool on);
@@ -338,6 +365,12 @@ private:
 	bool m_showVinylButton      = true;
 	bool m_micFxFeatureEnabled  = true;
 	bool m_loudnessNormalize    = false;
+	bool m_streamingEnabled       = true;
+	bool m_channelNameLinkDetect  = true;
+	bool m_streamAutoplay         = false;
+	bool m_vadWhilePlaying        = false;
+	bool m_duckWhenTalking        = false;
+	int  m_duckAmountPercent      = 40;
 
 	bool m_resetChVolume     = true;
 	bool m_resetChFx         = true;

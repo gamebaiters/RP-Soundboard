@@ -30,6 +30,10 @@ public:
 	// Macro decoration: applied on top of any custom color so macros are
 	// always visually identifiable (yellow border).
 	void setMacroDecoration(bool on);
+	// Stream (URL / YouTube link) decoration: a distinct teal look with a
+	// link glyph so saved-link cells are recognisable at a glance, the same
+	// way macros get their own style.
+	void setStreamDecoration(bool on);
 	// Background image stretched across the whole button face. Empty
 	// path clears it. The label is redrawn over the image with a
 	// translucent black backdrop so the text stays readable.
@@ -54,6 +58,7 @@ private:
 	QPoint dragStart;
 	QColor backgroundColor;
 	bool macroDecoration;
+	bool streamDecoration;
 	bool hasOwnStyle;
 	QString backgroundImagePath;
 	QPixmap backgroundPixmap;

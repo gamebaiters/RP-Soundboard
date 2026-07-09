@@ -43,6 +43,16 @@ private slots:
 private:
     void pullFromMicFx();     // sync widgets <- MicFx state
     void updateLiveBadge();
+    // Custom voice presets (save / delete / share) — mirrors the EQ preset
+    // controls in the audio sandbox. A mic preset = the mic sandbox state +
+    // live pitch, serialised to Base64.
+    void rebuildPresetCombo();          // built-ins + saved user presets
+    QString serialiseMicState() const;  // Base64 of {pitch, sandbox}
+    void applyMicStateFromData(const QString &base64);
+    void onSavePreset();
+    void onDeletePreset();
+    void onSharePreset();               // copy "GBSB4-MIC:<b64>" to clipboard
+    void onPastePreset();               // apply from clipboard
 
     QCheckBox   *m_enable      = nullptr;
     QLabel      *m_liveBadge   = nullptr;
@@ -52,6 +62,10 @@ private:
     QSlider     *m_reverb      = nullptr;
     QLabel      *m_reverbLabel = nullptr;
     QComboBox   *m_presetBox   = nullptr;
+    QPushButton *m_presetSave  = nullptr;
+    QPushButton *m_presetDelete= nullptr;
+    QPushButton *m_presetShare = nullptr;
+    QPushButton *m_presetPaste = nullptr;
     QCheckBox   *m_monitor     = nullptr;
     QPushButton *m_fxBtn       = nullptr;
     QTimer      *m_meterTimer  = nullptr;

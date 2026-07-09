@@ -31,6 +31,10 @@
 #define NAME_IMAGE_PATH "imagePath"
 #define NAME_REVERSE "reverse"
 #define NAME_AUTO_NORM "autoNormalize"
+#define NAME_IS_STREAM "isStreamUrl"
+#define NAME_IS_PLAYLIST "isPlaylist"
+#define NAME_STREAM_TITLE "streamTitle"
+#define NAME_STREAM_DURATION "streamDurationSec"
 
 #define DEFAULT_PATH ""
 #define DEFAULT_CUSTOM_TEXT ""
@@ -78,7 +82,13 @@ SoundInfo::SoundInfo() :
 	macroState(),
 	imagePath(),
 	reverse(false),
-	autoNormalize(false)
+	autoNormalize(false),
+	isStreamUrl(false),
+	isPlaylist(false),
+	streamTitle(),
+	streamDurationSec(-1.0),
+	netUserAgent(),
+	netHeaders()
 {
 
 }
@@ -110,6 +120,10 @@ void SoundInfo::readFromConfig( const QSettings &settings )
 	imagePath = settings.value(NAME_IMAGE_PATH, QString()).toString();
 	reverse       = settings.value(NAME_REVERSE, false).toBool();
 	autoNormalize = settings.value(NAME_AUTO_NORM, false).toBool();
+	isStreamUrl       = settings.value(NAME_IS_STREAM, false).toBool();
+	isPlaylist        = settings.value(NAME_IS_PLAYLIST, false).toBool();
+	streamTitle       = settings.value(NAME_STREAM_TITLE, QString()).toString();
+	streamDurationSec = settings.value(NAME_STREAM_DURATION, -1.0).toDouble();
 }
 
 
@@ -139,6 +153,10 @@ void SoundInfo::saveToConfig( QSettings &settings ) const
 	settings.setValue(NAME_IMAGE_PATH, imagePath);
 	settings.setValue(NAME_REVERSE, reverse);
 	settings.setValue(NAME_AUTO_NORM, autoNormalize);
+	settings.setValue(NAME_IS_STREAM, isStreamUrl);
+	settings.setValue(NAME_IS_PLAYLIST, isPlaylist);
+	settings.setValue(NAME_STREAM_TITLE, streamTitle);
+	settings.setValue(NAME_STREAM_DURATION, streamDurationSec);
 }
 
 

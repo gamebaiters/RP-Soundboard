@@ -75,6 +75,14 @@ public:
 	void setGhosted(bool on);
 	bool isGhosted() const { return m_ghosted; }
 
+	// LIVE-stream mode: no waveform is available (the source has no known
+	// length and is not seekable). Instead of a waveform the widget paints a
+	// centred purple notice. Also stops/skips the analyser so we never try to
+	// decode an endless stream into bins. Finite (VOD) network videos do NOT
+	// use this — they still get a progressive waveform.
+	void setLiveStream(bool on);
+	bool isLiveStream() const { return m_liveStream; }
+
 signals:
 	void seekRequested(double fraction);
 	// Right-click crop edit. Emitted only when totalLength > 0 (i.e. a
@@ -180,6 +188,19 @@ private:
 	// loading progress bar (binsProcessed / m_analysisBins). Keeping
 	// it here avoids exposing m_numBins from SampleVisualizerThread.
 	int            m_analysisBins  = 1024;
+	// Stream (network URL) source: the analyser decodes the whole remote
+	// video, which is slow, so for streams we DRAW THE PARTIAL BINS as
+	// they arrive (piece by piece from the left) instead of hiding the
+	// waveform until full analysis completes. Set in setSound from
+	// SoundInfo::isStreamUrl / an http(s) filename.
+	bool           m_streamProgressive = false;
+	// LIVE stream: paint a purple "no waveform for live streams" notice and
+	// never run the analyser. Distinct from m_streamProgressive (VOD network
+	// video, which DOES get a progressive waveform).
+	bool           m_liveStream = false;
+	// Network VOD: no preloaded waveform either (avoid decoding a whole remote
+	// file), but transport stays enabled (seekable). Blue "network" notice.
+	bool           m_networkNotice = false;
 
 	// Right-click crop marker preview. While the context menu is open
 	// the click position is rendered as a pulsing semi-transparent

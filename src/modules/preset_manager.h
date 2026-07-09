@@ -18,6 +18,12 @@ public:
     static void saveSandboxPreset(const QString &name, const QString &data);
     static void deleteSandboxPreset(const QString &name);
 
+    // Mic FX voice presets (mic sandbox state + live pitch), same file, own
+    // section. Used by the Microphone channel's Save/Delete/Share controls.
+    static QVector<Preset> loadMicPresets();
+    static void saveMicPreset(const QString &name, const QString &data);
+    static void deleteMicPreset(const QString &name);
+
 private:
     static QString presetsFilePath();
     static QVector<Preset> loadSection(const QString &section);

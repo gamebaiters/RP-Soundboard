@@ -12,4 +12,4 @@ Note:
 Your microphone stays open while a sound plays unless "Mute myself during playback" is enabled. This is a limit of the TeamSpeak plugin sound interface and cannot be changed.
 
 Disclaimer:
-This software uses code of FFmpeg (https://ffmpeg.org) licensed under the LGPLv2.1 (https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html). The exact FFmpeg source used in this build (tag n6.1.1) is available from https://ffmpeg.org/download.html or by request at https://gamebaiters.net.
+This software uses code of FFmpeg (https://ffmpeg.org) licensed under the LGPLv2.1 (https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html). The exact FFmpeg source used in this build (tag n8.1.1) is available from https://ffmpeg.org/download.html or by request at https://gamebaiters.net.

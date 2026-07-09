@@ -52,6 +52,11 @@ CAPI void sb_onHotkeyPressed(const char *keyword);
 CAPI void sb_checkForUpdates();
 CAPI int sb_parseCommand(char**, int);
 CAPI void sb_disableHotkeysTemporarily(bool disable);
+// Voice behaviour while a sound plays: (1) gate the user's mic by VAD so his
+// voice is only sent when he talks (soundboard stays continuous); (2) duck the
+// soundboard by duckAmount (0..1) whenever he talks. Called by the wiring on
+// settings load + change.
+CAPI void sb_setVoiceBehaviour(bool vadWhilePlaying, bool duckWhenTalking, float duckAmount);
 
 
 #define HOTKEY_STOP_ALL "stop_all"

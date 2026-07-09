@@ -64,6 +64,7 @@ extern "C"
 #include <ctime>
 #ifndef _WIN32
 #include <cstdlib>
+#include <cstdint>
 #include <limits.h>
 #endif
 #include "plugin.h"
@@ -385,6 +386,8 @@ public:
 
 	int readSamples(SampleProducer *sampleBuffer) override;
 	bool done() const override;
+	bool isNetBuffering() const override { return m_isNetwork && m_netBuffering.load(std::memory_order_relaxed); }
+	bool netFailed() const override { return m_isNetwork && m_netFailed.load(std::memory_order_relaxed); }
 	int seek(double seconds) override;
 	double getPosition() const override;
 	double getLength() const override;
@@ -408,6 +411,13 @@ public:
 	void setMaxPlayTime(double seconds) override;
 	void setReverse(bool on) override { m_reverse = on; }
 	void setAutoNormalize(bool on) override { m_autoNormalize = on; }
+	void setNetworkHeaders(const char *userAgent, const char *headers) override {
+		m_netUserAgent = userAgent ? userAgent : "";
+		m_netHeaders   = headers   ? headers   : "";
+	}
+	void setStreamDurationHint(double seconds) override {
+		m_streamDurationHint.store(seconds, std::memory_order_relaxed);
+	}
 	void setCancelToken(std::atomic<bool> *token) override { m_cancelToken = token; }
 	bool isReverseFirstChunkReady() const override {
 		if (!m_streamingReverse) return true;
@@ -490,6 +500,80 @@ private:
 	// LUFS auto-normalisation toggle. Set BEFORE open(); buildFilterGraph
 	// appends a loudnorm filter targeting -16 LUFS integrated.
 	bool  m_autoNormalize = false;
+	// Network-streaming state (v2.3.1 URL/YouTube feature). Set true in open()
+	// when the target is an http/https URL. Drives: skipping the local-file
+	// preflight, the reconnect/timeout AVDictionary, and forcing reverse off
+	// (areverse buffers the whole file — impossible for a live stream).
+	bool  m_isNetwork = false;
+	// Network read-stall recovery in readSamples. A forward seek on a googlevideo
+	// / HTTP VOD drops every read after the seek: re-seeking the SAME stale HTTP
+	// connection to the new byte-range offset (itag 140 m4a) simply never
+	// recovers. The DEFINITIVE fix is to fully REOPEN the URL (fresh
+	// avformat_open_input at the seek position) — a clean connection with a
+	// proper Range honors the seek. In-place _seek is tried a couple of times
+	// first (covers a genuine transient), then we escalate to a reopen; the
+	// whole thing is time-bounded so a truly dead/expired URL still terminates.
+	int   m_netRecoveryTries = 0;   // re-seek attempts in the current streak
+	int   m_netReopenTries   = 0;   // full-reopen attempts in the current streak
+	std::chrono::steady_clock::time_point m_netStallSince{};  // streak start (epoch = none)
+	std::chrono::steady_clock::time_point m_netLastReseek{};  // last real re-seek
+	std::chrono::steady_clock::time_point m_netLastReopen{};  // last full reopen
+	static constexpr double kNetStallGiveUpSec  = 12.0;
+	static constexpr int    kNetReseekSpacingMs = 300;
+	static constexpr int    kNetReopenSpacingMs = 1500;  // reopen is heavy (network)
+	static constexpr int    kNetMaxReopenTries  = 4;     // dead URL bail
+	// PROGRESS anchor for stuck detection. A half-dead googlevideo CDN node can
+	// dribble out a fraction of a second of audio after every reopen — enough to
+	// reset a naive stall timer, so the old give-up NEVER fired and the stream
+	// reopened forever (position frozen, everything buffering). This anchor only
+	// advances on REAL forward progress (> 2 s), so `now - m_netProgressTime`
+	// measures genuine no-progress wall time regardless of tiny dribbles.
+	double  m_netProgressPos = -1e30;
+	std::chrono::steady_clock::time_point m_netProgressTime{};
+	int     m_netRestartCount = 0;   // "restart from the beginning" attempts
+	bool    m_netReadFailLogged = false;   // rate-limit the av_read_frame-fail log
+	// After this long with no real progress, stop retrying the (flaky) byte-range
+	// seek and fall back to reopen-at-0 + sequential scan. Short enough that a
+	// dead byte-seek recovers quickly; long enough that a genuine transient blip
+	// recovers via a plain reopen first (2-3 reopens) without paying for a scan.
+	// (Was 8 s — too slow, the user watched it buffer then vanish.)
+	// When > 0: we reopened at 0 and are SEQUENTIALLY decode-skipping toward this
+	// target (input seconds) because the byte-range seek to it kept EOF-ing.
+	// Sequential reading is reliable where the ranged GET is flaky, so this makes
+	// a forward seek actually land where the user asked. Cleared once reached.
+	double  m_netScanToSec = -1.0;
+	static constexpr double kNetStuckGiveUpSec = 4.0;
+	// Set true when a network stall is declared unrecoverable at the seek target
+	// (drives a transient "network error" toast + the restart-from-start fall-
+	// back). Cleared by a good read / a fresh user seek. Read lock-free by the GUI.
+	std::atomic<bool> m_netFailed{false};
+	// Latched once we truly give up on a network stall: readSamples then returns
+	// 0 immediately (slot ends) instead of re-running the whole retry dance every
+	// producer cycle and spamming "giving up" forever. Cleared by open()/seek().
+	bool  m_netGaveUp = false;
+	// Last opened URL, kept so the stall recovery can reopen the exact same
+	// resource on a fresh connection. Network targets only.
+	std::string m_openUrl;
+	// True while the slot is alive but feeding recovery silence (stall after a
+	// forward seek). Read by the GUI to show a "buffering" notice. Cleared on
+	// any good read and at open.
+	std::atomic<bool> m_netBuffering{false};
+	// Seek-supersede epoch. m_seekGen is bumped (lock-free) by supersedeIo() /
+	// seek() every time a NEW seek intent appears. m_opGen is the epoch the
+	// CURRENT blocking FFmpeg operation (open / read / seek on the network) was
+	// started for. The interrupt callback aborts that operation the instant
+	// m_seekGen != m_opGen, so a stale reopen/read for an old target is
+	// cancelled within ms when the user clicks somewhere new — even mid-load.
+	std::atomic<std::uint64_t> m_seekGen{0};
+	std::atomic<std::uint64_t> m_opGen{0};
+	// UA + CRLF-joined HTTP headers from the resolver (setNetworkHeaders),
+	// empty = built-in defaults. std::string (not atomic) — set on the GUI/
+	// worker thread strictly BEFORE open(), never mutated during playback.
+	std::string m_netUserAgent;
+	std::string m_netHeaders;
+	// Fallback stream duration (setStreamDurationHint); used by getLength()
+	// only when FFmpeg could not determine the container duration.
+	std::atomic<double> m_streamDurationHint{-1.0};
 	// Cooperative cancel token set by the async setSlotReverse worker so
 	// an in-flight open() can be asked to give up early. Lifetime owned
 	// by caller (Sampler holds a shared_ptr<atomic<bool>> per slot).
@@ -624,6 +708,23 @@ void InputFileFFmpeg::reset()
 	m_maxFilePosition = 0.0;
 	m_nextSeekTimestamp = 0;
 	m_skipSamples = 0;
+	m_netRecoveryTries = 0;
+	m_netReopenTries = 0;
+	m_netStallSince = std::chrono::steady_clock::time_point{};
+	m_netLastReseek = std::chrono::steady_clock::time_point{};
+	m_netLastReopen = std::chrono::steady_clock::time_point{};
+	m_netProgressPos = -1e30;
+	m_netProgressTime = std::chrono::steady_clock::time_point{};
+	m_netRestartCount = 0;
+	m_netScanToSec = -1.0;
+	m_netGaveUp = false;
+	// m_netFailed is NOT cleared here — a same-URL restart must preserve it so
+	// the GUI can show the toast; it is cleared on a genuine URL change (open),
+	// a good read, or a fresh seek.
+	// NOTE: m_netBuffering is intentionally NOT cleared here — a network seek
+	// sets it true right before calling open() (which runs reset()) so the GUI
+	// "buffering" strip shows during the ~0.7 s reopen connect. It is cleared by
+	// the first good read (or a give-up), which is the correct end-of-buffering.
 	m_freeverb.init(m_outputSamplerate, m_outputChannels);
 }
 
@@ -959,6 +1060,29 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 		reset();
 	}
 
+	// Detect a network target (http/https/…): a URL has "://" and is not the
+	// local "file:" scheme. Network targets skip the on-disk preflight, force
+	// reverse off (areverse buffers the whole file — impossible for a live
+	// stream), and get a reconnect/timeout AVDictionary.
+	m_isNetwork = (filename && strstr(filename, "://") != NULL
+	               && strncmp(filename, "file:", 5) != 0);
+	// Remember the URL so the stall recovery can reopen it on a fresh
+	// connection (the only reliable way to forward-seek a googlevideo VOD).
+	{
+		// Clear the "network error" flag only when the URL genuinely CHANGES
+		// (a different resource) — a same-URL reopen/restart must keep it set
+		// long enough for the GUI poll to catch it and show the toast.
+		const std::string newUrl = (m_isNetwork && filename) ? filename : std::string();
+		if (newUrl != m_openUrl)
+			m_netFailed.store(false, std::memory_order_relaxed);
+		m_openUrl = newUrl;
+	}
+	// Reverse on a network stream is ALLOWED: the streaming-reverse path
+	// decodes bounded chunks and seeks backward via HTTP range requests (the
+	// per-chunk areverse never buffers the whole file). It may stutter on
+	// network jitter - acceptable for a stream - but it is not impossible.
+
+	if (!m_isNetwork)
 	{
 		// Pre-flight diagnostics: existence + readability + size on disk.
 		// Helps tell apart "file missing on this machine / VM" from
@@ -986,7 +1110,35 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 #endif
 	}
 
-	int ret = avformat_open_input(&m_fmtCtx, filename, NULL, NULL);
+	// Network-robustness options fed to avformat_open_input for URL targets.
+	AVDictionary *openOpts = NULL;
+	if (m_isNetwork)
+	{
+		// Auto-reconnect on drops + bounded I/O timeout so a dead CDN URL fails
+		// cleanly instead of hanging the producer thread; UA + headers from the
+		// resolver make the CDN request match what the resolver was granted.
+		av_dict_set(&openOpts, "reconnect", "1", 0);
+		// NOTE: reconnect_streamed is deliberately NOT set. It tells FFmpeg the
+		// source is a non-seekable STREAM, so after a seek + any connection blip
+		// it reconnects at the WRONG byte position (it "continues" instead of
+		// re-issuing the ranged GET) → av_read_frame then fails right after a
+		// forward seek = the "video vanishes after skipping" bug on a VOD. Plain
+		// reconnect (+ reconnect_on_network_error) re-issues the range correctly.
+		av_dict_set(&openOpts, "reconnect_on_network_error", "1", 0);
+		av_dict_set(&openOpts, "reconnect_delay_max", "5", 0);
+		av_dict_set(&openOpts, "rw_timeout", "15000000", 0); // 15 s (microseconds)
+		av_dict_set(&openOpts, "user_agent",
+		            m_netUserAgent.empty() ? "Mozilla/5.0" : m_netUserAgent.c_str(), 0);
+		if (!m_netHeaders.empty())
+			av_dict_set(&openOpts, "headers", m_netHeaders.c_str(), 0);
+		dbgLog("  network open: reconnect on, rw_timeout=15s, ua=%s, headers=%s",
+		       m_netUserAgent.empty() ? "(default)" : m_netUserAgent.c_str(),
+		       m_netHeaders.empty() ? "(none)" : "(set)");
+	}
+
+	int ret = avformat_open_input(&m_fmtCtx, filename, NULL,
+	                              m_isNetwork ? &openOpts : NULL);
+	if (openOpts) av_dict_free(&openOpts);
 	{
 		char errbuf[256] = {0};
 		av_strerror(ret, errbuf, sizeof(errbuf));
@@ -1151,9 +1303,16 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 
 	// Cache the file length once so getLength() is lock-free from now
 	// on (the audio thread polls it every cycle).
-	m_cachedLengthSec.store(
-		(double)outputSamplesEstimation() / (double)m_outputSamplerate,
-		std::memory_order_relaxed);
+	{
+		double lenSec = (double)outputSamplesEstimation() / (double)m_outputSamplerate;
+		// A stream whose container carries no reliable duration (some
+		// webm/opus) yields ~0 here — fall back to the resolver's duration
+		// hint so the waveform/timeline still has a total length.
+		double hint = m_streamDurationHint.load(std::memory_order_relaxed);
+		if (lenSec <= 0.1 && hint > 0.0)
+			lenSec = hint;
+		m_cachedLengthSec.store(lenSec, std::memory_order_relaxed);
+	}
 
 	// Use internal _seek (no lock) — we already hold m_mutex from open()
 	if(startPosSeconds > 0.0 && !m_reverse)
@@ -2087,6 +2246,20 @@ int InputFileFFmpeg::seek( double seconds )
 		m_chunkCv.notify_all();
 		return 0;
 	}
+	if (m_isNetwork && !m_openUrl.empty()) {
+		// In-place seek never recovers a googlevideo forward seek (the stale
+		// mid-stream connection won't re-issue a valid ranged GET), so a network
+		// seek IS a fresh reopen at the target — exactly what `ffmpeg -ss T -i
+		// URL` does, which streams cleanly. Runs on the seek-worker thread (off
+		// the GUI), so the ~0.5-1 s network open never freezes the UI; last-wins
+		// in the seek worker collapses spammed clicks to the final target.
+		const std::string url = m_openUrl;
+		m_netBuffering.store(true, std::memory_order_relaxed);  // GUI "buffering" during reopen
+		logInfo("[stream] seek -> reopen @%.1fs", seconds);
+		const int rr = open(url.c_str(), seconds);   // open() takes m_mutex itself
+		logInfo("[stream] seek reopen result=%d (opened=%d) @%.1fs", rr, (int)m_opened, seconds);
+		return rr;
+	}
 	Lock lock(m_mutex);
 	return _seek(seconds);
 }
@@ -2103,8 +2276,19 @@ int InputFileFFmpeg::_seek( double seconds )
 		return -1;
 
 	AVRational time_base = m_fmtCtx->streams[m_streamIndex]->time_base;
-	int64_t ts = (int64_t)(seconds / time_base.num * time_base.den);
-	if(LogFFmpegError(avformat_seek_file(m_fmtCtx, m_streamIndex, INT64_MIN, ts, ts, 0), "Seeking failed") < 0)
+	int64_t ts = (int64_t)(seconds / time_base.num * time_base.den);  // stream time_base — for the skip logic below
+	// FORMAT-LEVEL seek (stream_index = -1, AV_TIME_BASE) — this is exactly what
+	// `ffmpeg -ss T -i URL` does, and it seeks googlevideo m4a (itag 140)
+	// correctly. The old per-AUDIO-STREAM seek (m_streamIndex + stream time_base)
+	// returned success but positioned the HTTP reader at EOF for these streams,
+	// so the very next av_read_frame gave AVERROR_EOF right after a forward seek
+	// = "video vanishes after skipping". Fall back to the stream-specific seek
+	// (needed by a few containers) only if the format-level one fails.
+	int64_t avts = (int64_t)(seconds * (double)AV_TIME_BASE);
+	int seekRet = avformat_seek_file(m_fmtCtx, -1, INT64_MIN, avts, avts, 0);
+	if (seekRet < 0)
+		seekRet = avformat_seek_file(m_fmtCtx, m_streamIndex, INT64_MIN, ts, ts, 0);
+	if (LogFFmpegError(seekRet, "Seeking failed") < 0)
 		return -1;
 	avcodec_flush_buffers(m_codecCtx);
 
@@ -2125,6 +2309,15 @@ int InputFileFFmpeg::_seek( double seconds )
 	m_convertedSamples = (int64_t)(seconds * (double)m_outputSamplerate);
 	m_filePosition = seconds;
 	m_done = false;
+	// A fresh user seek clears a prior give-up + the stall streak so recovery
+	// (and playback) can start over from the new position.
+	m_netGaveUp = false;
+	m_netStallSince = std::chrono::steady_clock::time_point{};
+	m_netReopenTries = 0;
+	m_netFailed.store(false, std::memory_order_relaxed);
+	m_netProgressPos = -1e30;
+	m_netProgressTime = std::chrono::steady_clock::time_point{};
+	m_netRestartCount = 0;
 	return 0;
 }
 
@@ -2277,7 +2470,14 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 		return toWrite;
 	}
 
-	Lock lock(m_mutex);
+	// unique_lock (not lock_guard) so the network stall recovery can release
+	// m_mutex around a full reopen (open() takes the lock itself).
+	std::unique_lock<std::mutex> lock(m_mutex);
+
+	// Already gave up on this network stall — return "done" immediately so we
+	// don't re-run the retry dance (and spam the log) every producer cycle.
+	if (m_netGaveUp)
+		return 0;
 
 	if(!m_opened || !m_bufSrcCtx || !m_bufSinkCtx)
 	{
@@ -2291,8 +2491,20 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 	int written = 0; //samples read
 
 	int properFrames = 0;
-	while(properFrames == 0 && av_read_frame(m_fmtCtx, packet) == 0)
+	while(properFrames == 0)
 	{
+		int rfr = av_read_frame(m_fmtCtx, packet);
+		if (rfr != 0)
+		{
+			if (m_isNetwork && !m_netReadFailLogged) {
+				m_netReadFailLogged = true;   // once per stall streak (cleared on good read)
+				char eb[128] = {0};
+				av_strerror(rfr, eb, sizeof(eb));
+				logInfo("[stream] av_read_frame failed @%.1fs: %d (%s)",
+				        m_filePosition.load(std::memory_order_relaxed), rfr, eb);
+			}
+			break;   // EOF or a (possibly transient) network read error
+		}
 		if(packet->stream_index == m_streamIndex)
 		{
 			if (avcodec_send_packet(m_codecCtx, packet) == 0)
@@ -2363,6 +2575,25 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 							}
 						}
 
+						// SEQUENTIAL decode-skip toward a seek target the byte-range
+						// seek couldn't reach: advance the position but DISCARD the
+						// audio (no produce, no properFrames) until we arrive.
+						if (outSamples > 0 && m_netScanToSec > 0.0)
+						{
+							const double adv = (double)outSamples
+								* (double)m_speedFactor.load(std::memory_order_relaxed)
+								/ (double)m_outputSamplerate;
+							const double curFp = m_filePosition.load(std::memory_order_relaxed);
+							if (curFp + adv < m_netScanToSec) {
+								m_filePosition.store(curFp + adv, std::memory_order_relaxed);
+								m_convertedSamples += outSamples;
+								outSamples = 0;          // keep scanning, don't emit
+							} else {
+								m_netScanToSec = -1.0;   // arrived — emit from here on
+								m_netBuffering.store(false, std::memory_order_relaxed);
+							}
+						}
+
 						if(outSamples > 0)
 						{
 							short *outPtr = ((short*)filt_frame->extended_data[0]) + (skippedSamples * m_outputChannels);
@@ -2388,8 +2619,221 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 		av_packet_unref(packet);
 	}
 
+	if (properFrames > 0)
+	{
+		// A good read clears the recovery streak entirely.
+		m_netRecoveryTries = 0;
+		m_netReopenTries = 0;
+		m_netStallSince = std::chrono::steady_clock::time_point{};
+		m_netBuffering.store(false, std::memory_order_relaxed);
+		m_netFailed.store(false, std::memory_order_relaxed);
+		m_netReadFailLogged = false;
+		// Advance the progress anchor on real forward movement so the stuck
+		// detector measures genuine no-progress time (and clear the restart
+		// budget once we're genuinely playing again).
+		const double pnow = m_filePosition.load(std::memory_order_relaxed);
+		if (pnow > m_netProgressPos + 2.0) {
+			m_netProgressPos  = pnow;
+			m_netProgressTime = std::chrono::steady_clock::now();
+			m_netRestartCount = 0;
+		}
+	}
+
 	if(properFrames == 0)
 	{
+		// NETWORK transient recovery. av_read_frame failing mid-VOD (a dropped
+		// range request, or a spurious EOF right after a forward seek) must NOT
+		// latch m_done = true — that ends the slot "as if the file finished".
+		// Instead keep the slot alive (feed a short silence gap so the producer
+		// never sees the 0 that means "done") and issue a fresh range request,
+		// PACED by wall-clock so FFmpeg's reconnect has real time to complete.
+		// Only after kNetStallGiveUpSec of CONTINUOUS stall (a genuinely dead /
+		// expired URL) do we fall through to the real EOF path.
+		if (m_isNetwork)
+		{
+			// A newer seek is pending (the read just aborted via the interrupt
+			// callback, or supersedeIo bumped the epoch): DON'T reopen for this
+			// now-stale position. Feed silence and return so this readSamples
+			// releases m_mutex; the seek worker's reopen at the NEW target then
+			// runs immediately. This is what makes seek-spam only ever load the
+			// LAST click and cancel everything before it, even mid-load.
+			const double curPos = m_filePosition.load(std::memory_order_relaxed);
+			const double len = getLength();
+			const bool nearEnd = (len > 0.0) && (curPos >= len - 0.75);
+			if (!nearEnd)
+			{
+				auto now = std::chrono::steady_clock::now();
+				const auto epoch = std::chrono::steady_clock::time_point{};
+				if (m_netStallSince == epoch)
+					m_netStallSince = now;   // streak begins here
+
+				// STUCK detection via the progress anchor. Only real forward
+				// progress (> 2 s) resets it, so a CDN that dribbles a fraction of
+				// a second after every reopen (which reset the naive stall timer =
+				// the old "reopen forever, position frozen" bug) can no longer keep
+				// us looping. After kNetStuckGiveUpSec of genuine no-progress the
+				// seek target is declared unrecoverable.
+				if (m_netProgressTime == epoch || curPos > m_netProgressPos + 2.0) {
+					m_netProgressPos  = curPos;
+					m_netProgressTime = now;
+				}
+				const double stuckSec =
+					std::chrono::duration<double>(now - m_netProgressTime).count();
+				if (stuckSec > kNetStuckGiveUpSec)
+				{
+					m_netFailed.store(true, std::memory_order_relaxed);  // GUI toast
+					const std::string url = m_openUrl;
+					// Restart target = the TRUE beginning (0). NOT m_minFilePosition
+					// — a seek reopen sets that to the (failing) seek target, so
+					// using it would "restart" at the same dead spot and the guard
+					// below would never pass.
+					const double restartFrom = 0.0;
+					if (m_netRestartCount < 1 && !url.empty()
+					    && curPos > restartFrom + 3.0)
+					{
+						// The byte-range seek to curPos keeps EOF-ing on this file,
+						// but SEQUENTIAL reading is reliable (the initial play + the
+						// waveform analyser both read fine). So reopen at 0 and
+						// decode-skip forward to the ORIGINAL target — the seek then
+						// actually lands where the user asked, no restart-to-0 needed.
+						const double scanTarget = curPos;
+						m_netRestartCount++;
+						logInfo("[stream] byte-seek @%.1fs unreachable (%.1fs) - reopening at 0 and scanning to it",
+						        curPos, stuckSec);
+						const int savedRestart = m_netRestartCount;
+						lock.unlock();
+						open(url.c_str(), restartFrom);
+						lock.lock();
+						m_netRestartCount  = savedRestart;   // open()->reset() zeroed it
+						m_netScanToSec     = scanTarget;     // sequential skip to the target
+						m_netProgressPos   = restartFrom;
+						m_netProgressTime  = std::chrono::steady_clock::now();
+						m_netStallSince    = epoch;
+						m_netRecoveryTries = 0;
+						m_netReopenTries   = 0;
+					}
+					else
+					{
+						logInfo("[stream] giving up @%.1fs - network stall unrecoverable", curPos);
+						m_netGaveUp = true;
+						m_netBuffering.store(false, std::memory_order_relaxed);
+						m_done = true;
+						av_packet_free(&packet);
+						av_frame_free(&frame);
+						av_frame_free(&filt_frame);
+						return 0;   // slot ends cleanly (GUI toast already flagged)
+					}
+					// Bridge silence while the restart connects.
+					m_netBuffering.store(true, std::memory_order_relaxed);
+					const int silN = m_outputSamplerate / 50;
+					static thread_local std::vector<short> silR;
+					if ((int)silR.size() < silN * m_outputChannels)
+						silR.assign((size_t)silN * m_outputChannels, 0);
+					sampleBuffer->produce(silR.data(), silN);
+					written += silN;
+					av_packet_free(&packet);
+					av_frame_free(&frame);
+					av_frame_free(&filt_frame);
+					return written;
+				}
+
+				const double stalledSec =
+					std::chrono::duration<double>(now - m_netStallSince).count();
+				if (stalledSec < kNetStallGiveUpSec)
+				{
+					m_netBuffering.store(true, std::memory_order_relaxed);  // GUI "buffering"
+
+					const double sinceReopenMs =
+						std::chrono::duration<double, std::milli>(now - m_netLastReopen).count();
+					// REOPEN-ONLY recovery. In-place _seek never recovers a
+					// googlevideo stall (the stale connection won't re-issue a valid
+					// ranged GET), and firing one every 300 ms just HAMMERS the CDN
+					// with range requests — which makes googlevideo throttle the
+					// whole session (why even low positions started stalling too).
+					// So we only reopen a FRESH connection, gently spaced, which is
+					// both the sole thing that works and far fewer requests.
+					const bool reopenDue = !m_openUrl.empty()
+						&& (m_netLastReopen == epoch
+						    || sinceReopenMs >= (double)kNetReopenSpacingMs);
+
+					if (reopenDue)
+					{
+						m_netReopenTries++;
+						m_netLastReopen = now;
+						m_netLastReseek = now;
+						logInfo("[stream] stall @%.1fs (%.1fs) - REOPENING fresh connection (%d/%d)",
+						        curPos, stalledSec, m_netReopenTries, kNetMaxReopenTries);
+						// open() takes m_mutex itself → release ours around it. This
+						// runs on the PRODUCER thread (never the GUI), so the ~0.5-1 s
+						// network open never freezes the UI. Preserve the recovery
+						// bookkeeping across the call: open()'s reset() clobbers it,
+						// but the stall streak + reopen count MUST persist so a
+						// genuinely un-seekable URL still bails (only a real good read
+						// clears them).
+						const std::string url = m_openUrl;
+						const auto sStall = m_netStallSince;
+						const auto sReseek = m_netLastReseek;
+						const auto sReopen = m_netLastReopen;
+						const int  cReseek = m_netRecoveryTries;
+						const int  cReopen = m_netReopenTries;
+						const auto sProgT = m_netProgressTime;   // preserve stuck timer
+						const double sProgP = m_netProgressPos;
+						const int  cRestart = m_netRestartCount;
+						const double cScan = m_netScanToSec;   // preserve an in-flight scan
+						// While scanning, reopen at 0 (sequential) not at the flaky
+						// byte-seek position — a mid-scan blip must not drop us back
+						// onto the ranged GET that was failing in the first place.
+						const double reopenAt = (cScan > 0.0) ? 0.0 : curPos;
+						lock.unlock();
+						const int rr = open(url.c_str(), reopenAt);
+						lock.lock();
+						m_netStallSince    = sStall;
+						m_netLastReseek    = sReseek;
+						m_netLastReopen    = sReopen;
+						m_netRecoveryTries = cReseek;
+						m_netReopenTries   = cReopen;
+						m_netProgressTime  = sProgT;   // else reset() would reset the stuck timer every reopen
+						m_netProgressPos   = sProgP;
+						m_netRestartCount  = cRestart;
+						m_netScanToSec     = cScan;    // keep scanning across the reopen
+						m_netGaveUp        = false;   // open() cleared it; keep alive
+						if (rr < 0 && m_netReopenTries >= kNetMaxReopenTries)
+						{
+							logInfo("[stream] reopen failed %d times @%.1fs - giving up",
+							        m_netReopenTries, curPos);
+							m_netGaveUp = true;
+							m_netFailed.store(true, std::memory_order_relaxed);   // GUI toast
+							m_netBuffering.store(false, std::memory_order_relaxed);
+							m_done = true;
+							av_packet_free(&packet);
+							av_frame_free(&frame);
+							av_frame_free(&filt_frame);
+							return 0;   // slot ends cleanly
+						}
+					}
+
+					// Bridge silence keeps the slot alive across the retry.
+					m_netBuffering.store(true, std::memory_order_relaxed);
+					const int silN = m_outputSamplerate / 50;   // ~20 ms
+					static thread_local std::vector<short> sil;
+					if ((int)sil.size() < silN * m_outputChannels)
+						sil.assign((size_t)silN * m_outputChannels, 0);
+					sampleBuffer->produce(sil.data(), silN);
+					written += silN;
+					av_packet_free(&packet);
+					av_frame_free(&frame);
+					av_frame_free(&filt_frame);
+					return written;   // >0 → slot stays alive, retries next tick
+				}
+				// Time budget exhausted with no good read: give up ONCE. The latch
+				// makes the next readSamples return 0 straight away (no log spam).
+				logInfo("[stream] giving up @%.1fs after %.1fs of continuous stall",
+				        curPos, stalledSec);
+				m_netGaveUp = true;
+				m_netFailed.store(true, std::memory_order_relaxed);   // GUI "network error" toast
+				m_netBuffering.store(false, std::memory_order_relaxed);
+			}
+		}
 		// EOF handling
 		avcodec_send_packet(m_codecCtx, NULL);
 		while (avcodec_receive_frame(m_codecCtx, frame) == 0)

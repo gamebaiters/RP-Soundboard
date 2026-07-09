@@ -62,7 +62,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ffmpeg-static
-          key: ffmpeg-static-msvc-x64-n8.1.1-v6-ffmpeg8-cbs-noschan
+          key: ffmpeg-static-msvc-x64-n8.1.1-v7-ffmpeg8-net-schannel
 
       - name: Build static FFmpeg with MSVC toolchain
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -92,14 +92,14 @@ jobs:
               --disable-programs --disable-doc --disable-debug \
               --disable-everything \
               --disable-bsfs \
-              --disable-protocols \
-              --disable-schannel --disable-securetransport --disable-sdl2 \
-              --disable-network --disable-iconv --disable-zlib \
+              --enable-network \
+              --enable-schannel --disable-securetransport --disable-sdl2 \
+              --disable-iconv --disable-zlib \
               --enable-decoder=mp3,mp3float,aac,vorbis,opus,flac,pcm_s16le,pcm_s16be,pcm_u16le,pcm_u16be,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le,pcm_u8,pcm_alaw,pcm_mulaw,wmav2,wmapro,ac3,eac3 \
               --enable-encoder=pcm_s16le,flac,vorbis,aac \
               --enable-demuxer=mp3,wav,ogg,flac,mov,matroska,avi,aac,asf,flv \
               --enable-muxer=wav,flac,ogg,ipod,mp4 \
-              --enable-protocol=file \
+              --enable-protocol=file,http,https,tcp,tls,crypto,httpproxy \
               --enable-parser=mpegaudio,vorbis,opus,flac,aac,ac3 \
               --enable-filter=aresample,aformat,aeval,anull,silenceremove,atempo,asetrate
           make -j$(nproc) V=0
@@ -139,6 +139,11 @@ jobs:
           if (Test-Path deploy/plugins/rp_soundboard) {
               Copy-Item -Recurse deploy/plugins/rp_soundboard/* stage/plugins/rp_soundboard/
           }
+          # Bundle the streaming engine (yt-dlp) - the plugin looks for it in its
+          # own dir and silently self-updates it at runtime. Standalone binary,
+          # no Python needed. NOT committed to git (18 MB) - fetched fresh here.
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" `
+              -OutFile "stage/plugins/rp_soundboard/yt-dlp.exe"
           "DLL size (must be > 1 MB - confirms FFmpeg statically linked):"
           (Get-Item stage/plugins/rp_soundboard_fx_win64.dll).Length
           Get-ChildItem stage/plugins -Recurse | Format-Table FullName,Length
@@ -193,6 +198,11 @@ jobs:
           if [ -d deploy/plugins/rp_soundboard ]; then
               cp -r deploy/plugins/rp_soundboard/* stage/plugins/rp_soundboard/
           fi
+          # Bundle the streaming engine (yt-dlp). Standalone Linux binary
+          # (no Python), placed under the name the plugin looks for.
+          curl -fsSL -o stage/plugins/rp_soundboard/yt-dlp \
+              https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux
+          chmod +x stage/plugins/rp_soundboard/yt-dlp
 
       - uses: actions/upload-artifact@v4
         with:
@@ -456,6 +466,11 @@ jobs:
           if [ -d deploy/plugins/rp_soundboard ]; then
               cp -r deploy/plugins/rp_soundboard/* stage/plugins/rp_soundboard/
           fi
+          # Bundle the streaming engine (yt-dlp). Standalone macOS binary
+          # (no Python), placed under the name the plugin looks for.
+          curl -fsSL -o stage/plugins/rp_soundboard/yt-dlp_macos \
+              https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos
+          chmod +x stage/plugins/rp_soundboard/yt-dlp_macos
 
           echo "--- Bundled binaries ---"
           ls -la stage/plugins/

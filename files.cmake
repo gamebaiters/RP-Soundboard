@@ -116,6 +116,8 @@ set(sources
 	src/modules/main_page.cpp
 	src/modules/main_page_wiring.h
 	src/modules/main_page_wiring.cpp
+	src/modules/stream_resolver.h
+	src/modules/stream_resolver.cpp
 
 	# --- Audio sandbox DSP (per-channel HRTF / paulstretch / EQ / reverb) ---
 	src/dsp/SandboxState.h

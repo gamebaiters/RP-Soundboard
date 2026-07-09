@@ -431,6 +431,87 @@ void HowToDialog::rebuildContent()
         "<b>Version history</b> &mdash; the full change log of every "
         "documented release, browsable per-version on a split view.</p>") });
 
+    s.append({ "streaming", tr("22. Live streaming (YouTube, links & playlists)"), tr(
+        "<p>&#127916; Paste a <b>YouTube</b> link (or any http/https media link) "
+        "and it streams <b>live</b> through the full effect chain &mdash; nothing "
+        "is downloaded to disk. Link resolution is powered by yt-dlp, which the "
+        "plugin keeps up to date silently in the background.</p>"
+        "<p><b>Three ways to load a link:</b></p>"
+        "<ul>"
+        "<li>&#128279; <b>Paste it as a channel name.</b> The name turns "
+        "<span style='color:#3fb950;'>green</span> (the link), the video "
+        "<b>title</b> appears on the waveform, and it loads into that channel. "
+        "The real channel name comes back when you stop or load something else.</li>"
+        "<li>&#128190; <b>Save it to a button.</b> Right-click a cell &rarr; "
+        "<b>Save link…</b>, or drag a URL straight onto a button. Clicking the "
+        "button then streams it.</li>"
+        "<li>&#127925; <b>Drop a URL onto a channel</b> to play it right away.</li>"
+        "</ul>"
+        "<p><b>Auto-play:</b> by default a link loads <i>paused</i> and ready. "
+        "Turn on Settings &rarr; <b>Streaming</b> &rarr; <i>Auto-play files "
+        "loaded from a link</i> to start playback immediately.</p>"
+        "<p><b>Normal videos vs live streams:</b> a normal (finite) video gets a "
+        "<b>full waveform</b> with seek, reverse, crop and download &mdash; just "
+        "like a local file. A true <b>live</b> stream shows a purple "
+        "<span style='color:#b58cff;'>&#9679; LIVE</span> notice with no waveform "
+        "(you can't seek an ongoing broadcast).</p>"
+        "<p>&#9203; <b>Seeking:</b> jumping far forward on a video reconnects on a "
+        "fresh connection; a <i>Loading</i> strip shows for a moment while it "
+        "re-buffers, then playback resumes at the new spot &mdash; it never dies.</p>"
+        "<p>&#127925; <b>Playlists:</b> paste or save a playlist link and choose "
+        "<b>Whole playlist</b> or <b>Just this video</b>. Whole opens a "
+        "<b>playlist panel</b> listing every track:</p>"
+        "<ul>"
+        "<li>Click a track to load it into the channel.</li>"
+        "<li>Tick <b>Autoplay</b> to advance to the next track automatically.</li>"
+        "<li>The panel can be closed and reopened with the channel's "
+        "<b>&#9776; list</b> button.</li>"
+        "<li>Save a <b>whole playlist onto a button</b>: right-click a channel "
+        "that has a playlist &rarr; <i>Save … whole playlist here</i>, or drop a "
+        "playlist link on a button and pick <b>Whole playlist</b>. Clicking that "
+        "button reopens the entire playlist.</li>"
+        "</ul>"
+        "<p>&#11015; <b>Save the audio to a file:</b> on a normal video the "
+        "channel's export button becomes a green <b>Save audio</b> download, and "
+        "the cell right-click offers <i>Download … audio here</i> straight into a "
+        "button. (Live streams are link-only.)</p>"
+        "<p><b>Settings &rarr; Streaming</b> lets you pick the audio quality "
+        "(Best / Balanced / Data saver). Everything loads on demand every time, "
+        "so nothing is ever left on your disk.</p>") });
+
+    s.append({ "voice", tr("23. Your microphone: voice changer & transmission"), tr(
+        "<p>&#127908; <b>Mic FX</b> is a real-time <b>voice changer</b> for your "
+        "own microphone &mdash; separate from the soundboard channels. Enable it "
+        "in Settings &rarr; <b>Enable Mic FX</b>, then open the microphone panel.</p>"
+        "<p>You get a <b>pitch</b> shift (in semitones), reverb and the full "
+        "<b>14-effect sandbox</b> applied live to your voice. Pick a ready-made "
+        "<b>voice preset</b> from the drop-down, or build your own.</p>"
+        "<p>The four small buttons next to the preset list (icons):</p>"
+        "<ul>"
+        "<li>&#128190; <b>Save</b> (floppy) &mdash; store the current voice as a "
+        "named preset.</li>"
+        "<li>&#128465; <b>Delete</b> (bin) &mdash; remove the selected custom "
+        "preset.</li>"
+        "<li>&#128228; <b>Share</b> (nodes) &mdash; copy the preset to the "
+        "clipboard so you can send it to a friend.</li>"
+        "<li>&#128203; <b>Paste</b> (clipboard) &mdash; apply a shared preset "
+        "from the clipboard.</li>"
+        "</ul>"
+        "<p>You can also freeze the current voice into a <b>macro button</b> "
+        "(right-click a cell &rarr; <i>Save Mic FX package into macro</i>); "
+        "pressing it toggles that voice on and off.</p>"
+        "<p><b>Voice &amp; transmission</b> (Settings &rarr; <b>Voice</b>) "
+        "controls how your own voice behaves while a sound plays:</p>"
+        "<ul>"
+        "<li>&#127908; <b>Voice activation while playing</b> &mdash; the "
+        "soundboard is sent continuously, but your own voice is only transmitted "
+        "when you actually speak.</li>"
+        "<li>&#128266; <b>Duck the soundboard when I talk</b> &mdash; the "
+        "soundboard volume smoothly dips while you speak and rises again when you "
+        "stop, so your voice always comes through. The dip amount is "
+        "adjustable.</li>"
+        "</ul>") });
+
     // ---- assemble HTML ----
     QString toc;
     QString bodyHtml;
@@ -469,7 +550,9 @@ void HowToDialog::rebuildContent()
         "<h2>%2</h2><ul>%3</ul><hr/>%4"
         "</body></html>")
         .arg(tr("A complete walkthrough of every soundboard feature. "
-                "Click a heading below to jump to it."),
+                "Click a heading below to jump to it. "
+                "New: &#127916; live streaming &amp; playlists (22) and "
+                "&#127908; the microphone voice changer (23)."),
              tr("Contents"), toc, bodyHtml,
              bg, text, accent, muted);
 

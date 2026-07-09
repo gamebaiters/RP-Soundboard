@@ -18,6 +18,7 @@
 #include "audio_exporter.h"
 #include "export_progress_dialog.h"
 #include "vinyl_popup.h"
+#include "stream_resolver.h"
 
 #include "../ConfigModel.h"
 #include "../samples.h"
@@ -45,6 +46,7 @@
 #include <QApplication>
 #include <QButtonGroup>
 #include <QToolButton>
+#include <QSet>
 #include <QSpinBox>
 #include <QRegularExpression>
 #include <QJsonDocument>
@@ -56,6 +58,12 @@
 #include <QHash>
 #include <QSet>
 #include <QVector>
+#include <QListWidget>
+#include <QListWidgetItem>
+#include <QSettings>
+#include <QProgressDialog>
+#include <QDir>
+#include <memory>
 #include <QPointer>
 #include <QLabel>
 #include <QPushButton>
@@ -107,6 +115,472 @@ struct LastPlayedCtx {
     QString filename;          // expected source file (mismatch invalidates)
 };
 static QHash<int, LastPlayedCtx> s_lastPlayedCtx;
+
+// --- URL / YouTube live-stream per-slot state (v2.3.1) --------------------
+// slot -> canonical page URL currently loaded as a live stream in that slot.
+static QHash<int, QString> s_slotStreamUrl;
+// slot -> video title (drives the waveform file-label + is the "this slot is a
+// stream" flag onStartPlaying reads to apply the stream-mode transport).
+static QHash<int, QString> s_slotStreamTitle;
+// slots mid-load of a stream: guards onStopPlaying from restoring the channel
+// name when the stop is only the OLD content being replaced by a new stream.
+static QSet<int>           s_slotStreamLoading;
+// slots whose current stream resolved as LIVE (no waveform/seek/reverse/vinyl).
+static QSet<int>           s_slotStreamLive;
+// slot -> the QObject scope of the in-flight resolve for that slot. A NEW
+// resolve on the same slot deletes the old scope first, so a stale resolve can
+// never fire its resolved() lambda after the user typed a different link
+// (seamless replace) or cleared the link (abort).
+static QHash<int, QPointer<QObject>> s_slotResolveCtx;
+// slot -> canonical URL currently being resolved (for the Cancel button).
+static QHash<int, QString> s_slotPendingUrl;
+// slot -> its open playlist panel (kept alive, hidden on close so the channel's
+// ☰ button can re-show it). One panel per channel = per-channel playlists.
+static QHash<int, QPointer<QDialog>> s_slotPlaylistPanel;
+// Playlist page URL + title currently loaded in a slot (whole-playlist mode), so
+// the right-click menu can offer "save the whole playlist into a button".
+static QHash<int, QString> s_slotPlaylistUrl;
+static QHash<int, QString> s_slotPlaylistTitle;
+// "Assign a just-downloaded audio to a button" mode: after the user saves a
+// video's audio and answers "yes, also to a button", the NEXT grid cell click
+// binds this file instead of playing. Empty = not in assign mode.
+static QString s_pendingAssignFile;
+static QString s_pendingAssignTitle;
+
+// Clear a slot's live-stream state and put the channel's real name back
+// (restoreName is a no-op if the channel isn't showing a green link) and drop
+// the stream-mode transport lock. Safe on any slot, stream or not.
+static void clearSlotStream(MainPage *page, int slot) {
+    s_slotStreamUrl.remove(slot);
+    s_slotStreamTitle.remove(slot);
+    s_slotStreamLoading.remove(slot);
+    s_slotStreamLive.remove(slot);
+    if (page && slot >= 0 && slot < page->channels().size()) {
+        if (auto *ch = page->channels().at(slot)) {
+            ch->restoreName();
+            ch->setStreamLoading(false);
+            ch->setExportIsDownload(false);
+            ch->waveform()->setLiveStream(false);
+        }
+    }
+}
+
+// Fully UNLOAD a channel's playlist (close + forget its panel, hide the ☰).
+// Called ONLY on an explicit "do something else" (load a normal sound, paste a
+// different link, click another button) — never on a natural track-end, so
+// autoplay keeps working.
+static void unloadPlaylistPanel(MainPage *page, int slot) {
+    if (auto panel = s_slotPlaylistPanel.value(slot)) { panel->close(); panel->deleteLater(); }
+    s_slotPlaylistPanel.remove(slot);
+    s_slotPlaylistUrl.remove(slot);
+    s_slotPlaylistTitle.remove(slot);
+    if (page && slot >= 0 && slot < page->channels().size())
+        if (auto *ch = page->channels().at(slot)) ch->setPlaylistAvailable(false);
+}
+
+// Abort any in-flight resolve for `slot` and return a FRESH one-shot scope for a
+// new resolve. Shows the channel's loading marquee. Deleting the previous scope
+// disconnects its resolved/failed lambdas so they no longer fire.
+static QObject *beginSlotResolve(MainPage *page, int slot) {
+    if (auto old = s_slotResolveCtx.value(slot)) old->deleteLater();
+    QObject *ctx = new QObject(page);
+    s_slotResolveCtx[slot] = ctx;
+    if (page && slot >= 0 && slot < page->channels().size())
+        if (auto *ch = page->channels().at(slot)) ch->setStreamLoading(true);
+    return ctx;
+}
+
+// End the resolve scope for a slot (hide marquee, forget the scope pointer).
+static void endSlotResolve(MainPage *page, int slot, QObject *ctx) {
+    if (s_slotResolveCtx.value(slot) == ctx) s_slotResolveCtx.remove(slot);
+    s_slotPendingUrl.remove(slot);
+    if (page && slot >= 0 && slot < page->channels().size())
+        if (auto *ch = page->channels().at(slot)) ch->setStreamLoading(false);
+    if (ctx) ctx->deleteLater();
+}
+
+// Cancel whatever network operation is in flight for `slot`: abort the resolve
+// scope (its result is ignored), kill the yt-dlp process, cancel any download,
+// hide the marquee and restore the channel. Everything is per-slot so cancelling
+// one channel never touches another.
+static void cancelSlotStreamLoad(MainPage *page, int slot) {
+    if (auto ctx = s_slotResolveCtx.value(slot)) { ctx->deleteLater(); s_slotResolveCtx.remove(slot); }
+    const QString url = s_slotPendingUrl.value(slot);
+    if (!url.isEmpty()) StreamResolver::instance().cancelResolve(url);
+    s_slotPendingUrl.remove(slot);
+    StreamResolver::instance().cancelDownload();
+    clearSlotStream(page, slot);   // hides marquee + restores name
+}
+
+// Transient auto-dismiss toast over a channel widget: shows a stream error +
+// probable reason, fades itself out after a few seconds. No modal interruption.
+static void showStreamErrorBubble(QWidget *anchor, const QString &msg) {
+    if (!anchor) return;
+    auto *toast = new QLabel(anchor->window());
+    toast->setText(msg);
+    toast->setWordWrap(true);
+    toast->setMaximumWidth(320);
+    toast->setAttribute(Qt::WA_DeleteOnClose);
+    toast->setStyleSheet(
+        "QLabel { background: #5a1f24; color: #ffd7da; border: 1px solid #b0434c;"
+        " border-radius: 6px; padding: 8px 10px; font-weight: bold; }");
+    toast->adjustSize();
+    QPoint tl = anchor->mapTo(anchor->window(),
+                             QPoint((anchor->width() - toast->width()) / 2, 4));
+    if (tl.x() < 4) tl.setX(4);
+    toast->move(tl);
+    toast->show();
+    toast->raise();
+    QTimer::singleShot(5000, toast, &QWidget::close);
+}
+
+// Neutral (azure) transient toast over the window — used for informational
+// hints like "click a cell to save the audio there".
+static void showInfoToast(QWidget *anchor, const QString &msg, int ms = 6000) {
+    if (!anchor) return;
+    auto *toast = new QLabel(anchor->window());
+    toast->setText(msg);
+    toast->setWordWrap(true);
+    toast->setMaximumWidth(360);
+    toast->setAttribute(Qt::WA_DeleteOnClose);
+    toast->setStyleSheet(
+        "QLabel { background: #143a52; color: #d7ecff; border: 1px solid #3fa7ff;"
+        " border-radius: 6px; padding: 8px 10px; font-weight: bold; }");
+    toast->adjustSize();
+    QWidget *win = anchor->window();
+    toast->move(qMax(8, (win->width() - toast->width()) / 2), 8);
+    toast->show();
+    toast->raise();
+    QTimer::singleShot(ms, toast, &QWidget::close);
+}
+
+// Resolve `pageUrl` and load it as a live/VOD stream into `slot`, seamlessly
+// replacing whatever that slot was resolving/playing. `greenChannelName` shows
+// the pasted link IN GREEN as the channel name (channel-name-paste path);
+// playlist / button paths pass false and keep the real name. `autoPlay` leaves
+// the slot playing (playlist autoplay); otherwise it loads paused + ready.
+// Central point for: per-slot abort/replace, live detection, loading marquee,
+// error toast. Used by titleChanged AND the playlist panel.
+static void loadStreamIntoSlot(MainPage *page, Sampler *sampler, ConfigModel *model,
+                               int slot, const QString &pageUrl,
+                               bool greenChannelName, bool autoPlay,
+                               bool keepPlaylist = false)
+{
+    if (!page || !sampler || slot < 0 || slot >= page->channels().size()) return;
+    auto *ch0 = page->channels().at(slot);
+    if (!ch0) return;
+    // A fresh link that is NOT a playlist track = the user chose something else:
+    // unload any playlist previously loaded in this channel.
+    if (!keepPlaylist) unloadPlaylistPanel(page, slot);
+    if (greenChannelName) ch0->showStreamLink(pageUrl);
+
+    StreamResolver &R = StreamResolver::instance();
+    QObject *ctx = beginSlotResolve(page, slot);   // aborts any prior resolve
+    s_slotPendingUrl[slot] = pageUrl;              // for the Cancel button
+
+    QObject::connect(&R, &StreamResolver::resolved, ctx,
+        [page, sampler, model, slot, pageUrl, ctx, greenChannelName, autoPlay](
+            const QString &u, const ResolvedStream &s){
+            if (u != pageUrl) return;
+            endSlotResolve(page, slot, ctx);
+            if (slot >= page->channels().size()) return;
+            auto *ch = page->channels().at(slot);
+            if (!ch) return;
+            SoundInfo snd;
+            snd.filename          = s.directUrl;
+            snd.isStreamUrl       = true;
+            snd.isLive            = s.isLive;
+            snd.netUserAgent      = s.userAgent;
+            snd.netHeaders        = s.headers;
+            snd.streamTitle       = s.title;
+            snd.streamDurationSec = s.durationSec;
+            s_slotStreamLoading.insert(slot);
+            s_slotStreamTitle[slot] = s.title.isEmpty() ? pageUrl : s.title;
+            s_slotStreamUrl[slot]   = pageUrl;
+            if (s.isLive) s_slotStreamLive.insert(slot);
+            else          s_slotStreamLive.remove(slot);
+            // Open the network stream OFF the GUI thread so nothing freezes.
+            // Capture the FX / volume values here (GUI) and hand them off; a
+            // failed open surfaces via onPlaybackError (which clears the state).
+            const bool globalFx = model && model->getGlobalFxEnabled();
+            sampler->playSoundInSlotAsync(slot, snd,
+                ch->volume()->local(), ch->volume()->remote(),
+                AudioUtils::sliderToPitchFactor(ch->fx()->pitch()),
+                AudioUtils::sliderToPitchFactor(ch->fx()->speed()),
+                ch->fx()->reverb() / 100.0f,
+                globalFx, autoPlay);
+        });
+    QObject::connect(&R, &StreamResolver::failed, ctx,
+        [page, slot, pageUrl, ctx, greenChannelName](const QString &u, const QString &err){
+            if (u != pageUrl) return;
+            endSlotResolve(page, slot, ctx);
+            if (slot < page->channels().size())
+                if (auto *ch = page->channels().at(slot))
+                    showStreamErrorBubble(ch, QObject::tr("Couldn't load the link.\n%1").arg(err));
+            clearSlotStream(page, slot);   // restore name / drop green
+            Q_UNUSED(greenChannelName);
+        });
+    R.resolve(pageUrl);
+}
+
+// Open the non-modal playlist panel for a resolved playlist: header (reference
+// channel + playlist name), a list of every entry, an Autoplay toggle. Clicking
+// a row loads that video into the reference channel; with autoplay on, the next
+// entry auto-loads when the current one ends. Reuses loadStreamIntoSlot so every
+// per-entry behaviour (live handling, error toast, seamless replace) is shared.
+static void openPlaylistPanel(MainPage *page, Sampler *sampler, ConfigModel *model,
+                              int slot, const QString &playlistTitle,
+                              const QVector<PlaylistEntry> &entries)
+{
+    // One panel per slot: if this channel already has a playlist panel open (or
+    // hidden), reuse it instead of stacking a second one (fixes the double-open
+    // and lets the channel's ☰ button re-show a closed panel).
+    if (auto existing = s_slotPlaylistPanel.value(slot)) {
+        existing->show();
+        existing->raise();
+        existing->activateWindow();
+        return;
+    }
+    auto *dlg = new QDialog(page);
+    // NOT delete-on-close: closing hides it so the ☰ reopen button works.
+    dlg->setWindowTitle(QObject::tr("Playlist"));
+    dlg->resize(420, 460);
+    s_slotPlaylistPanel[slot] = dlg;
+    s_slotPlaylistTitle[slot] = playlistTitle;
+    if (slot >= 0 && slot < page->channels().size())
+        if (auto *c = page->channels().at(slot)) c->setPlaylistAvailable(true);
+
+    QString chName = (slot >= 0 && slot < page->channels().size() && page->channels().at(slot))
+                        ? page->channels().at(slot)->title() : QObject::tr("Channel %1").arg(slot + 1);
+
+    auto *lay = new QVBoxLayout(dlg);
+    auto *header = new QLabel(QObject::tr("<b>%1</b><br>Channel: %2")
+                             .arg(playlistTitle.isEmpty() ? QObject::tr("Playlist") : playlistTitle.toHtmlEscaped())
+                             .arg(chName.toHtmlEscaped()), dlg);
+    header->setTextFormat(Qt::RichText);
+    lay->addWidget(header);
+
+    auto *list = new QListWidget(dlg);
+    for (const PlaylistEntry &e : entries) {
+        auto *item = new QListWidgetItem(e.title.isEmpty() ? e.pageUrl : e.title, list);
+        item->setData(Qt::UserRole, e.pageUrl);
+    }
+    lay->addWidget(list, 1);
+
+    auto *autoplay = new QCheckBox(QObject::tr("Autoplay (advance to the next when one ends)"), dlg);
+    lay->addWidget(autoplay);
+
+    auto *hint = new QLabel(QObject::tr("Click a track to load it into the channel."), dlg);
+    hint->setStyleSheet("color: palette(mid);");
+    lay->addWidget(hint);
+
+    // Shared cursor into the list, so autoplay chaining can advance it.
+    auto curIdx = std::make_shared<int>(-1);
+    // "armed" gates the autoplay advance to ONE per track that ACTUALLY started
+    // playing. Loading a track stops whatever the slot held first, so
+    // onStopPlaying fires spuriously during EVERY load — without this guard,
+    // clicking track 1 cascaded (load 1 -> stop -> advance to 2 -> stop ->
+    // advance to 3...) and jumped straight to the third track. Any load (user
+    // click OR autoplay) clears it; only a real onStartPlaying re-arms it, and
+    // an advance consumes it — so a load-induced stop can never advance.
+    auto armed = std::make_shared<bool>(false);
+
+    auto loadRow = [page, sampler, model, slot, curIdx, list, armed](int row, bool play){
+        if (row < 0 || row >= list->count()) return;
+        *armed = false;   // a fresh load: the imminent stop-of-old must NOT advance
+        *curIdx = row;
+        list->setCurrentRow(row);
+        const QString url = list->item(row)->data(Qt::UserRole).toString();
+        loadStreamIntoSlot(page, sampler, model, slot, url,
+                           /*greenChannelName*/false, /*autoPlay*/play,
+                           /*keepPlaylist*/true);   // stay loaded across tracks
+    };
+
+    QObject::connect(list, &QListWidget::itemClicked, dlg, [loadRow, list, autoplay](QListWidgetItem *it){
+        loadRow(list->row(it), autoplay->isChecked());
+    });
+
+    // Autoplay chaining: when the reference slot goes idle and autoplay is on,
+    // load the next entry. Scoped to `dlg` so it dies with the panel.
+    if (sampler) {
+        QObject::connect(sampler, &Sampler::onStartPlaying, dlg,
+            [slot, armed](int startedSlot, bool, QString){
+                if (startedSlot == slot) *armed = true;
+            });
+        QObject::connect(sampler, &Sampler::onStopPlaying, dlg,
+            [dlg, slot, curIdx, list, autoplay, loadRow, armed](int stoppedSlot){
+                if (stoppedSlot != slot) return;
+                if (!autoplay->isChecked()) return;
+                if (!*armed) return;            // stop was a load, not a track end
+                *armed = false;                 // consume: exactly one advance
+                int next = *curIdx + 1;
+                if (next < list->count())
+                    QTimer::singleShot(150, dlg, [loadRow, next]{ loadRow(next, true); });
+            }, Qt::QueuedConnection);
+    }
+
+    dlg->show();
+    dlg->raise();
+}
+
+// Resolve a playlist page URL and open its (non-modal) panel against `slot` as
+// the reference channel. Shared by the paste-as-channel-name "Whole playlist"
+// choice AND a button that has a whole playlist saved on it. Records the
+// playlist URL/title per slot so the right-click menu can re-save it.
+static void resolveAndOpenPlaylist(MainPage *page, Sampler *sampler, ConfigModel *model,
+                                   int slot, const QString &pageUrl)
+{
+    if (!page || slot < 0 || slot >= page->channels().size()) return;
+    // If a DIFFERENT playlist is already loaded in this slot, tear its panel
+    // down FIRST — otherwise openPlaylistPanel's reuse-by-slot early-return
+    // would just re-show the OLD (stale) panel instead of the new playlist.
+    // (Same URL = a deliberate reopen; keep the existing panel.)
+    if (s_slotPlaylistUrl.value(slot) != pageUrl)
+        unloadPlaylistPanel(page, slot);
+    s_slotPlaylistUrl[slot] = pageUrl;
+    StreamResolver &R = StreamResolver::instance();
+    QObject *ctx = beginSlotResolve(page, slot);   // marquee + cancellable
+    s_slotPendingUrl[slot] = pageUrl;
+    QObject::connect(&R, &StreamResolver::playlistResolved, ctx,
+        [page, sampler, model, slot, pageUrl, ctx](const QString &u, const QString &title,
+                                                   const QVector<PlaylistEntry> &entries){
+            if (u != pageUrl) return;
+            endSlotResolve(page, slot, ctx);
+            openPlaylistPanel(page, sampler, model, slot, title, entries);
+        });
+    QObject::connect(&R, &StreamResolver::failed, ctx,
+        [page, slot, pageUrl, ctx](const QString &u, const QString &err){
+            if (u != pageUrl) return;
+            endSlotResolve(page, slot, ctx);
+            if (slot < page->channels().size())
+                if (auto *c = page->channels().at(slot))
+                    showStreamErrorBubble(c, QObject::tr("Couldn't load the playlist.\n%1").arg(err));
+        });
+    R.resolvePlaylist(pageUrl);
+}
+
+// Playlist link pasted as a channel name: ask whole-playlist vs single video.
+static void openPlaylistFlow(MainPage *page, Sampler *sampler, ConfigModel *model,
+                             int slot, const QString &pageUrl)
+{
+    if (slot < 0 || slot >= page->channels().size()) return;
+    auto *ch = page->channels().at(slot);
+    if (!ch) return;
+    ch->showStreamLink(pageUrl);   // green while the user decides
+
+    QMessageBox box(page);
+    box.setWindowTitle(QObject::tr("Playlist detected"));
+    box.setText(QObject::tr("This link is a playlist. What would you like to load?"));
+    QPushButton *whole  = box.addButton(QObject::tr("Whole playlist"), QMessageBox::AcceptRole);
+    QPushButton *single = box.addButton(QObject::tr("Just this video"), QMessageBox::YesRole);
+    box.addButton(QMessageBox::Cancel);
+    box.exec();
+
+    if (box.clickedButton() == single) {
+        loadStreamIntoSlot(page, sampler, model, slot, pageUrl,
+                           /*greenChannelName*/true,
+                           /*autoPlay*/model->getStreamAutoplay());
+        return;
+    }
+    if (box.clickedButton() == whole) {
+        ch->restoreName();          // channel keeps its real name; panel is the ref
+        resolveAndOpenPlaylist(page, sampler, model, slot, pageUrl);
+        return;
+    }
+    // Cancel: drop the green link, restore the channel's real name.
+    ch->restoreName();
+}
+
+// Sanitise a video title into a safe filename stem.
+static QString safeFileStem(const QString &title) {
+    QString s = title;
+    s.replace(QRegularExpression("[\\\\/:*?\"<>|]"), "_");
+    s = s.trimmed();
+    if (s.isEmpty()) s = "youtube_audio";
+    return s.left(120);
+}
+
+void pushSoundsToGrid(MainPage *page, ConfigModel *model);   // fwd (defined below)
+
+// Bind button `idx` to a WHOLE-PLAYLIST cell (isStreamUrl + isPlaylist). Clicking
+// it later opens the entire playlist. The playlist name is resolved async for a
+// nicer label; until then the cell shows "Playlist".
+static void saveLinkAsPlaylistButton(ConfigModel *model, MainPage *page,
+                                     int idx, const QString &url) {
+    if (!model) return;
+    SoundInfo s;
+    if (auto *cur = model->getSoundInfo(idx)) s = *cur;
+    s.filename    = url;
+    s.isStreamUrl = true;
+    s.isPlaylist  = true;
+    s.streamTitle = QObject::tr("Playlist");
+    if (s.customText.isEmpty()) s.customText = QObject::tr("Playlist");
+    model->setSoundInfo(idx, s);
+    pushSoundsToGrid(page, model);
+    StreamResolver &R = StreamResolver::instance();
+    QObject *ctx = new QObject(page);
+    QObject::connect(&R, &StreamResolver::playlistResolved, ctx,
+        [model, page, idx, url, ctx](const QString &u, const QString &title,
+                                     const QVector<PlaylistEntry> &){
+            if (u != url) return;
+            if (auto *cur = model->getSoundInfo(idx)) {
+                if (cur->filename == url && cur->isPlaylist) {
+                    SoundInfo up = *cur;
+                    if (!title.isEmpty()) { up.streamTitle = title; up.customText = title; }
+                    model->setSoundInfo(idx, up);
+                    pushSoundsToGrid(page, model);
+                }
+            }
+            ctx->deleteLater();
+        });
+    QObject::connect(&R, &StreamResolver::failed, ctx,
+        [ctx](const QString &, const QString &){ ctx->deleteLater(); });
+    R.resolvePlaylist(url);
+}
+
+// Ask "whole playlist vs just this video" for a playlist URL being saved to a
+// button. Returns 1 = whole, 0 = single, -1 = cancel.
+static int askPlaylistSaveChoice(MainPage *page) {
+    QMessageBox box(page);
+    box.setWindowTitle(QObject::tr("Playlist link"));
+    box.setText(QObject::tr("This link is a playlist. Save the whole playlist to the button, or just this video?"));
+    QPushButton *whole  = box.addButton(QObject::tr("Whole playlist"), QMessageBox::AcceptRole);
+    QPushButton *single = box.addButton(QObject::tr("Just this video"), QMessageBox::YesRole);
+    box.addButton(QMessageBox::Cancel);
+    box.exec();
+    if (box.clickedButton() == whole)  return 1;
+    if (box.clickedButton() == single) return 0;
+    return -1;
+}
+
+// Download the audio of pageUrl to destFile with the themed, custom-painted
+// progress card (the same one the DSP export uses — a plain QProgressDialog
+// rendered broken on the native Windows style). onOk is invoked with destFile
+// on success (e.g. to bind a button to the new file).
+static void runStreamDownload(MainPage *page, const QString &pageUrl,
+                              const QString &destFile,
+                              std::function<void(const QString &)> onOk)
+{
+    auto *prog = new ExportProgressDialog(destFile, page);
+    prog->setAttribute(Qt::WA_DeleteOnClose);
+    prog->show();
+    prog->raise();
+
+    StreamResolver &R = StreamResolver::instance();
+    QObject *ctx = new QObject(prog);   // dies with the dialog
+
+    QObject::connect(&R, &StreamResolver::downloadProgress, ctx,
+        [prog](const QString &, int pct){ if (pct >= 0) prog->setProgress(pct); });
+    QObject::connect(prog, &ExportProgressDialog::cancelRequested, ctx, []{
+        StreamResolver::instance().cancelDownload();
+    });
+    QObject::connect(&R, &StreamResolver::downloadFinished, ctx,
+        [prog, onOk](bool ok, const QString &msg, const QString &dest){
+            prog->setFinished(ok, ok ? QString() : msg);
+            if (ok && onOk) onOk(dest);
+        });
+    R.downloadAudio(pageUrl, destFile);
+}
 
 // Slots flagged for a HARD clear on the next onStopPlaying tick. Set
 // by clearRequested handlers (the red X button next to the filename,
@@ -223,6 +697,16 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     w->setShowVinylButton     (model->getShowVinylButton());
     w->setMicFxFeatureEnabled (model->getMicFxFeatureEnabled());
     w->setLoudnessNormalize   (model->getLoudnessNormalize());
+    w->setStreamingEnabled    (model->getStreamingEnabled());
+    w->setChannelNameLinkDetect(model->getChannelNameLinkDetect());
+    w->setStreamAutoplay      (model->getStreamAutoplay());
+    w->setStreamQuality       (StreamResolver::preferredQuality());
+    w->setVadWhilePlaying     (model->getVadWhilePlaying());
+    w->setDuckWhenTalking     (model->getDuckWhenTalking());
+    w->setDuckAmount          (model->getDuckAmountPercent());
+    // Push the persisted voice behaviour into the audio path at load.
+    sb_setVoiceBehaviour(model->getVadWhilePlaying(), model->getDuckWhenTalking(),
+                         model->getDuckAmountPercent() / 100.0f);
     // Sandbox module kill switch: restore the persisted mask into the
     // static SlotDsp mask (audio side) + the Settings checkboxes.
     {
@@ -612,6 +1096,30 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         model->setLoudnessNormalize(v);
         if (Sampler *smp = sb_getSampler()) smp->setGlobalNormalize(v);
     });
+    QObject::connect(w, &SettingsWindow::streamingEnabledChanged, [model](bool v){
+        model->setStreamingEnabled(v);
+    });
+    QObject::connect(w, &SettingsWindow::channelNameLinkDetectChanged, [model](bool v){
+        model->setChannelNameLinkDetect(v);
+    });
+    QObject::connect(w, &SettingsWindow::streamAutoplayChanged, [model](bool v){
+        model->setStreamAutoplay(v);
+    });
+    QObject::connect(w, &SettingsWindow::streamQualityChanged, [](const QString &q){
+        StreamResolver::setPreferredQuality(q);
+    });
+    QObject::connect(w, &SettingsWindow::vadWhilePlayingChanged, [model](bool v){
+        model->setVadWhilePlaying(v);
+        sb_setVoiceBehaviour(v, model->getDuckWhenTalking(), model->getDuckAmountPercent() / 100.0f);
+    });
+    QObject::connect(w, &SettingsWindow::duckWhenTalkingChanged, [model](bool v){
+        model->setDuckWhenTalking(v);
+        sb_setVoiceBehaviour(model->getVadWhilePlaying(), v, model->getDuckAmountPercent() / 100.0f);
+    });
+    QObject::connect(w, &SettingsWindow::duckAmountChanged, [model](int v){
+        model->setDuckAmountPercent(v);
+        sb_setVoiceBehaviour(model->getVadWhilePlaying(), model->getDuckWhenTalking(), v / 100.0f);
+    });
     QObject::connect(w, &SettingsWindow::sandboxModuleToggled, [](int stage, bool on){
         // Paulstretch's slot is structural (pinned pipeline index 0);
         // it can be disabled like the rest but never breaks anything.
@@ -638,6 +1146,23 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
     auto *grid = page->buttonGrid();
 
     QObject::connect(grid, &ButtonGrid::buttonTriggered, [model, sampler, page](int idx){
+        // "Assign a just-downloaded audio to a button" mode: the next cell
+        // click BINDS the file instead of playing anything.
+        if (!s_pendingAssignFile.isEmpty()) {
+            SoundInfo s;
+            if (auto *cur = model->getSoundInfo(idx)) s = *cur;
+            s.filename    = s_pendingAssignFile;
+            s.isStreamUrl = false;
+            s.streamTitle.clear();
+            s.customText  = s_pendingAssignTitle;
+            model->setSoundInfo(idx, s);
+            pushSoundsToGrid(page, model);
+            showInfoToast(page, QObject::tr("Saved to the button."), 3000);
+            s_pendingAssignFile.clear();
+            s_pendingAssignTitle.clear();
+            return;
+        }
+
         // 200ms debounce vs TS3 hotkey auto-repeat.
         static QHash<int, qint64> s_lastTriggerMs;
         qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -796,41 +1321,317 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
         // only honors pitch/speed/reverb on slots with an inputFile, so
         // push channel/per-button values AFTER play returns. Error
         // dialog comes from the onPlaybackError handler.
-        if (!sampler->playSoundInSlot(slot, *info, false))
+        //
+        // Factored into a local so the normal path and the async stream-resolve
+        // callback below run the IDENTICAL post-play FX setup.
+        auto startPlayback = [model, sampler, page, syncChannelToSlot, idx](const SoundInfo &snd, int slot) {
+            // An explicit button play into this slot = the user chose something
+            // else, so any playlist loaded here is unloaded (panel never drives
+            // startPlayback — it uses loadStreamIntoSlot with keepPlaylist).
+            unloadPlaylistPanel(page, slot);
+            // Loading a NON-stream sound into a slot that was streaming restores
+            // the channel's real name + unlocks reverse/vinyl (synchronous, so
+            // no flicker). Stream loads keep their state (set by the caller).
+            if (!snd.isStreamUrl) clearSlotStream(page, slot);
+            s_slotToBtnIdx[slot] = idx;
+            auto *ch = page->channels().at(slot);
+            const bool globalFx = model->getGlobalFxEnabled();
+            // Compute the FX factors to apply after open — on the GUI thread so
+            // the widget reads are safe even when the open runs on a worker.
+            float pf = 1.0f, sf = 1.0f, rv = 0.0f;
+            bool  applyFx = false;
+            if (globalFx && snd.fxRemember) {
+                pf = AudioUtils::sliderToPitchFactor(snd.fxPitch);
+                sf = AudioUtils::sliderToPitchFactor(snd.fxSpeed);
+                rv = snd.fxReverb / 100.0f;
+                applyFx = true;
+                ch->fx()->setPitch(snd.fxPitch);
+                ch->fx()->setSpeed(snd.fxSpeed);
+                ch->fx()->setReverb(snd.fxReverb);
+                ch->fx()->setSync (snd.fxSyncPitchSpeed);
+            } else if (globalFx) {
+                pf = AudioUtils::sliderToPitchFactor(ch->fx()->pitch());
+                sf = AudioUtils::sliderToPitchFactor(ch->fx()->speed());
+                rv = ch->fx()->reverb() / 100.0f;
+                applyFx = true;
+            }
+            // Network stream: open OFF the GUI thread (no freeze). A button
+            // click plays immediately (autoPlay), unlike the channel-name paste
+            // which loads paused.
+            if (snd.isStreamUrl) {
+                sampler->playSoundInSlotAsync(slot, snd,
+                    ch->volume()->local(), ch->volume()->remote(),
+                    pf, sf, rv, applyFx, /*autoPlay*/true);
+                return;
+            }
+            if (!sampler->playSoundInSlot(slot, snd, false))
+                return;
+            sampler->setSlotVolumeLocal (slot, ch->volume()->local());
+            sampler->setSlotVolumeRemote(slot, ch->volume()->remote());
+            if (applyFx) {
+                sampler->setSlotPitchFactor(slot, pf);
+                sampler->setSlotSpeedFactor(slot, sf);
+                sampler->setSlotReverbMix  (slot, rv);
+            } else {
+                // Master FX off: force neutral so any inherited slot state
+                // from playSoundInSlot is wiped.
+                sampler->setSlotPitchFactor(slot, 1.0f);
+                sampler->setSlotSpeedFactor(slot, 1.0f);
+                sampler->setSlotReverbMix  (slot, 0.0f);
+            }
+            (void)syncChannelToSlot;
+        };
+
+        if (info->isStreamUrl && info->isPlaylist) {
+            // Whole-playlist cell: open the playlist into the picked channel
+            // (panel + click-to-load + autoplay chaining) instead of playing a
+            // single video. Nothing is played until the user picks a track.
+            if (!model || !model->getStreamingEnabled()) return;
+            resolveAndOpenPlaylist(page, sampler, model, slot, info->filename);
             return;
-        s_slotToBtnIdx[slot] = idx;
-        auto *ch = page->channels().at(slot);
-        sampler->setSlotVolumeLocal (slot, ch->volume()->local());
-        sampler->setSlotVolumeRemote(slot, ch->volume()->remote());
-        const bool globalFx = model->getGlobalFxEnabled();
-        if (globalFx && info->fxRemember) {
-            // Per-button FX overrides the channel's current FX.
-            sampler->setSlotPitchFactor (slot, AudioUtils::sliderToPitchFactor(info->fxPitch ));
-            sampler->setSlotSpeedFactor (slot, AudioUtils::sliderToPitchFactor(info->fxSpeed ));
-            sampler->setSlotReverbMix   (slot, info->fxReverb / 100.0f);
-            ch->fx()->setPitch(info->fxPitch);
-            ch->fx()->setSpeed(info->fxSpeed);
-            ch->fx()->setReverb(info->fxReverb);
-            ch->fx()->setSync (info->fxSyncPitchSpeed);
-        } else if (globalFx) {
-            syncChannelToSlot(slot);
-        } else {
-            // Master FX off: force neutral so any inherited slot state
-            // from playSoundInSlot is wiped.
-            sampler->setSlotPitchFactor(slot, 1.0f);
-            sampler->setSlotSpeedFactor(slot, 1.0f);
-            sampler->setSlotReverbMix  (slot, 0.0f);
         }
+
+        if (info->isStreamUrl) {
+            // Master streaming switch OFF -> a saved-link cell is inert.
+            if (!model || !model->getStreamingEnabled()) return;
+            // Live URL / YouTube cell: resolve the canonical page URL to a fresh
+            // direct CDN URL (async, off the GUI thread), then play. A fresh
+            // cache hit returns on the next event-loop turn, so the flow is
+            // uniform. FFmpeg streams the result - nothing is downloaded whole.
+            const QString pageUrl = info->filename;
+            const SoundInfo base  = *info;  // carry FX / crop / volume forward
+            StreamResolver &R = StreamResolver::instance();
+            QObject *ctx = beginSlotResolve(page, slot);  // marquee + abort prior
+            s_slotPendingUrl[slot] = pageUrl;             // for the Cancel button
+            QObject::connect(&R, &StreamResolver::resolved, ctx,
+                [startPlayback, base, pageUrl, slot, ctx, page](const QString &u, const ResolvedStream &s) {
+                    if (u != pageUrl) return;
+                    endSlotResolve(page, slot, ctx);
+                    SoundInfo play = base;
+                    play.filename     = s.directUrl;
+                    play.netUserAgent = s.userAgent;
+                    play.netHeaders   = s.headers;
+                    play.isLive       = s.isLive;
+                    if (s.durationSec > 0.0) play.streamDurationSec = s.durationSec;
+                    // Mark the slot as a live stream so onStartPlaying shows the
+                    // video title in the file-label + locks reverse/vinyl. (A
+                    // button-cell stream has no green channel name - that is only
+                    // for the paste-link-as-channel-name entry.)
+                    s_slotStreamLoading.insert(slot);
+                    s_slotStreamTitle[slot] = s.title.isEmpty() ? pageUrl : s.title;
+                    s_slotStreamUrl[slot]   = pageUrl;
+                    if (s.isLive) s_slotStreamLive.insert(slot);
+                    else          s_slotStreamLive.remove(slot);
+                    startPlayback(play, slot);
+                });
+            QObject::connect(&R, &StreamResolver::failed, ctx,
+                [page, pageUrl, slot, ctx](const QString &u, const QString &err) {
+                    if (u != pageUrl) return;
+                    endSlotResolve(page, slot, ctx);
+                    if (slot < page->channels().size())
+                        if (auto *ch = page->channels().at(slot))
+                            showStreamErrorBubble(ch, QObject::tr("Couldn't load the link.\n%1").arg(err));
+                });
+            R.resolve(pageUrl);
+            return;
+        }
+
+        startPlayback(*info, slot);
     });
 
     QObject::connect(grid, &ButtonGrid::buttonFileDropped, [model, page](int idx, const QList<QUrl> &urls){
         if (urls.isEmpty()) return;
         SoundInfo s;
         if (auto *cur = model->getSoundInfo(idx)) s = *cur;
-        s.filename = urls.first().toLocalFile();
+        const QUrl u = urls.first();
+        const QString scheme = u.scheme().toLower();
+        if ((scheme == "http" || scheme == "https") && model && model->getStreamingEnabled()) {
+            // A playlist link -> ask whole-playlist vs single video.
+            if (StreamResolver::looksLikePlaylist(u.toString())) {
+                const int choice = askPlaylistSaveChoice(page);
+                if (choice < 0) return;                 // cancel
+                if (choice == 1) { saveLinkAsPlaylistButton(model, page, idx, u.toString()); return; }
+                // choice == 0 -> fall through, save as a single-video stream cell.
+            }
+            // Dropped a web link -> live stream cell (v2.3.1). Store the
+            // CANONICAL page URL; resolve-on-play fetches a fresh direct URL
+            // each play (googlevideo URLs expire). Kick a resolve now so the
+            // cell shows a real title before the user ever clicks it.
+            s.filename    = u.toString();
+            s.isStreamUrl = true;
+            if (s.customText.isEmpty())
+                s.customText = QObject::tr("Loading…");
+            model->setSoundInfo(idx, s);
+            pushSoundsToGrid(page, model);
+
+            StreamResolver &R = StreamResolver::instance();
+            const QString pageUrl = s.filename;
+            QObject *ctx = new QObject(page);
+            QObject::connect(&R, &StreamResolver::resolved, ctx,
+                [model, page, idx, pageUrl, ctx](const QString &ru, const ResolvedStream &rs){
+                    if (ru != pageUrl) return;
+                    if (auto *cur = model->getSoundInfo(idx)) {
+                        if (cur->filename == pageUrl && cur->isStreamUrl) {
+                            SoundInfo up = *cur;
+                            if (!rs.title.isEmpty()) { up.streamTitle = rs.title; up.customText = rs.title; }
+                            up.streamDurationSec = rs.durationSec;
+                            model->setSoundInfo(idx, up);
+                            pushSoundsToGrid(page, model);
+                        }
+                    }
+                    ctx->deleteLater();
+                });
+            QObject::connect(&R, &StreamResolver::failed, ctx,
+                [ctx](const QString &, const QString &){ ctx->deleteLater(); });
+            R.resolve(pageUrl);
+            return;
+        }
+        s.filename    = u.toLocalFile();
+        s.isStreamUrl = false;
         model->setSoundInfo(idx, s);
         pushSoundsToGrid(page, model);
     });
+
+    // Right-click "Save link...": paste a media/YouTube link into a QInputDialog
+    // and store it as a live-stream cell on this button. Clicking the button
+    // then resolves + streams it (buttonTriggered's isStreamUrl path). The title
+    // is resolved now so the cell shows the video name instead of the URL.
+    QObject::connect(grid, &ButtonGrid::saveLinkRequested, [model, page](int idx){
+        if (!model || !model->getStreamingEnabled()) {
+            QMessageBox::information(page, QObject::tr("Save link"),
+                QObject::tr("URL / YouTube streaming is disabled in Settings."));
+            return;
+        }
+        bool ok = false;
+        const QString link = QInputDialog::getText(page, QObject::tr("Save link"),
+            QObject::tr("Paste a video / audio link (YouTube, etc.):"),
+            QLineEdit::Normal, QString(), &ok).trimmed();
+        if (!ok || link.isEmpty()) return;
+        if (!StreamResolver::looksLikeUrl(link)) {
+            QMessageBox::warning(page, QObject::tr("Save link"),
+                QObject::tr("That does not look like a valid link."));
+            return;
+        }
+        // A playlist link -> ask whole-playlist vs single video.
+        if (StreamResolver::looksLikePlaylist(link)) {
+            const int choice = askPlaylistSaveChoice(page);
+            if (choice < 0) return;                 // cancel
+            if (choice == 1) { saveLinkAsPlaylistButton(model, page, idx, link); return; }
+            // choice == 0 -> fall through, save as a single-video stream cell.
+        }
+        SoundInfo s;
+        if (auto *cur = model->getSoundInfo(idx)) s = *cur;
+        s.filename    = link;
+        s.isStreamUrl = true;
+        if (s.customText.isEmpty()) s.customText = QObject::tr("Loading...");
+        model->setSoundInfo(idx, s);
+        pushSoundsToGrid(page, model);
+
+        StreamResolver &R = StreamResolver::instance();
+        const QString pageUrl = link;
+        QObject *ctx = new QObject(page);
+        QObject::connect(&R, &StreamResolver::resolved, ctx,
+            [model, page, idx, pageUrl, ctx](const QString &ru, const ResolvedStream &rs){
+                if (ru != pageUrl) return;
+                if (auto *cur = model->getSoundInfo(idx)) {
+                    if (cur->filename == pageUrl && cur->isStreamUrl) {
+                        SoundInfo up = *cur;
+                        if (!rs.title.isEmpty()) { up.streamTitle = rs.title; up.customText = rs.title; }
+                        up.streamDurationSec = rs.durationSec;
+                        model->setSoundInfo(idx, up);
+                        pushSoundsToGrid(page, model);
+                    }
+                }
+                ctx->deleteLater();
+            });
+        QObject::connect(&R, &StreamResolver::failed, ctx,
+            [ctx](const QString &, const QString &){ ctx->deleteLater(); });
+        R.resolve(pageUrl);
+    });
+
+    // Provider: which channels currently hold a resolved YouTube video (so the
+    // cell right-click menu can offer save-link / download-audio per channel).
+    grid->setStreamChannelsProvider([page]() -> QVector<StreamChannelInfo> {
+        QVector<StreamChannelInfo> out;
+        // Candidate slots = those holding a single video OR a whole playlist.
+        // (NB: 'slots' is a Qt keyword/macro — must not be used as an identifier.)
+        QSet<int> slotSet;
+        for (auto it = s_slotStreamUrl.constBegin(); it != s_slotStreamUrl.constEnd(); ++it)
+            slotSet.insert(it.key());
+        for (auto it = s_slotPlaylistUrl.constBegin(); it != s_slotPlaylistUrl.constEnd(); ++it)
+            slotSet.insert(it.key());
+        for (int slot : slotSet) {
+            StreamChannelInfo sc;
+            sc.slot          = slot;
+            sc.pageUrl       = s_slotStreamUrl.value(slot);   // may be empty (playlist only)
+            sc.title         = s_slotStreamTitle.value(slot, sc.pageUrl);
+            sc.isLive        = s_slotStreamLive.contains(slot);
+            sc.isPlaylist    = s_slotPlaylistUrl.contains(slot);
+            sc.playlistUrl   = s_slotPlaylistUrl.value(slot);
+            sc.playlistTitle = s_slotPlaylistTitle.value(slot, QObject::tr("Playlist"));
+            if (slot >= 0 && slot < page->channels().size())
+                if (auto *c = page->channels().at(slot)) {
+                    // A channel-name-paste stream shows the green URL as its
+                    // name — use the video title as the label instead.
+                    sc.channelName = c->showingStreamLink() ? sc.title : c->title();
+                }
+            out.push_back(sc);
+        }
+        return out;
+    });
+
+    // Right-click a cell -> "Save <channel>'s link here": bind this button to
+    // the channel's page URL as a live-stream cell (works for live too).
+    QObject::connect(grid, &ButtonGrid::saveStreamLinkToButton,
+        [model, page](int idx, const QString &pageUrl, const QString &title){
+            if (!model) return;
+            SoundInfo s;
+            if (auto *cur = model->getSoundInfo(idx)) s = *cur;
+            s.filename    = pageUrl;
+            s.isStreamUrl = true;
+            s.streamTitle = title;
+            s.customText  = title.isEmpty() ? QObject::tr("(link)") : title;
+            model->setSoundInfo(idx, s);
+            pushSoundsToGrid(page, model);
+        });
+
+    // Right-click a cell -> "Save <channel>'s whole playlist here": bind this
+    // button to the PLAYLIST URL. Triggering it later opens the whole playlist.
+    QObject::connect(grid, &ButtonGrid::savePlaylistToButton,
+        [model, page](int idx, const QString &playlistUrl, const QString &title){
+            if (!model || playlistUrl.isEmpty()) return;
+            SoundInfo s;
+            if (auto *cur = model->getSoundInfo(idx)) s = *cur;
+            s.filename    = playlistUrl;
+            s.isStreamUrl = true;
+            s.isPlaylist  = true;
+            s.streamTitle = title;
+            s.customText  = title.isEmpty() ? QObject::tr("Playlist") : title;
+            model->setSoundInfo(idx, s);
+            pushSoundsToGrid(page, model);
+            showInfoToast(page, QObject::tr("Playlist saved to the button."), 3000);
+        });
+
+    // Right-click a cell -> "Download <channel>'s audio here…": pick a folder,
+    // download the audio, then bind this button to the resulting local file.
+    QObject::connect(grid, &ButtonGrid::downloadStreamToButton,
+        [model, page](int idx, const QString &pageUrl, const QString &title){
+            if (!model || !model->getStreamingEnabled()) return;
+            QString dir = QFileDialog::getExistingDirectory(page,
+                QObject::tr("Choose destination folder"));
+            if (dir.isEmpty()) return;
+            const QString dest = QDir(dir).filePath(safeFileStem(title) + ".m4a");
+            runStreamDownload(page, pageUrl, dest, [model, page, idx, title](const QString &file){
+                SoundInfo s;
+                if (auto *cur = model->getSoundInfo(idx)) s = *cur;
+                s.filename    = file;
+                s.isStreamUrl = false;
+                s.streamTitle.clear();
+                s.customText  = title;
+                model->setSoundInfo(idx, s);
+                pushSoundsToGrid(page, model);
+            });
+        });
 
     // Drag a button onto another = swap their SoundInfo. The actual
     // swap is deferred via QTimer::singleShot(0) because the drop
@@ -983,6 +1784,52 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 if (page->channels().at(i)->channelId() == channelId) { slot = i; break; }
             }
             if (slot < 0) return;
+            // Dragging a saved-link (stream) button onto a channel: resolve the
+            // page URL to a fresh direct URL, then load (play->pause). Mirrors
+            // the buttonTriggered stream path so effects/label/stream-mode all
+            // apply. FFmpeg streams it live.
+            if (info->isStreamUrl) {
+                if (!model || !model->getStreamingEnabled()) return;
+                const QString pageUrl = info->filename;
+                const SoundInfo base  = *info;
+                StreamResolver &R = StreamResolver::instance();
+                QObject *ctx = new QObject(page);
+                QObject::connect(&R, &StreamResolver::resolved, ctx,
+                    [page, sampler, slot, btnIdx, base, pageUrl, ctx](const QString &u, const ResolvedStream &s){
+                        if (u != pageUrl) return;
+                        ctx->deleteLater();
+                        if (slot >= page->channels().size()) return;
+                        auto *tch = page->channels().at(slot);
+                        if (!tch) return;
+                        SoundInfo play = base;
+                        play.filename          = s.directUrl;
+                        play.netUserAgent      = s.userAgent;
+                        play.netHeaders        = s.headers;
+                        play.streamTitle       = s.title;
+                        if (s.durationSec > 0.0) play.streamDurationSec = s.durationSec;
+                        s_slotStreamLoading.insert(slot);
+                        s_slotStreamTitle[slot] = s.title.isEmpty() ? pageUrl : s.title;
+                        s_slotStreamUrl[slot]   = pageUrl;
+                        if (sampler->playSoundInSlot(slot, play, false)) {
+                            s_slotToBtnIdx[slot] = btnIdx;
+                            sampler->setSlotVolumeLocal (slot, tch->volume()->local());
+                            sampler->setSlotVolumeRemote(slot, tch->volume()->remote());
+                            sampler->pausePlayback(slot);
+                        } else {
+                            clearSlotStream(page, slot);
+                        }
+                    });
+                QObject::connect(&R, &StreamResolver::failed, ctx,
+                    [page, slot, pageUrl, ctx](const QString &u, const QString &){
+                        if (u != pageUrl) return;
+                        ctx->deleteLater();
+                        clearSlotStream(page, slot);
+                    });
+                R.resolve(pageUrl);
+                return;
+            }
+            // Non-stream drop restores the channel name if the slot was a stream.
+            clearSlotStream(page, slot);
             sampler->stopPlayback(slot);
             // Error dialog comes from onPlaybackError handler.
             if (!sampler->playSoundInSlot(slot, *info, false))
@@ -1011,13 +1858,81 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             }
             sampler->pausePlayback(slot);
         });
-        QObject::connect(ch, &Channel::titleChanged, page, [](int id, const QString &t){
-            ChannelStatePersistence::saveName(id, t);
+        QObject::connect(ch, &Channel::titleChanged, page, [page, sampler, model](int id, const QString &t){
+            int slot = -1;
+            for (int i = 0; i < page->channels().size(); ++i)
+                if (page->channels().at(i)->channelId() == id) { slot = i; break; }
+
+            // Paste a media / YouTube link AS THE CHANNEL NAME: the instant it
+            // looks like a URL (synchronous check) the channel name (= the link)
+            // turns GREEN and the video loads as a live stream in THIS channel.
+            // The video TITLE goes to the waveform file-label (onStartPlaying),
+            // NOT the channel name - the name stays the green link until the
+            // stream stops or another sound is loaded, then the real name is
+            // restored. The link is never persisted, so a restart shows the name.
+            if (sampler && slot >= 0 && model && model->getStreamingEnabled()
+                && model->getChannelNameLinkDetect() && StreamResolver::looksLikeUrl(t)) {
+                auto *ch2 = page->channels().at(slot);
+                const QString pageUrl = t.trimmed();
+                // Already loaded this exact link (focus-out with the green link
+                // still shown and the slot already holds this URL) -> no reload.
+                if (ch2 && ch2->showingStreamLink() && ch2->title() == pageUrl
+                    && s_slotStreamUrl.value(slot) == pageUrl)
+                    return;
+                // Playlist link -> ask whole-playlist vs single video.
+                if (StreamResolver::looksLikePlaylist(pageUrl)) {
+                    openPlaylistFlow(page, sampler, model, slot, pageUrl);
+                    return;
+                }
+                // Single video: resolve + load (seamlessly replacing whatever
+                // was loading/playing here — loadStreamIntoSlot aborts the prior
+                // resolve, shows the loading marquee, live-detects, error-toasts).
+                // Auto-play is opt-in via the "Auto-play files loaded from a
+                // link" setting; default loads paused/ready.
+                loadStreamIntoSlot(page, sampler, model, slot, pageUrl,
+                                   /*greenChannelName*/true,
+                                   /*autoPlay*/model->getStreamAutoplay());
+                return;
+            }
+
+            // A real (non-URL) name: abort any in-flight resolve for this slot
+            // (user cleared/changed the link mid-load) and, if the channel was
+            // showing a green stream link, exit that display; adopt the name.
+            // Also unload any playlist loaded here — the user chose to rename.
+            if (slot >= 0) {
+                if (auto old = s_slotResolveCtx.value(slot)) { old->deleteLater(); s_slotResolveCtx.remove(slot); }
+                if (auto *ch2 = page->channels().at(slot)) ch2->setStreamLoading(false);
+                unloadPlaylistPanel(page, slot);
+            }
+            if (slot >= 0)
+                if (auto *ch2 = page->channels().at(slot))
+                    if (ch2->showingStreamLink()) ch2->restoreName();
+            // Cleared to empty → fall back to the default "Channel N" name rather
+            // than leaving a blank title.
+            const QString finalName = t.trimmed().isEmpty()
+                ? QObject::tr("Channel %1").arg(id + 1) : t;
+            if (slot >= 0)
+                if (auto *ch2 = page->channels().at(slot))
+                    ch2->setTitle(finalName);
+            ChannelStatePersistence::saveName(id, finalName);
         });
         QString savedName = ChannelStatePersistence::loadName(ch->channelId());
         if (!savedName.isEmpty()) ch->setTitle(savedName);
         ch->setFxVisible(model && model->getGlobalFxEnabled());
         ch->setWaveformVisible(!(model && model->getHideWaveform()));
+        // Cancel (✕) on the resolving marquee: abort this channel's load.
+        QObject::connect(ch, &Channel::streamLoadCancelRequested, page, [page](int id){
+            for (int i = 0; i < page->channels().size(); ++i)
+                if (page->channels().at(i)->channelId() == id) { cancelSlotStreamLoad(page, i); break; }
+        });
+        // ☰ reopen: re-show this channel's (hidden) playlist panel.
+        QObject::connect(ch, &Channel::playlistReopenRequested, page, [page](int id){
+            for (int i = 0; i < page->channels().size(); ++i)
+                if (page->channels().at(i)->channelId() == id) {
+                    if (auto p = s_slotPlaylistPanel.value(i)) { p->show(); p->raise(); p->activateWindow(); }
+                    break;
+                }
+        });
         QObject::connect(ch, &Channel::removeChannelRequested, page, [page, sampler, model](int id){
             int idx = -1;
             for (int i = 0; i < page->channels().size(); ++i) {
@@ -1413,6 +2328,25 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
     });
     for (auto *existing : page->channels()) wireChannelButtons(existing);
 
+    // One-time YouTube discovery hint over the first channel's name. Gated on a
+    // QSettings one-shot flag so it only ever appears once, and only while the
+    // streaming feature is enabled. Deferred so the channel is laid out first.
+    if (model && model->getStreamingEnabled()) {
+        QSettings dsc("GameBaiters", "Soundboard");
+        if (!dsc.value("ytDiscoveryShown2", false).toBool() && !page->channels().isEmpty()) {
+            QTimer::singleShot(1200, page, [page]{
+                if (page->channels().isEmpty()) return;
+                if (auto *ch = page->channels().first()) {
+                    ch->showDiscoveryBubble(QObject::tr(
+                        "Did you know? You can paste and play a YouTube video "
+                        "directly — just paste the link as the channel name. Try it now!"));
+                    QSettings s("GameBaiters", "Soundboard");
+                    s.setValue("ytDiscoveryShown2", true);
+                }
+            });
+        }
+    }
+
     // Sampler -> waveform indicator. Slot N drives channel widget N.
     if (sampler) {
         QObject::connect(sampler, &Sampler::onStartPlaying, page,
@@ -1421,10 +2355,41 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             if (preview) return;
             if (slot < 0 || slot >= page->channels().size()) return;
             auto *ch = page->channels().at(slot);
+            // s_slotStreamTitle was populated at load; consume the loading flag.
+            s_slotStreamLoading.remove(slot);
+            const bool isStream = s_slotStreamTitle.contains(slot);
+            const bool isLive   = s_slotStreamLive.contains(slot);
+            if (isLive) {
+                // LIVE stream: no waveform (endless, unseekable). Purple notice,
+                // reverse/vinyl/skip disabled, no analyser on the URL. Live can't
+                // be saved to a file, so no download control.
+                ch->waveform()->setLiveStream(true);
+                ch->waveform()->setStreamLabel(s_slotStreamTitle.value(slot, filename));
+                ch->waveform()->setPlaying(true);
+                ch->setExportIsDownload(false);
+                LastPlayedCtx lctx;
+                lctx.btnIdx   = s_slotToBtnIdx.value(slot, -1);
+                lctx.filename = filename;
+                s_lastPlayedCtx[slot] = lctx;
+                return;
+            }
+            ch->waveform()->setLiveStream(false);
             SoundInfo info;
             info.filename = filename;
+            // Normal network VOD draws a full (progressive) waveform just like a
+            // local file — only true LIVE streams skip it (handled above).
+            info.isStreamUrl = isStream;
             ch->waveform()->setSound(info);
             ch->waveform()->setPlaying(true);
+            // Finite stream: show the video TITLE in the file-label instead of
+            // the ugly direct CDN URL, and surface the prominent "Save audio"
+            // download button (a VOD stream can be saved to a file).
+            if (isStream) {
+                ch->waveform()->setStreamLabel(s_slotStreamTitle.value(slot, filename));
+                ch->setExportIsDownload(true);
+            } else {
+                ch->setExportIsDownload(false);
+            }
             // Feed the actual crop applied to this slot so the waveform
             // can mark its start / end points. clearPlayback() on stop
             // or sound change wipes it, and looping never re-emits this
@@ -1498,6 +2463,11 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                     return;
                 }
             }
+            // Live-stream slot genuinely stopped (a stream RELOAD leaves the
+            // slot playing/paused and already returned above). Restore the
+            // channel's real name + unlock reverse/vinyl.
+            if (!s_slotStreamLoading.contains(slot) && s_slotStreamTitle.contains(slot))
+                clearSlotStream(page, slot);
             auto *wave = page->channels().at(slot)->waveform();
 
             // Hard-clear path: clearRequested marked this slot before
@@ -1579,8 +2549,16 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             if (sl >= 0) base = base.mid(sl + 1);
             if (base.isEmpty()) base = QObject::tr("(unknown file)");
 
+            const bool isNet = filename.startsWith("http://") || filename.startsWith("https://")
+                            || s_slotStreamUrl.contains(slot);
             QString reason;
-            if (filename.isEmpty()) {
+            if (isNet) {
+                // A network URL never "exists" on disk — don't report File not
+                // found; clear the stream state and restore the channel name.
+                reason = QObject::tr("Network stream error");
+                base   = s_slotStreamTitle.value(slot, QObject::tr("stream"));
+                clearSlotStream(page, slot);
+            } else if (filename.isEmpty()) {
                 reason = QObject::tr("No file assigned");
             } else {
                 QFileInfo fi(filename);
@@ -2618,9 +3596,17 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     // keep the original mutex-bearing pos/length read.
     if (sampler) {
         auto wasActive = std::make_shared<QVector<bool>>();
+        // Edge-tracked "this slot is currently buffering" bitset, so the loading
+        // marquee is toggled only on change (a network stream feeding recovery
+        // silence after a stall shows the "caricando" strip; cleared on resume).
+        auto bufActive = std::make_shared<QVector<bool>>();
+        // Rising-edge tracker for the "network error" toast (a stream that could
+        // not recover a stall at the seek target and fell back to restart-from-
+        // start). Shown once per failure, not every 33 ms.
+        auto failActive = std::make_shared<QVector<bool>>();
         auto *posTimer = new QTimer(page);
         posTimer->setInterval(33);
-        QObject::connect(posTimer, &QTimer::timeout, page, [page, sampler, wasActive]{
+        QObject::connect(posTimer, &QTimer::timeout, page, [page, sampler, wasActive, bufActive, failActive]{
             // Skip entire iteration when the GUI is hidden OR nothing
             // is playing - both are user-visible criteria for "no work
             // needed". Without the anyPlaying gate the timer kept
@@ -2630,12 +3616,16 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
             if (!sampler->anyPlaying()) return;
             const int n = page->channels().size();
             if (wasActive->size() < n) wasActive->resize(n);
+            if (bufActive->size() < n) bufActive->resize(n);
+            if (failActive->size() < n) failActive->resize(n);
             for (int i = 0; i < n; ++i) {
                 Sampler::state_e st = sampler->getState(i);
                 if (st == Sampler::ePLAYING_PREVIEW) continue;
                 bool active = (st == Sampler::ePLAYING || st == Sampler::ePAUSED);
                 auto *ch = page->channels().at(i);
                 if (!active) {
+                    if ((*bufActive)[i]) { (*bufActive)[i] = false; ch->setStreamLoading(false); }
+                    (*failActive)[i] = false;
                     if ((*wasActive)[i]) {
                         // Replay UX: KEEP the waveform / filename / time
                         // label after the playing -> silent transition.
@@ -2650,6 +3640,25 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                     continue;
                 }
                 (*wasActive)[i] = true;
+                // Network stream recovering from a stall (e.g. a forward seek):
+                // show the "caricando" marquee while it feeds silence, hide it
+                // when audio resumes. Edge-tracked so we don't re-toggle every
+                // 33 ms. Only affects streams (local files never buffer).
+                bool buffering = sampler->getSlotNetBuffering(i);
+                if (buffering != (*bufActive)[i]) {
+                    (*bufActive)[i] = buffering;
+                    ch->setStreamLoading(buffering);
+                }
+                // Network stall unrecoverable at the seek target: show a
+                // transient "network error" toast once (rising edge). The
+                // decoder itself falls back to restarting from the beginning.
+                bool failed = sampler->getSlotNetFailed(i);
+                if (failed && !(*failActive)[i]) {
+                    showStreamErrorBubble(ch, QObject::tr(
+                        "Network error — couldn't stream from that point. "
+                        "Restarting from the beginning."));
+                }
+                (*failActive)[i] = failed;
                 // Skip the cursor refresh while a debounced seek is
                 // pending for this channel: the click handler snapped
                 // the cursor to the click target; reading the live
@@ -2789,6 +3798,35 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
             // between click + slot-dispatch.
             auto *src_ch = page->channelAt(slot);
             if (!src_ch) return;
+            // Stream channel: the "filename" is a video title, not a real file.
+            // Download the YouTube audio straight to disk (full quality, via the
+            // engine) instead of baking the streamed playback. Live streams have
+            // no end, so they can only be SAVED AS A LINK, never to a file.
+            if (s_slotStreamUrl.contains(slot)) {
+                if (s_slotStreamLive.contains(slot)) {
+                    QMessageBox::information(page, QObject::tr("Export"),
+                        QObject::tr("This is a live stream — it can only be saved as a link, not to a file."));
+                    return;
+                }
+                const QString pageUrl = s_slotStreamUrl.value(slot);
+                const QString title   = s_slotStreamTitle.value(slot, QObject::tr("youtube_audio"));
+                QString dir = QFileDialog::getExistingDirectory(page,
+                    QObject::tr("Choose destination folder"));
+                if (dir.isEmpty()) return;
+                const QString dest = QDir(dir).filePath(safeFileStem(title) + ".m4a");
+                runStreamDownload(page, pageUrl, dest, [page, title](const QString &file){
+                    // Offer to also bind the saved file to a soundboard button.
+                    if (QMessageBox::question(page, QObject::tr("Save to a button"),
+                            QObject::tr("Audio saved.\n\nAlso assign it to a soundboard button? "
+                                        "Click Yes, then click the cell where you want it."))
+                        == QMessageBox::Yes) {
+                        s_pendingAssignFile  = file;
+                        s_pendingAssignTitle = title;
+                        showInfoToast(page, QObject::tr("Click a soundboard cell to save the audio there."));
+                    }
+                });
+                return;
+            }
             QString src = src_ch->waveform()->filename();
             if (src.isEmpty()) {
                 QMessageBox::information(page, QObject::tr("Export"),

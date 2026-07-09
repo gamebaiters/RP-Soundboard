@@ -135,6 +135,9 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     , m_showVinylButton     (new QCheckBox(tr("Show vinyl (tape stop) button on channels"), this))
     , m_micFxFeature        (new QCheckBox(tr("Enable Mic FX (real-time voice changer)"), this))
     , m_loudnessNormalize   (new QCheckBox(tr("Normalize loudness of every sound (EBU R128, -16 LUFS)"), this))
+    , m_streamingEnabled    (new QCheckBox(tr("Enable URL / YouTube live streaming"), this))
+    , m_channelLinkDetect   (new QCheckBox(tr("Load a link pasted as a channel name"), this))
+    , m_streamAutoplay      (new QCheckBox(tr("Auto-play files loaded from a link"), this))
     , m_resetChVolume(new QCheckBox(tr("Volume"), this))
     , m_resetChFx(new QCheckBox(tr("Pitch / speed / reverb"), this))
     , m_resetChFile(new QCheckBox(tr("Stop playback + clear loaded audio"), this))
@@ -182,6 +185,8 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     m_showVinylButton   ->setChecked(true);
     m_micFxFeature      ->setChecked(true);
     m_loudnessNormalize ->setChecked(false);
+    m_streamingEnabled  ->setChecked(true);
+    m_channelLinkDetect ->setChecked(true);
 
     // Reset behaviour defaults
     m_resetChVolume->setChecked(true);
@@ -251,6 +256,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         "Master switch for the Mic FX voice changer. When OFF, the\n"
         "microphone panel, its toolbar button and all mic processing\n"
         "disappear completely."), this)));
+    // URL / YouTube streaming toggles moved to their own "Streaming" section.
     generalLay->addWidget(m_multi);
 
     // ============== Channels section ==============
@@ -690,9 +696,67 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     // Persistence keys carry an "_v2" suffix so the one-time reorg
     // does not drag stale open/collapsed state from the old layout
     // (would leave random sections open on first load otherwise).
+    // ============== Streaming (YouTube / URL) section ==============
+    m_streamQuality = new QComboBox(this);
+    m_streamQuality->addItem(tr("Best available"),           "best");
+    m_streamQuality->addItem(tr("Balanced (recommended)"),   "balanced");
+    m_streamQuality->addItem(tr("Data saver (smallest)"),    "data");
+    auto *streamLay = new QVBoxLayout;
+    streamLay->addWidget(subHeader(tr("Behaviour"), this));
+    streamLay->addLayout(indented(checkRow(m_streamingEnabled, tr(
+        "Master switch for URL / YouTube live streaming. When OFF,\n"
+        "pasting a link (as a channel name, a button's Save link, or a\n"
+        "dropped URL) does nothing - everything stays local files."), this)));
+    streamLay->addLayout(indented(checkRow(m_channelLinkDetect, tr(
+        "When ON, pasting a link AS A CHANNEL NAME loads it as a stream\n"
+        "in that channel. OFF = a pasted link stays a plain name."), this)));
+    streamLay->addLayout(indented(checkRow(m_streamAutoplay, tr(
+        "When ON, a file loaded from a link starts playing immediately.\n"
+        "OFF = it loads paused, ready for you to press play."), this)));
+    streamLay->addWidget(subHeader(tr("Engine (yt-dlp)"), this));
+    {
+        auto *qr = new QHBoxLayout;
+        qr->addWidget(new QLabel(tr("Audio quality:"), this));
+        qr->addWidget(m_streamQuality, 1);
+        streamLay->addLayout(indented(qr));
+        auto *note = new QLabel(tr(
+            "Higher quality uses more bandwidth. The streaming engine and its\n"
+            "version/update controls live in the About dialog."), this);
+        note->setStyleSheet("color: palette(mid);");
+        streamLay->addWidget(note);
+    }
+
+    // ============== Voice & transmission section ==============
+    m_vadWhilePlaying = new QCheckBox(tr("Use voice activation for my mic while a sound plays"), this);
+    m_duckWhenTalking = new QCheckBox(tr("Lower the soundboard when I talk (ducking)"), this);
+    m_duckAmount      = new QSlider(Qt::Horizontal, this);
+    m_duckAmount->setRange(0, 90);
+    m_duckAmount->setValue(40);
+    m_duckAmountLabel = new QLabel(tr("Lower by: 40%"), this);
+    auto *voiceLay = new QVBoxLayout;
+    voiceLay->addWidget(subHeader(tr("While a sound is playing"), this));
+    voiceLay->addLayout(indented(checkRow(m_vadWhilePlaying, tr(
+        "The soundboard is transmitted continuously; your OWN voice is only\n"
+        "sent when you actually speak (voice activation), independent of the\n"
+        "soundboard. Applies while a sound plays and you are not muted."), this)));
+    voiceLay->addLayout(indented(checkRow(m_duckWhenTalking, tr(
+        "When you speak, the soundboard volume dips so your voice stays\n"
+        "clearly audible, then returns when you stop."), this)));
+    {
+        auto *dr = new QHBoxLayout;
+        dr->addWidget(m_duckAmountLabel);
+        dr->addWidget(m_duckAmount, 1);
+        voiceLay->addLayout(indented(dr));
+    }
+    connect(m_duckAmount, &QSlider::valueChanged, this, [this](int v){
+        m_duckAmountLabel->setText(tr("Lower by: %1%").arg(v));
+    });
+
     auto *body = new QVBoxLayout;
     body->setSpacing(2);
     body->addWidget(makeSection(tr("General"),                        generalLay,  this, "general_v2"));
+    body->addWidget(makeSection(tr("Streaming (YouTube / URL)"),      streamLay,   this, "streaming_v2"));
+    body->addWidget(makeSection(tr("Voice && transmission"),          voiceLay,    this, "voice_v2"));
     body->addWidget(makeSection(tr("Channels"),                       channelsLay, this, "channels_v2"));
     body->addWidget(makeSection(tr("Audio sandbox && 3D HRTF"),       sandboxLay,  this, "sandbox_v2"));
     // Button-grid rows / cols selectors moved to the main soundboard
@@ -764,6 +828,14 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_showVinylButton,      &QCheckBox::toggled, this, &SettingsWindow::showVinylButtonChanged);
     connect(m_micFxFeature,         &QCheckBox::toggled, this, &SettingsWindow::micFxFeatureEnabledChanged);
     connect(m_loudnessNormalize,    &QCheckBox::toggled, this, &SettingsWindow::loudnessNormalizeChanged);
+    connect(m_streamingEnabled,     &QCheckBox::toggled, this, &SettingsWindow::streamingEnabledChanged);
+    connect(m_channelLinkDetect,    &QCheckBox::toggled, this, &SettingsWindow::channelNameLinkDetectChanged);
+    connect(m_streamAutoplay,       &QCheckBox::toggled, this, &SettingsWindow::streamAutoplayChanged);
+    connect(m_streamQuality, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+        [this](int){ emit streamQualityChanged(streamQuality()); });
+    connect(m_vadWhilePlaying,      &QCheckBox::toggled, this, &SettingsWindow::vadWhilePlayingChanged);
+    connect(m_duckWhenTalking,      &QCheckBox::toggled, this, &SettingsWindow::duckWhenTalkingChanged);
+    connect(m_duckAmount,           &QSlider::valueChanged, this, &SettingsWindow::duckAmountChanged);
 
     connect(m_resetChVolume,      &QCheckBox::toggled, this, &SettingsWindow::resetChVolumeChanged);
     connect(m_resetChFx,          &QCheckBox::toggled, this, &SettingsWindow::resetChFxChanged);
@@ -813,6 +885,12 @@ bool SettingsWindow::spectrogramView()        const { return m_spectrogramView->
 bool SettingsWindow::showVinylButton()        const { return m_showVinylButton->isChecked();      }
 bool SettingsWindow::micFxFeatureEnabled()    const { return m_micFxFeature->isChecked();         }
 bool SettingsWindow::loudnessNormalize()      const { return m_loudnessNormalize->isChecked();    }
+bool SettingsWindow::streamingEnabled()       const { return m_streamingEnabled->isChecked();     }
+bool SettingsWindow::channelNameLinkDetect()  const { return m_channelLinkDetect->isChecked();    }
+QString SettingsWindow::streamQuality()       const { return m_streamQuality->currentData().toString(); }
+bool SettingsWindow::vadWhilePlaying()        const { return m_vadWhilePlaying->isChecked();      }
+bool SettingsWindow::duckWhenTalking()        const { return m_duckWhenTalking->isChecked();      }
+int  SettingsWindow::duckAmount()             const { return m_duckAmount->value();               }
 
 bool SettingsWindow::resetChVolume()          const { return m_resetChVolume->isChecked();      }
 bool SettingsWindow::resetChFx()              const { return m_resetChFx->isChecked();          }
@@ -857,6 +935,21 @@ void SettingsWindow::setSpectrogramView(bool on)       { QSignalBlocker b(m_spec
 void SettingsWindow::setShowVinylButton(bool on)       { QSignalBlocker b(m_showVinylButton);      m_showVinylButton->setChecked(on);      }
 void SettingsWindow::setMicFxFeatureEnabled(bool on)   { QSignalBlocker b(m_micFxFeature);         m_micFxFeature->setChecked(on);         }
 void SettingsWindow::setLoudnessNormalize(bool on)     { QSignalBlocker b(m_loudnessNormalize);    m_loudnessNormalize->setChecked(on);    }
+void SettingsWindow::setStreamingEnabled(bool on)      { QSignalBlocker b(m_streamingEnabled);     m_streamingEnabled->setChecked(on);     }
+void SettingsWindow::setChannelNameLinkDetect(bool on) { QSignalBlocker b(m_channelLinkDetect);    m_channelLinkDetect->setChecked(on);    }
+void SettingsWindow::setStreamAutoplay(bool on)        { QSignalBlocker b(m_streamAutoplay);        m_streamAutoplay->setChecked(on);       }
+void SettingsWindow::setStreamQuality(const QString &q) {
+    QSignalBlocker b(m_streamQuality);
+    int idx = m_streamQuality->findData(q);
+    m_streamQuality->setCurrentIndex(idx >= 0 ? idx : 1);   // default "balanced"
+}
+void SettingsWindow::setVadWhilePlaying(bool on) { QSignalBlocker b(m_vadWhilePlaying); m_vadWhilePlaying->setChecked(on); }
+void SettingsWindow::setDuckWhenTalking(bool on) { QSignalBlocker b(m_duckWhenTalking); m_duckWhenTalking->setChecked(on); }
+void SettingsWindow::setDuckAmount(int pct) {
+    QSignalBlocker b(m_duckAmount);
+    m_duckAmount->setValue(pct);
+    if (m_duckAmountLabel) m_duckAmountLabel->setText(tr("Lower by: %1%").arg(pct));
+}
 
 void SettingsWindow::setSandboxModuleMask(quint32 mask)
 {

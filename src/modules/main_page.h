@@ -49,6 +49,13 @@ public:
     class QSpinBox    *rowsSpin()         { return m_rowsSpin; }
     class QSpinBox    *colsSpin()         { return m_colsSpin; }
 
+    // Bottom-toolbar group visibility (Settings > Channels > Main toolbar).
+    // Each group can be hidden to slim the bar down to what the user
+    // actually uses; the underlying values keep working.
+    void setMuteChecksVisible(bool on);      // Mute locally / myself / Preview
+    void setProfileButtonsVisible(bool on);  // P1..P4 + their help bubble
+    void setGridSizeVisible(bool on);        // Rows / Cols spinners + labels
+
     QVector<Channel *> channels() const   { return m_channels; }
     Channel           *channelAt(int idx) const;
     Channel           *addChannel();      // appends a new Channel widget
@@ -132,6 +139,9 @@ private:
     // bottom row; the wiring layer mirrors them onto ConfigModel.
     class QSpinBox     *m_rowsSpin = nullptr;
     class QSpinBox     *m_colsSpin = nullptr;
+    class QLabel       *m_rowsLbl  = nullptr;     // captions, hidden with the
+    class QLabel       *m_colsLbl  = nullptr;     // grid-size group
+    QWidget            *m_profilesHelp = nullptr; // P1-P4 help bubble
 
     // Preview-only checkbox: when checked, label fades smoothly
     // between two warning colours so the user always sees at a glance

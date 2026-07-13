@@ -44,6 +44,18 @@ struct InputFileOptions
 };
 
 
+// Global shutdown abort for blocking FFmpeg NETWORK I/O. When armed, every
+// AVFormatContext we open (network targets install an interrupt callback)
+// aborts its blocking open/read/seek within milliseconds. Armed at the very
+// top of sb_kill / Sampler::shutdown so the bounded thread joins actually
+// succeed instead of timing out into TerminateThread (which killed workers
+// mid-SSL-handshake / mid-heap-alloc and produced the intermittent "TS3
+// crashed" dialog on a perfectly normal client close). MUST be re-disarmed
+// in sb_init: TS3 can disable + re-enable the plugin in the same process.
+namespace InputFileNet {
+	void setShutdownAbort(bool on);
+}
+
 class InputFile : public SampleSource
 {
 public:

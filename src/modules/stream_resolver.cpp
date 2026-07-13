@@ -199,6 +199,12 @@ ResolvedStream StreamResolver::cached(const QString &pageUrl) const
 }
 
 //----------------------------------------------------------------
+void StreamResolver::invalidate(const QString &pageUrl)
+{
+	m_cache.remove(videoKey(pageUrl));
+}
+
+//----------------------------------------------------------------
 void StreamResolver::resolve(const QString &pageUrl)
 {
 	const QString url = pageUrl.trimmed();

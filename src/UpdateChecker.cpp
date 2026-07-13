@@ -8,6 +8,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QMessageBox>
+#include <QApplication>
 #include <QFileInfo>
 #include <QDir>
 #include <QDateTime>
@@ -132,7 +133,8 @@ void UpdateChecker::onFinishDownloadXml(QNetworkReply *reply)
 
 			if (m_explicitCheck)
 			{
-				QMessageBox::information(NULL, "Update Check", "Your version of GameBaiters - Soundboard is up to date.");
+				QMessageBox::information(NULL, tr("Update Check"),
+					tr("Your version of GameBaiters - Soundboard is up to date."));
 			}
 		}
 	}
@@ -243,10 +245,10 @@ void UpdateChecker::askUserForUpdate()
 {
 	QMessageBox msgBox0;
 	msgBox0.setTextFormat(Qt::RichText);
-	msgBox0.setText(QString("A new version of GameBaiters - Soundboard is available (%1).<br /><br />"\
+	msgBox0.setText(tr("A new version of GameBaiters - Soundboard is available (%1).<br /><br />"
 		"Would you like to download and install it?").arg(m_verInfo.version));
 	msgBox0.setIcon(QMessageBox::Information);
-	msgBox0.setWindowTitle("New version of GameBaiters - Soundboard!");
+	msgBox0.setWindowTitle(tr("New version of GameBaiters - Soundboard!"));
 	msgBox0.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
 	msgBox0.setDefaultButton(QMessageBox::Yes);
 	if (m_verInfo.features.length() > 0)
@@ -292,19 +294,23 @@ void UpdateChecker::onFinishedUpdate()
 {
 	if(m_updater->getSuccess())
 	{
+		// The update helper (already launched) waits for a GRACEFUL client
+		// exit before touching anything; closing all windows is how we ask
+		// TeamSpeak to quit cleanly. See UpdaterWindow::executeFile.
+		logInfo("[updater] download ok, helper launched - asking TeamSpeak to close");
 		QApplication::closeAllWindows();
-		//QMessageBox::information(NULL, "Update finished", QString("RP Soundboard was successfully updated to build %1").arg(m_verInfo.build));
 	}
 	else
 	{
+		logInfo("[updater] update failed - offering the manual download link");
 		QMessageBox msgBox;
 		msgBox.setTextFormat(Qt::RichText);
-		msgBox.setText(QString("The Update to %1 failed.<br /><br />"\
+		msgBox.setText(tr("The Update to %1 failed.<br /><br />"
 			"Please download it manually here: <br /><a href=\"%2\">%2</a>")
-			.arg(m_verInfo.version.isEmpty() ? QString("build %1").arg(m_verInfo.build) : QString("version %1").arg(m_verInfo.version))
+			.arg(m_verInfo.version.isEmpty() ? tr("build %1").arg(m_verInfo.build) : tr("version %1").arg(m_verInfo.version))
 			.arg(m_verInfo.latestDownload));
 		msgBox.setIcon(QMessageBox::Information);
-		msgBox.setWindowTitle("Update failed");
+		msgBox.setWindowTitle(tr("Update failed"));
 		msgBox.setStandardButtons(QMessageBox::Close);
 		msgBox.setDefaultButton(QMessageBox::Close);
 		msgBox.exec();

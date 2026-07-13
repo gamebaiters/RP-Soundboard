@@ -73,6 +73,7 @@
 #include <QGridLayout>
 #include <QScreen>
 #include <QDateTime>
+#include <QFile>
 #include <cmath>
 #include <memory>
 #include <functional>
@@ -146,6 +147,14 @@ static QHash<int, QString> s_slotPlaylistTitle;
 // binds this file instead of playing. Empty = not in assign mode.
 static QString s_pendingAssignFile;
 static QString s_pendingAssignTitle;
+// slot -> wall-clock (ms) of the last AUTOMATIC stream reconnect. When a
+// stream's direct URL dies mid-play (expiry / CDN throttle), the poll re-
+// resolves the page URL through yt-dlp and resumes at the last position
+// instead of showing an error — the error toast is reserved for the case
+// where even the fresh resolve fails. Budget: one auto reconnect per minute
+// per slot, so a genuinely broken stream still errors out instead of
+// resolve-looping forever. Cleared on every MANUAL load of the slot.
+static QHash<int, qint64> s_slotNetRetryMs;
 
 // Clear a slot's live-stream state and put the channel's real name back
 // (restoreName is a no-op if the channel isn't showing a green link) and drop
@@ -181,12 +190,18 @@ static void unloadPlaylistPanel(MainPage *page, int slot) {
 // Abort any in-flight resolve for `slot` and return a FRESH one-shot scope for a
 // new resolve. Shows the channel's loading marquee. Deleting the previous scope
 // disconnects its resolved/failed lambdas so they no longer fire.
-static QObject *beginSlotResolve(MainPage *page, int slot) {
+static QObject *beginSlotResolve(MainPage *page, int slot,
+                                 const QString &stageText = QString()) {
     if (auto old = s_slotResolveCtx.value(slot)) old->deleteLater();
     QObject *ctx = new QObject(page);
     s_slotResolveCtx[slot] = ctx;
     if (page && slot >= 0 && slot < page->channels().size())
-        if (auto *ch = page->channels().at(slot)) ch->setStreamLoading(true);
+        if (auto *ch = page->channels().at(slot)) {
+            // Stage-by-stage loading text so the user sees WHAT is happening
+            // (resolve vs open vs buffering), not just a generic marquee.
+            if (!stageText.isEmpty()) ch->setStreamLoadingText(stageText);
+            ch->setStreamLoading(true);
+        }
     return ctx;
 }
 
@@ -264,7 +279,8 @@ static void showInfoToast(QWidget *anchor, const QString &msg, int ms = 6000) {
 static void loadStreamIntoSlot(MainPage *page, Sampler *sampler, ConfigModel *model,
                                int slot, const QString &pageUrl,
                                bool greenChannelName, bool autoPlay,
-                               bool keepPlaylist = false)
+                               bool keepPlaylist = false,
+                               bool isAutoRetry = false)
 {
     if (!page || !sampler || slot < 0 || slot >= page->channels().size()) return;
     auto *ch0 = page->channels().at(slot);
@@ -273,9 +289,14 @@ static void loadStreamIntoSlot(MainPage *page, Sampler *sampler, ConfigModel *mo
     // unload any playlist previously loaded in this channel.
     if (!keepPlaylist) unloadPlaylistPanel(page, slot);
     if (greenChannelName) ch0->showStreamLink(pageUrl);
+    // A MANUAL load resets the auto-reconnect budget for this slot; the auto
+    // retry itself must not, or a broken stream would reconnect-loop forever.
+    if (!isAutoRetry) s_slotNetRetryMs.remove(slot);
 
     StreamResolver &R = StreamResolver::instance();
-    QObject *ctx = beginSlotResolve(page, slot);   // aborts any prior resolve
+    QObject *ctx = beginSlotResolve(page, slot,    // aborts any prior resolve
+        isAutoRetry ? QObject::tr("Reconnecting to the stream…")
+                    : QObject::tr("Fetching video info…"));
     s_slotPendingUrl[slot] = pageUrl;              // for the Cancel button
 
     QObject::connect(&R, &StreamResolver::resolved, ctx,
@@ -286,6 +307,11 @@ static void loadStreamIntoSlot(MainPage *page, Sampler *sampler, ConfigModel *mo
             if (slot >= page->channels().size()) return;
             auto *ch = page->channels().at(slot);
             if (!ch) return;
+            // Resolve done — the next (visible) stage is FFmpeg connecting to
+            // the CDN, which can take a second or two. Keep the marquee up
+            // with the new stage text; onStartPlaying hides it.
+            ch->setStreamLoadingText(QObject::tr("Opening audio stream…"));
+            ch->setStreamLoading(true);
             SoundInfo snd;
             snd.filename          = s.directUrl;
             snd.isStreamUrl       = true;
@@ -439,7 +465,8 @@ static void resolveAndOpenPlaylist(MainPage *page, Sampler *sampler, ConfigModel
         unloadPlaylistPanel(page, slot);
     s_slotPlaylistUrl[slot] = pageUrl;
     StreamResolver &R = StreamResolver::instance();
-    QObject *ctx = beginSlotResolve(page, slot);   // marquee + cancellable
+    QObject *ctx = beginSlotResolve(page, slot,    // marquee + cancellable
+        QObject::tr("Fetching playlist tracks…"));
     s_slotPendingUrl[slot] = pageUrl;
     QObject::connect(&R, &StreamResolver::playlistResolved, ctx,
         [page, sampler, model, slot, pageUrl, ctx](const QString &u, const QString &title,
@@ -582,6 +609,124 @@ static void runStreamDownload(MainPage *page, const QString &pageUrl,
     R.downloadAudio(pageUrl, destFile);
 }
 
+// "Save audio" flow for a STREAM slot: download the source audio at full
+// quality via the engine, then optionally bind the saved file to a grid
+// button. This is a separate action from "Export audio" (the DSP bake of a
+// local file), which does not apply to streams — the channel shows a
+// dedicated green download button instead of repurposing the export one.
+static void startStreamDownloadFlow(MainPage *page, int slot)
+{
+    if (!page || !s_slotStreamUrl.contains(slot)) return;
+    if (s_slotStreamLive.contains(slot)) {
+        QMessageBox::information(page, QObject::tr("Save audio"),
+            QObject::tr("This is a live stream — it can only be saved as a link, not to a file."));
+        return;
+    }
+    const QString pageUrl = s_slotStreamUrl.value(slot);
+    const QString title   = s_slotStreamTitle.value(slot, QObject::tr("youtube_audio"));
+    QString dir = QFileDialog::getExistingDirectory(page,
+        QObject::tr("Choose destination folder"));
+    if (dir.isEmpty()) return;
+    const QString dest = QDir(dir).filePath(safeFileStem(title) + ".m4a");
+    runStreamDownload(page, pageUrl, dest, [page, title](const QString &file){
+        // Offer to also bind the saved file to a soundboard button.
+        if (QMessageBox::question(page, QObject::tr("Save to a button"),
+                QObject::tr("Audio saved.\n\nAlso assign it to a soundboard button? "
+                            "Click Yes, then click the cell where you want it."))
+            == QMessageBox::Yes) {
+            s_pendingAssignFile  = file;
+            s_pendingAssignTitle = title;
+            showInfoToast(page, QObject::tr("Click a soundboard cell to save the audio there."));
+        }
+    });
+}
+
+// "Export audio" (true DSP bake) for a STREAM slot. The AudioExporter needs a
+// local file — and the direct CDN URL may demand rotating headers — so the
+// flow is: engine-download the source audio into the contained scratch dir,
+// then run the NORMAL AudioExporter over that temp copy with the channel's
+// live fx + sandbox state (snapshotted at click), then delete the temp. Two
+// visible phases: download progress, then the usual encode progress card.
+static void startStreamExportFlow(MainPage *page, ConfigModel *model, int slot)
+{
+    if (!page || !model || !s_slotStreamUrl.contains(slot)) return;
+    if (s_slotStreamLive.contains(slot)) {
+        QMessageBox::information(page, QObject::tr("Export audio"),
+            QObject::tr("This is a live stream — it has no end, so it cannot be exported to a file."));
+        return;
+    }
+    auto *src_ch = page->channelAt(slot);
+    if (!src_ch) return;
+
+    // Destination + format (same dialog as the local-file export).
+    QString selectedFilter;
+    const QString filters =
+        QObject::tr("WAV (PCM 16-bit) (*.wav);;FLAC (lossless) (*.flac);;"
+                    "OGG Vorbis (*.ogg);;AAC / M4A (*.m4a);;All files (*.*)");
+    QString dst = QFileDialog::getSaveFileName(page,
+        QObject::tr("Export audio with DSP"),
+        QString(), filters, &selectedFilter);
+    if (dst.isEmpty()) return;
+    auto endsWithI = [&](const QString &s, const char *ext) {
+        return s.endsWith(QString::fromLatin1(ext), Qt::CaseInsensitive);
+    };
+    if (!(endsWithI(dst, ".wav") || endsWithI(dst, ".flac") ||
+          endsWithI(dst, ".ogg") || endsWithI(dst, ".oga") ||
+          endsWithI(dst, ".m4a") || endsWithI(dst, ".mp4") ||
+          endsWithI(dst, ".aac")))
+    {
+        if      (selectedFilter.contains(".flac")) dst += QStringLiteral(".flac");
+        else if (selectedFilter.contains(".ogg"))  dst += QStringLiteral(".ogg");
+        else if (selectedFilter.contains(".m4a"))  dst += QStringLiteral(".m4a");
+        else                                       dst += QStringLiteral(".wav");
+    }
+
+    // Snapshot the channel's LIVE settings NOW (click time), not when the
+    // download lands — matches the local export's semantics.
+    const float pitchFactor = AudioUtils::sliderToPitchFactor(src_ch->fx()->pitch());
+    const float speedFactor = AudioUtils::sliderToPitchFactor(src_ch->fx()->speed());
+    const float reverbMix   = src_ch->fx()->reverb() / 100.0f;
+    const bool  sandboxOn   = model->getAudioSandboxEnabled() && src_ch->sandboxState().enabled;
+    const SandboxState sbState = src_ch->sandboxState();
+
+    // Phase 1: download the source audio into the scratch dir (auto-wiped at
+    // start/shutdown, so a failed run never leaves junk on disk).
+    const QString pageUrl = s_slotStreamUrl.value(slot);
+    const QString title   = s_slotStreamTitle.value(slot, QObject::tr("youtube_audio"));
+    const QString tmp     = StreamResolver::workDir() + "/"
+                          + safeFileStem(title) + "_export.m4a";
+    runStreamDownload(page, pageUrl, tmp,
+        [page, dst, pitchFactor, speedFactor, reverbMix, sbState, sandboxOn](const QString &file){
+        // Phase 2: the normal DSP bake over the temp copy.
+        auto *exporter = new AudioExporter(file, dst,
+                                           pitchFactor, speedFactor, reverbMix,
+                                           sbState, sandboxOn,
+                                           48000.0, nullptr);
+        auto *progress = new ExportProgressDialog(dst, page);
+        progress->setAttribute(Qt::WA_DeleteOnClose);
+        QObject::connect(exporter, &AudioExporter::progress,
+                         progress, &ExportProgressDialog::setProgress,
+                         Qt::QueuedConnection);
+        QObject::connect(exporter, &AudioExporter::exportFinished, progress,
+                         [progress](bool ok, const QString &err){
+            progress->setFinished(ok, err);
+        }, Qt::QueuedConnection);
+        // Temp source is deleted whatever the outcome.
+        QObject::connect(exporter, &AudioExporter::exportFinished, exporter,
+                         [file](bool, const QString &){ QFile::remove(file); },
+                         Qt::QueuedConnection);
+        QObject::connect(progress, &ExportProgressDialog::cancelRequested,
+                         exporter, [exporter]{ exporter->requestInterruption(); });
+        QObject::connect(exporter, &QThread::finished, exporter, &QObject::deleteLater);
+        QObject::connect(progress, &QDialog::rejected, exporter,
+                         [exporter]{ exporter->requestInterruption(); });
+        progress->show();
+        progress->raise();
+        progress->activateWindow();
+        exporter->start();
+    });
+}
+
 // Slots flagged for a HARD clear on the next onStopPlaying tick. Set
 // by clearRequested handlers (the red X button next to the filename,
 // also future drag-out paths) BEFORE they call sampler->stopPlayback,
@@ -691,6 +836,10 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     w->setMultiChannelInfinity(model->getMultiChannelInfinity());
     w->setShowPauseAllButton  (model->getShowPauseAllButton());
     w->setShowStopAllButton   (model->getShowStopAllButton());
+    w->setShowAddChannelButton(model->getShowAddChannelButton());
+    w->setShowMuteChecks      (model->getShowMuteChecks());
+    w->setShowProfileButtons  (model->getShowProfileButtons());
+    w->setShowGridSizeSelectors(model->getShowGridSizeSelectors());
     w->setVerticalMeter       (model->getVerticalMeter());
     w->setShowSkipButtons     (model->getShowSkipButtons());
     w->setSpectrogramView     (model->getSpectrogramView());
@@ -701,6 +850,7 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     w->setChannelNameLinkDetect(model->getChannelNameLinkDetect());
     w->setStreamAutoplay      (model->getStreamAutoplay());
     w->setStreamQuality       (StreamResolver::preferredQuality());
+    w->setStreamFxGradient    (model->getStreamFxGradient());
     w->setVadWhilePlaying     (model->getVadWhilePlaying());
     w->setDuckWhenTalking     (model->getDuckWhenTalking());
     w->setDuckAmount          (model->getDuckAmountPercent());
@@ -713,6 +863,18 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
         QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
         quint32 mask = st.value(QStringLiteral("sandbox_modules/mask"),
                                 0xFFFFFFFFu).toUInt();
+        // VERSIONED mask: a mask saved before newer DspStages were appended
+        // has ZERO bits for them, which silently hard-disabled every new
+        // module (VoiceFx/autotune, Gate, DynEq, ...) no matter what the
+        // sandbox UI said — THE "the new effects do nothing" bug. Bits for
+        // stages that did not exist when the mask was written default to ON.
+        // mask_stages records the Stage_COUNT at write time; legacy masks
+        // (no key) are assumed to predate the first append wave (14 stages).
+        int maskStages = st.value(QStringLiteral("sandbox_modules/mask_stages"),
+                                  14).toInt();
+        if (maskStages < 1) maskStages = 14;
+        for (int stg = maskStages; stg < SandboxState::Stage_COUNT; ++stg)
+            mask |= (1u << stg);
         mask |= 1u;   // Paulstretch's pipeline slot is structural - keep it on
         for (int stg = 0; stg < SandboxState::Stage_COUNT; ++stg)
             SlotDsp::setGlobalStageEnabled(stg, (mask >> stg) & 1u);
@@ -722,7 +884,11 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     // saved settings right after wiring (no need for user to re-toggle).
     if (page->pauseAllBtn())   page->pauseAllBtn()->setVisible(model->getShowPauseAllButton());
     if (page->stopAllBtn())    page->stopAllBtn ()->setVisible(model->getShowStopAllButton());
-    if (page->addChannelBtn()) page->addChannelBtn()->setVisible(!model->getMultiChannelInfinity());
+    if (page->addChannelBtn()) page->addChannelBtn()->setVisible(
+        model->getShowAddChannelButton() && !model->getMultiChannelInfinity());
+    page->setMuteChecksVisible(model->getShowMuteChecks());
+    page->setProfileButtonsVisible(model->getShowProfileButtons());
+    page->setGridSizeVisible(model->getShowGridSizeSelectors());
     page->setMicFxFeatureVisible(model->getMicFxFeatureEnabled());
     MicFx::instance().setFeatureEnabled(model->getMicFxFeatureEnabled());
     if (sb_getSampler())
@@ -732,6 +898,7 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
         ch->setSkipButtonsVisible(model->getShowSkipButtons());
         ch->waveform()->setSpectrogramView(model->getSpectrogramView());
         ch->setVinylButtonVisible(model->getShowVinylButton());
+        ch->waveform()->setStreamGradientEnabled(model->getStreamFxGradient());
     }
     w->setResetChVolume(model->getResetChVolume());
     w->setResetChFx(model->getResetChFx());
@@ -1055,11 +1222,36 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         model->setShowCropMarkers(v);
         for (auto *ch : page->channels()) ch->waveform()->setShowCropMarkers(v);
     });
+    // Animated played-waveform gradient (all playback, theme-aware).
+    QObject::connect(w, &SettingsWindow::streamFxGradientChanged, [model, page](bool v){
+        model->setStreamFxGradient(v);
+        for (auto *ch : page->channels()) ch->waveform()->setStreamGradientEnabled(v);
+    });
     QObject::connect(w, &SettingsWindow::multiChannelInfinityChanged, [model, page](bool v){
         model->setMultiChannelInfinity(v);
         // "+ Add channel" disappears when infinity mode is on - a
         // manual add is redundant, temp channels spawn automatically.
-        if (page->addChannelBtn()) page->addChannelBtn()->setVisible(!v);
+        // (Also gated on its own toolbar-visibility setting.)
+        if (page->addChannelBtn()) page->addChannelBtn()->setVisible(
+            model->getShowAddChannelButton() && !v);
+    });
+    // Main-toolbar group visibility.
+    QObject::connect(w, &SettingsWindow::showAddChannelButtonChanged, [model, page](bool v){
+        model->setShowAddChannelButton(v);
+        if (page->addChannelBtn()) page->addChannelBtn()->setVisible(
+            v && !model->getMultiChannelInfinity());
+    });
+    QObject::connect(w, &SettingsWindow::showMuteChecksChanged, [model, page](bool v){
+        model->setShowMuteChecks(v);
+        page->setMuteChecksVisible(v);
+    });
+    QObject::connect(w, &SettingsWindow::showProfileButtonsChanged, [model, page](bool v){
+        model->setShowProfileButtons(v);
+        page->setProfileButtonsVisible(v);
+    });
+    QObject::connect(w, &SettingsWindow::showGridSizeSelectorsChanged, [model, page](bool v){
+        model->setShowGridSizeSelectors(v);
+        page->setGridSizeVisible(v);
     });
     QObject::connect(w, &SettingsWindow::showPauseAllButtonChanged, [model, page](bool v){
         model->setShowPauseAllButton(v);
@@ -1127,6 +1319,10 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
         st.setValue(QStringLiteral("sandbox_modules/mask"),
                     SlotDsp::globalStageMask());
+        // Stamp the stage count so a future stage append can tell which
+        // bits this mask actually covers (see the versioned read at init).
+        st.setValue(QStringLiteral("sandbox_modules/mask_stages"),
+                    (int)SandboxState::Stage_COUNT);
         // Open sandbox dialogs pick the change up on their next show
         // (ChannelSandboxDialog::showEvent -> refreshModuleVisibility);
         // the audio-side bypass is instant via the static mask.
@@ -1298,6 +1494,32 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
                     if (entry.contains("name"))
                         ch->setTitle(entry.value("name").toString());
                     ch->applyState(st);
+                    // Stream channel saved in the macro: st.filename is the
+                    // long-expired direct CDN URL. Re-resolve the PAGE url
+                    // through the engine instead and resume at the saved
+                    // position once playback actually starts.
+                    const QString mStreamUrl   = entry.value("streamUrl").toString();
+                    const QString mPlaylistUrl = entry.value("playlistUrl").toString();
+                    if (!mPlaylistUrl.isEmpty())
+                        resolveAndOpenPlaylist(page, sampler, model, i, mPlaylistUrl);
+                    if (!mStreamUrl.isEmpty()) {
+                        const double resumeAt = st.playbackPos;
+                        if (sampler && resumeAt > 1.0) {
+                            auto *once = new QObject(page);
+                            QObject::connect(sampler, &Sampler::onStartPlaying, once,
+                                [sampler, i, resumeAt, once](int startedSlot, bool preview, QString){
+                                    if (preview || startedSlot != i) return;
+                                    sampler->seek(resumeAt, i);
+                                    once->deleteLater();
+                                });
+                            QTimer::singleShot(30000, once, &QObject::deleteLater);
+                        }
+                        loadStreamIntoSlot(page, sampler, model, i, mStreamUrl,
+                                           entry.value("streamGreen").toBool(),
+                                           /*autoPlay*/true,
+                                           /*keepPlaylist*/!mPlaylistUrl.isEmpty());
+                        continue;
+                    }
                     if (!st.filename.isEmpty()) {
                         SoundInfo macroSound;
                         macroSound.filename = st.filename;
@@ -1673,6 +1895,17 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
             QJsonObject entry;
             entry["name"]  = ch->title();
             entry["state"] = QJsonDocument::fromJson(st.toJson()).object();
+            // Live network stream: the state's filename is the DIRECT CDN
+            // URL, which expires within hours and carries no HTTP headers —
+            // replaying it as a plain file (the old behaviour) broke the
+            // macro. Persist the PAGE url + title and re-resolve at fire.
+            if (s_slotStreamUrl.contains(i)) {
+                entry["streamUrl"]   = s_slotStreamUrl.value(i);
+                entry["streamTitle"] = s_slotStreamTitle.value(i);
+                entry["streamGreen"] = ch->showingStreamLink();
+            }
+            if (s_slotPlaylistUrl.contains(i))
+                entry["playlistUrl"] = s_slotPlaylistUrl.value(i);
             arr.append(entry);
         }
         s.macroState = QJsonDocument(arr).toJson(QJsonDocument::Compact);
@@ -2357,6 +2590,12 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             auto *ch = page->channels().at(slot);
             // s_slotStreamTitle was populated at load; consume the loading flag.
             s_slotStreamLoading.remove(slot);
+            // Audio is actually flowing: hide the "Opening audio stream…"
+            // marquee and release a stale seek-pending cursor lock from the
+            // previous content (a network seek whose commit was discarded
+            // mid-rotation would otherwise freeze the cursor forever).
+            ch->setStreamLoading(false);
+            ch->setProperty("pendingSeekActive", false);
             const bool isStream = s_slotStreamTitle.contains(slot);
             const bool isLive   = s_slotStreamLive.contains(slot);
             if (isLive) {
@@ -3606,7 +3845,7 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         auto failActive = std::make_shared<QVector<bool>>();
         auto *posTimer = new QTimer(page);
         posTimer->setInterval(33);
-        QObject::connect(posTimer, &QTimer::timeout, page, [page, sampler, wasActive, bufActive, failActive]{
+        QObject::connect(posTimer, &QTimer::timeout, page, [page, sampler, model, wasActive, bufActive, failActive]{
             // Skip entire iteration when the GUI is hidden OR nothing
             // is playing - both are user-visible criteria for "no work
             // needed". Without the anyPlaying gate the timer kept
@@ -3626,6 +3865,9 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 if (!active) {
                     if ((*bufActive)[i]) { (*bufActive)[i] = false; ch->setStreamLoading(false); }
                     (*failActive)[i] = false;
+                    // A silent slot has no in-flight seek: drop a stale
+                    // cursor lock so the next playback's cursor moves.
+                    ch->setProperty("pendingSeekActive", false);
                     if ((*wasActive)[i]) {
                         // Replay UX: KEEP the waveform / filename / time
                         // label after the playing -> silent transition.
@@ -3647,16 +3889,52 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 bool buffering = sampler->getSlotNetBuffering(i);
                 if (buffering != (*bufActive)[i]) {
                     (*bufActive)[i] = buffering;
+                    if (buffering)
+                        ch->setStreamLoadingText(QObject::tr("Buffering stream…"));
                     ch->setStreamLoading(buffering);
                 }
-                // Network stall unrecoverable at the seek target: show a
-                // transient "network error" toast once (rising edge). The
-                // decoder itself falls back to restarting from the beginning.
+                // Network stall the decoder could not recover on its own
+                // (in-place reopen + restart-and-scan both exhausted). Before
+                // showing an error, try ONE automatic reconnect per minute:
+                // re-resolve the page URL through the streaming engine (the
+                // direct CDN URL may simply have expired) and resume at the
+                // position where playback died. The error toast is reserved
+                // for the case where even that fails — so the user only ever
+                // sees an error when something is genuinely broken.
                 bool failed = sampler->getSlotNetFailed(i);
                 if (failed && !(*failActive)[i]) {
-                    showStreamErrorBubble(ch, QObject::tr(
-                        "Network error — this stream could not be played. "
-                        "Try again in a moment."));
+                    const QString pageUrl = s_slotStreamUrl.value(i);
+                    const bool hasPlaylist = !s_slotPlaylistPanel.value(i).isNull();
+                    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+                    if (!pageUrl.isEmpty() && !hasPlaylist
+                        && nowMs - s_slotNetRetryMs.value(i, 0) > 60000) {
+                        s_slotNetRetryMs[i] = nowMs;
+                        const double resumePos = sampler->getPosition(i);
+                        StreamResolver::instance().invalidate(pageUrl);
+                        // One-shot: once the reconnected stream actually
+                        // starts, jump back to where playback died.
+                        auto *once = new QObject(page);
+                        QObject::connect(sampler, &Sampler::onStartPlaying, once,
+                            [sampler, i, resumePos, once](int startedSlot, bool preview, QString){
+                                if (preview || startedSlot != i) return;
+                                if (resumePos > 3.0) sampler->seek(resumePos, i);
+                                once->deleteLater();
+                            });
+                        // Safety GC: if the reconnect never starts (resolve
+                        // failed → toast already shown), drop the hook.
+                        QTimer::singleShot(30000, once, &QObject::deleteLater);
+                        loadStreamIntoSlot(page, sampler, model, i, pageUrl,
+                                           ch->showingStreamLink(), /*autoPlay*/true,
+                                           /*keepPlaylist*/true, /*isAutoRetry*/true);
+                    } else {
+                        // Genuinely broken (reconnect budget exhausted, or a
+                        // playlist slot — there the autoplay advance is the
+                        // recovery and a reconnect would race it into a
+                        // double load): surface the error.
+                        showStreamErrorBubble(ch, QObject::tr(
+                            "Network error — this stream could not be played. "
+                            "Try again in a moment."));
+                    }
                 }
                 (*failActive)[i] = failed;
                 // Skip the cursor refresh while a debounced seek is
@@ -3790,6 +4068,11 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 rch->applyState(cur);
             }
         });
+        // Dedicated "Save audio" button on stream channels (separate from the
+        // DSP "Export audio" — see startStreamDownloadFlow).
+        QObject::connect(ch, &Channel::downloadRequested, page, [page](int slot){
+            startStreamDownloadFlow(page, slot);
+        });
         QObject::connect(ch, &Channel::exportRequested, page, [page, model](int slot){
             // slot here is Channel::m_id which equals the channel's
             // index in MainPage::channels() so long as channels are
@@ -3798,33 +4081,12 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
             // between click + slot-dispatch.
             auto *src_ch = page->channelAt(slot);
             if (!src_ch) return;
-            // Stream channel: the "filename" is a video title, not a real file.
-            // Download the YouTube audio straight to disk (full quality, via the
-            // engine) instead of baking the streamed playback. Live streams have
-            // no end, so they can only be SAVED AS A LINK, never to a file.
+            // Stream channel: "Export audio" is a TRUE DSP bake here too —
+            // download the source to a temp copy, then encode it through the
+            // channel's fx + sandbox chain (startStreamExportFlow). "Save
+            // audio" (the green button) remains the plain source download.
             if (s_slotStreamUrl.contains(slot)) {
-                if (s_slotStreamLive.contains(slot)) {
-                    QMessageBox::information(page, QObject::tr("Export"),
-                        QObject::tr("This is a live stream — it can only be saved as a link, not to a file."));
-                    return;
-                }
-                const QString pageUrl = s_slotStreamUrl.value(slot);
-                const QString title   = s_slotStreamTitle.value(slot, QObject::tr("youtube_audio"));
-                QString dir = QFileDialog::getExistingDirectory(page,
-                    QObject::tr("Choose destination folder"));
-                if (dir.isEmpty()) return;
-                const QString dest = QDir(dir).filePath(safeFileStem(title) + ".m4a");
-                runStreamDownload(page, pageUrl, dest, [page, title](const QString &file){
-                    // Offer to also bind the saved file to a soundboard button.
-                    if (QMessageBox::question(page, QObject::tr("Save to a button"),
-                            QObject::tr("Audio saved.\n\nAlso assign it to a soundboard button? "
-                                        "Click Yes, then click the cell where you want it."))
-                        == QMessageBox::Yes) {
-                        s_pendingAssignFile  = file;
-                        s_pendingAssignTitle = title;
-                        showInfoToast(page, QObject::tr("Click a soundboard cell to save the audio there."));
-                    }
-                });
+                startStreamExportFlow(page, model, slot);
                 return;
             }
             QString src = src_ch->waveform()->filename();
@@ -3916,6 +4178,7 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         ch->setExportVisible(model->getAudioExportEnabled());
         ch->waveform()->setAdaptToFx(model->getAdaptWaveformToFx());
         ch->waveform()->setShowCropMarkers(model->getShowCropMarkers());
+        ch->waveform()->setStreamGradientEnabled(model->getStreamFxGradient());
         if (model->getAdaptWaveformToFx()) {
             ch->waveform()->setSandboxState(ch->sandboxState());
             // Seed the live FxPanel state too so the waveform reflects

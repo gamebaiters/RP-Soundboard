@@ -9,6 +9,7 @@
 
 
 #include <QPainter>
+#include <QLinearGradient>
 #include "AudioUtils.h"
 #include <QTimer>
 #include <QMouseEvent>
@@ -123,15 +124,67 @@ void SoundView::paintEvent(QPaintEvent *evt)
 		if (posX > cursorMaxX) posX = cursorMaxX;
 		if (posX < cursorMinX) posX = cursorMinX;
 		painter.setPen(Qt::NoPen);
-		painter.setBrush(playedTint);
+		QRect tintRect;
 		if (m_reverse) {
 			int x1 = std::min(width() - 2, cursorMaxX);
 			if (x1 > posX)
-				painter.drawRect(posX, 1, x1 - posX, height() - 2);
+				tintRect = QRect(posX, 1, x1 - posX, height() - 2);
 		} else {
 			int x0 = std::max(1, cursorMinX);
 			if (posX > x0)
-				painter.drawRect(x0, 1, posX - x0, height() - 2);
+				tintRect = QRect(x0, 1, posX - x0, height() - 2);
+		}
+		if (!tintRect.isNull()) {
+			if (m_streamGradientEnabled) {
+				// Animated colour flow on the played portion — ALL
+				// playback, not just streams (user request). Phase from
+				// the wall clock; the 30 Hz position poll repaints
+				// during playback so no extra timer is needed (paused =
+				// static gradient, fine).
+				//
+				// THEME-AWARE: with a custom theme active the gradient
+				// runs between the theme's accent and waveform colours
+				// (spread apart if the user picked near-identical ones),
+				// so it never clashes with the palette. Default theme
+				// keeps the azure→violet look. RGB lerp only — no HSL
+				// math, so the Qt h=-1 grey trap can't bite.
+				if (!m_gradClock.isValid()) m_gradClock.start();
+				const double ph = 0.5 + 0.5
+					* std::sin((double)m_gradClock.elapsed() * 0.0012);
+				const int alpha = playedTint.alpha();
+				QColor cA(0x3f, 0xa7, 0xff, alpha);   // azure  (default)
+				QColor cB(0x8a, 0x5c, 0xf6, alpha);   // violet (default)
+				{
+					Theme::Colors tc = Theme::colors();
+					if (tc.enabled) {
+						cA = tc.accent;
+						cB = tc.waveform;
+						// Near-identical picks would make the gradient
+						// invisible — push the second stop brighter.
+						const int dr = cA.red()   - cB.red();
+						const int dg = cA.green() - cB.green();
+						const int db = cA.blue()  - cB.blue();
+						if (dr * dr + dg * dg + db * db < 48 * 48)
+							cB = cB.lighter(160);
+						cA.setAlpha(alpha);
+						cB.setAlpha(alpha);
+					}
+				}
+				auto mix = [](const QColor &x, const QColor &y, double t){
+					return QColor(
+						x.red()   + int((y.red()   - x.red())   * t),
+						x.green() + int((y.green() - x.green()) * t),
+						x.blue()  + int((y.blue()  - x.blue())  * t),
+						x.alpha());
+				};
+				QLinearGradient g(tintRect.left(), 0, tintRect.right(), 0);
+				g.setColorAt(0.0, mix(cA, cB, ph));
+				g.setColorAt(1.0, mix(cB, cA, ph));
+				painter.setBrush(g);
+			} else {
+				painter.setBrush(playedTint);
+			}
+			painter.drawRect(tintRect);
 		}
 	}
 
@@ -617,6 +670,14 @@ void SoundView::setShowCropMarkers(bool on)
 	if (m_showCropMarkers == on)
 		return;
 	m_showCropMarkers = on;
+	update();
+}
+
+void SoundView::setStreamGradientEnabled(bool on)
+{
+	if (m_streamGradientEnabled == on)
+		return;
+	m_streamGradientEnabled = on;
 	update();
 }
 

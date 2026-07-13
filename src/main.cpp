@@ -410,6 +410,12 @@ CAPI void sb_init()
 
 	InitFFmpegLibrary();
 
+	// Disarm the global network-I/O abort: TS3 can disable + re-enable the
+	// plugin in the same process, and sb_kill leaves the flag armed. Without
+	// this, every network open/read after a plugin re-enable would abort
+	// instantly and streaming would be silently dead until a client restart.
+	InputFileNet::setShutdownAbort(false);
+
 	// Wipe any leftover stream scratch files from a previous session BEFORE
 	// anything runs — a 10-hour video must never accumulate on disk.
 	StreamResolver::cleanTempDir();
@@ -494,6 +500,14 @@ CAPI void sb_saveConfig()
 
 CAPI void sb_kill()
 {
+	// Arm the global FFmpeg network-I/O abort FIRST: any producer / seek /
+	// export worker blocked inside a network open/read (rw_timeout is 15 s)
+	// returns within milliseconds, so every bounded thread join below
+	// actually succeeds instead of escalating to TerminateThread — which
+	// could kill a worker mid-heap-alloc / mid-SSL-handshake and produce
+	// the intermittent "TeamSpeak crashed" dialog on a normal close.
+	InputFileNet::setShutdownAbort(true);
+
 	// Flush any debounced config write so the last slider position the
 	// user set in the seconds before quit is persisted. writeConfig()
 	// schedules on a 250 ms timer; without this flush, fast-close TS3

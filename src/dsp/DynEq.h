@@ -56,6 +56,11 @@ private:
     float m_lastGainDb[kNumBands]  = {0};
     float m_attackCoeff[kNumBands] = {0};
     float m_releaseCoeff[kNumBands]= {0};
+    // Control-rate divider for updateBandGain. Per-instance: the old
+    // function-local static was shared across every DynEq instance AND
+    // every band (and raced across audio threads), so the update cadence
+    // per band was erratic under multi-channel load.
+    int   m_updateCounter          = 0;
 
     void recomputeBand(int b);
     void updateBandGain(int b);

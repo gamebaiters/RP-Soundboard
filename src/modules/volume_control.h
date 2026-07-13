@@ -38,10 +38,15 @@ private slots:
 private:
     void applyLinkDelta(QSlider *driver, QSlider *follower, int newValue);
 
+    void refreshTooltips();
+
     QSlider     *m_local;
     QSlider     *m_remote;
     QLabel      *m_localLabel;
     QLabel      *m_remoteLabel;
+    QLabel      *m_capLocal  = nullptr;   // "Local" caption (hidden in compact)
+    QLabel      *m_capRemote = nullptr;   // "Remote" caption
+    QWidget     *m_help      = nullptr;   // help bubble (hidden in compact)
     QToolButton *m_link;
     int          m_linkDelta; // remote - local at link time
     bool         m_internalSync; // re-entrancy guard

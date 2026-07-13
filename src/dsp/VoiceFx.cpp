@@ -197,9 +197,17 @@ float VoiceFx::detectPitch() {
     for (int i = 0; i < W; ++i) energy += frame[i] * frame[i];
     if (energy < 1e-4f) return -1.0f;    // silence
 
-    const int minLag = static_cast<int>(m_fs / 500.0);   // <= 500 Hz
-    const int maxLag = std::min(W / 2, static_cast<int>(m_fs / 70.0)); // >= 70 Hz
+    // 60..800 Hz covers deep male voice up to sung female vocals (the old
+    // 70..500 window missed a lot of real singing, which read as "autotune
+    // does nothing" on music).
+    const int minLag = static_cast<int>(m_fs / 800.0);
+    const int maxLag = std::min(W / 2, static_cast<int>(m_fs / 60.0));
     if (maxLag <= minLag) return -1.0f;
+
+    // Store the whole correlation curve so the octave guard below can
+    // compare corr(lag/2) against the global peak.
+    static thread_local std::vector<float> corr;
+    corr.assign(static_cast<size_t>(maxLag + 1), 0.0f);
 
     float bestCorr = 0.0f;
     int   bestLag = -1;
@@ -210,9 +218,20 @@ float VoiceFx::detectPitch() {
             norm += frame[i] * frame[i] + frame[i + lag] * frame[i + lag];
         }
         float c = (norm > 1e-9f) ? (2.0f * sum / norm) : 0.0f;
+        corr[lag] = c;
         if (c > bestCorr) { bestCorr = c; bestLag = lag; }
     }
-    if (bestLag < 0 || bestCorr < 0.45f) return -1.0f;   // unvoiced
+    // 0.30 (was 0.45): voiced-but-breathy material and vocals mixed over
+    // instruments rarely reach 0.45 normalized correlation, so the tuner
+    // spent most of the time "unvoiced" = inaudible.
+    if (bestLag < 0 || bestCorr < 0.30f) return -1.0f;   // unvoiced
+    // Octave-down error guard: for a periodic signal the autocorrelation
+    // peaks at every multiple of the period, and the global max often
+    // lands on 2x the true period (an octave LOW). If half the winning
+    // lag is nearly as strong, the true pitch is the higher octave.
+    int half = bestLag / 2;
+    if (half >= minLag && corr[half] >= 0.90f * bestCorr)
+        bestLag = half;
     return static_cast<float>(m_fs / bestLag);
 }
 
@@ -591,9 +610,12 @@ void VoiceFx::processRevDelay(float &l, float &r) {
 
 void VoiceFx::processShimmer(float &l, float &r) {
     auto allpass = [](std::vector<float> &buf, int &w, float x) -> float {
+        // Canonical Schroeder allpass: out = -g*x + v; buf = x + g*v.
+        // (The previous -x + v form was not unity-magnitude and coloured
+        // the diffusion slightly.)
         constexpr float g = 0.55f;
         float v = buf[w];
-        float out = -x + v;
+        float out = -g * x + v;
         buf[w] = x + v * g;
         if (++w >= static_cast<int>(buf.size())) w = 0;
         return out;

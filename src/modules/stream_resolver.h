@@ -63,6 +63,12 @@ public:
 	// expired. Never blocks, never spawns.
 	ResolvedStream cached(const QString &pageUrl) const;
 
+	// Drop the cached entry for pageUrl so the next resolve() spawns a FRESH
+	// yt-dlp run. Used by the automatic stream-reconnect path: a direct URL
+	// can die before its TTL (IP change, CDN throttle, expiry), and resuming
+	// through the stale cache would just fail again.
+	void invalidate(const QString &pageUrl);
+
 	// Stable cache key: the YouTube video id (watch?v=, youtu.be/, /shorts/,
 	// /embed/) or, for anything else, the whole URL.
 	static QString videoKey(const QString &pageUrl);

@@ -64,6 +64,12 @@ public:
     // Indeterminate "resolving link…" indicator: a thin marquee bar shown under
     // the title row while StreamResolver is working, hidden on resolved/failed.
     void            setStreamLoading(bool on);
+    // Stage text shown next to the marquee ("Fetching video info…", "Opening
+    // audio stream…", "Buffering…") so the user sees WHAT is happening right
+    // now, not just that something is. Resets to the generic "Loading link…"
+    // whenever the marquee is hidden, so a stale stage never leaks into the
+    // next load.
+    void            setStreamLoadingText(const QString &text);
     // Show / hide the "reopen playlist" button (a playlist was loaded here).
     void            setPlaylistAvailable(bool on);
     // One-time discovery hint above the channel name pointing at the paste-a-
@@ -151,6 +157,9 @@ signals:
     void sandboxStateChanged(int channelId, const SandboxState &s);
     void sandboxResetRequested(int channelId);
     void exportRequested(int channelId);
+    // Dedicated "Save audio" (stream download) button — separate from the
+    // DSP "Export audio" action, which does not apply to streams.
+    void downloadRequested(int channelId);
 
 protected:
     void dragEnterEvent(class QDragEnterEvent *e) override;
@@ -187,6 +196,7 @@ private:
     class QFrame   *m_frame = nullptr;
     QWidget            *m_loadingBar = nullptr;   // custom marquee while resolving
     QWidget            *m_loadingRow = nullptr;    // marquee + cancel row
+    class QLabel       *m_loadingText = nullptr;   // stage text ("Opening stream…")
     class QToolButton  *m_loadCancelBtn = nullptr;
     class QToolButton  *m_playlistBtn = nullptr;   // reopen playlist panel
     QWidget            *m_discoveryBubble = nullptr;  // one-time YT hint card
@@ -198,6 +208,7 @@ private:
     ChannelMeter                 *m_meter = nullptr;
     ChannelSandboxDialog         *m_sandboxDialog = nullptr;
     QPushButton                  *m_exportBtn = nullptr;
+    QPushButton                  *m_downloadBtn = nullptr;  // stream "Save audio"
     bool                          m_sandboxFeatureEnabled = true;
     bool                          m_exportVisibleSetting = false;
     bool                          m_exportIsDownload = false;

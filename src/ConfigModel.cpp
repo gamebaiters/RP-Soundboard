@@ -129,6 +129,10 @@ ConfigModel::ConfigModel()
 	m_multiChannelInfinity = false;
 	m_showPauseAllButton = true;
 	m_showStopAllButton = true;
+	m_showAddChannelButton = true;
+	m_showMuteChecks = true;
+	m_showProfileButtons = true;
+	m_showGridSizeSelectors = true;
 	m_verticalMeter = false;
 	m_showSkipButtons = true;
 	m_spectrogramView = false;
@@ -137,6 +141,7 @@ ConfigModel::ConfigModel()
 	m_streamingEnabled = true;
 	m_channelNameLinkDetect = true;
 	m_streamAutoplay = false;
+	m_streamFxGradient = true;
 	m_loudnessNormalize = false;
 
 	m_resetChVolume = true;
@@ -220,6 +225,10 @@ void ConfigModel::readConfig(const QString &file)
 	m_multiChannelInfinity= settings.value("multi_channel_infinity", false).toBool();
 	m_showPauseAllButton  = settings.value("show_pause_all_button", true).toBool();
 	m_showStopAllButton   = settings.value("show_stop_all_button",  true).toBool();
+	m_showAddChannelButton  = settings.value("show_add_channel_button",   true).toBool();
+	m_showMuteChecks        = settings.value("show_mute_checks",          true).toBool();
+	m_showProfileButtons    = settings.value("show_profile_buttons",      true).toBool();
+	m_showGridSizeSelectors = settings.value("show_grid_size_selectors",  true).toBool();
 	m_verticalMeter       = settings.value("vertical_meter",        false).toBool();
 	m_showSkipButtons     = settings.value("show_skip_buttons",     true).toBool();
 	m_spectrogramView     = settings.value("spectrogram_view",      false).toBool();
@@ -228,6 +237,7 @@ void ConfigModel::readConfig(const QString &file)
 	m_streamingEnabled      = settings.value("streaming_enabled",         true).toBool();
 	m_channelNameLinkDetect = settings.value("channel_name_link_detect",  true).toBool();
 	m_streamAutoplay        = settings.value("stream_autoplay",           false).toBool();
+	m_streamFxGradient      = settings.value("stream_fx_gradient",        true).toBool();
 	m_vadWhilePlaying       = settings.value("vad_while_playing",         false).toBool();
 	m_duckWhenTalking       = settings.value("duck_when_talking",         false).toBool();
 	m_duckAmountPercent     = settings.value("duck_amount_percent",       40).toInt();
@@ -330,6 +340,10 @@ void ConfigModel::writeConfigImmediate(const QString &file)
 	settings.setValue("multi_channel_infinity", m_multiChannelInfinity);
 	settings.setValue("show_pause_all_button", m_showPauseAllButton);
 	settings.setValue("show_stop_all_button",  m_showStopAllButton);
+	settings.setValue("show_add_channel_button",  m_showAddChannelButton);
+	settings.setValue("show_mute_checks",         m_showMuteChecks);
+	settings.setValue("show_profile_buttons",     m_showProfileButtons);
+	settings.setValue("show_grid_size_selectors", m_showGridSizeSelectors);
 	settings.setValue("vertical_meter",        m_verticalMeter);
 	settings.setValue("show_skip_buttons",     m_showSkipButtons);
 	settings.setValue("spectrogram_view",      m_spectrogramView);
@@ -338,6 +352,7 @@ void ConfigModel::writeConfigImmediate(const QString &file)
 	settings.setValue("streaming_enabled",         m_streamingEnabled);
 	settings.setValue("channel_name_link_detect",  m_channelNameLinkDetect);
 	settings.setValue("stream_autoplay",           m_streamAutoplay);
+	settings.setValue("stream_fx_gradient",        m_streamFxGradient);
 	settings.setValue("vad_while_playing",         m_vadWhilePlaying);
 	settings.setValue("duck_when_talking",         m_duckWhenTalking);
 	settings.setValue("duck_amount_percent",       m_duckAmountPercent);
@@ -933,6 +948,10 @@ void ConfigModel::setShowCropMarkers(bool on)
 void ConfigModel::setMultiChannelInfinity(bool on) { m_multiChannelInfinity = on; writeConfig(); }
 void ConfigModel::setShowPauseAllButton(bool on)   { m_showPauseAllButton   = on; writeConfig(); }
 void ConfigModel::setShowStopAllButton(bool on)    { m_showStopAllButton    = on; writeConfig(); }
+void ConfigModel::setShowAddChannelButton(bool on) { m_showAddChannelButton = on; writeConfig(); }
+void ConfigModel::setShowMuteChecks(bool on)       { m_showMuteChecks       = on; writeConfig(); }
+void ConfigModel::setShowProfileButtons(bool on)   { m_showProfileButtons   = on; writeConfig(); }
+void ConfigModel::setShowGridSizeSelectors(bool on){ m_showGridSizeSelectors= on; writeConfig(); }
 void ConfigModel::setVerticalMeter(bool on)        { m_verticalMeter        = on; writeConfig(); }
 void ConfigModel::setShowSkipButtons(bool on)      { m_showSkipButtons      = on; writeConfig(); }
 void ConfigModel::setSpectrogramView(bool on)      { m_spectrogramView      = on; writeConfig(); }
@@ -941,6 +960,7 @@ void ConfigModel::setMicFxFeatureEnabled(bool on)  { m_micFxFeatureEnabled  = on
 void ConfigModel::setStreamingEnabled(bool on)        { m_streamingEnabled       = on; writeConfig(); }
 void ConfigModel::setChannelNameLinkDetect(bool on)   { m_channelNameLinkDetect  = on; writeConfig(); }
 void ConfigModel::setStreamAutoplay(bool on)          { m_streamAutoplay         = on; writeConfig(); }
+void ConfigModel::setStreamFxGradient(bool on)        { m_streamFxGradient       = on; writeConfig(); }
 void ConfigModel::setVadWhilePlaying(bool on)         { m_vadWhilePlaying        = on; writeConfig(); }
 void ConfigModel::setDuckWhenTalking(bool on)         { m_duckWhenTalking        = on; writeConfig(); }
 void ConfigModel::setDuckAmountPercent(int pct)       { m_duckAmountPercent      = pct; writeConfig(); }

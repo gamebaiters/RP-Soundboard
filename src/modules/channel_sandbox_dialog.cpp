@@ -2728,10 +2728,19 @@ void ChannelSandboxDialog::buildUi()
     });
 
     // ---- Voice FX wiring ----
+    // Enabling a SUB while the macro master is off was the classic "autotune
+    // does nothing" trap: SlotDsp gates the whole stage on vfxEnabled, so the
+    // sub checkbox looked broken. Auto-raise the master with the first sub.
+    auto vfxAutoMaster = [this](bool subOn){
+        if (!subOn || m_state.vfxEnabled) return;
+        m_state.vfxEnabled = true;
+        if (m_vfxEnable) { QSignalBlocker b(m_vfxEnable); m_vfxEnable->setChecked(true); }
+    };
     if (m_vfxEnable) connect(m_vfxEnable, &QCheckBox::toggled, this, [this](bool on){
         m_state.vfxEnabled = on; pushChange();
     });
-    if (m_vfxTuneEnable) connect(m_vfxTuneEnable, &QCheckBox::toggled, this, [this](bool on){
+    if (m_vfxTuneEnable) connect(m_vfxTuneEnable, &QCheckBox::toggled, this, [this, vfxAutoMaster](bool on){
+        vfxAutoMaster(on);
         m_state.vfxTuneEnabled = on; pushChange();
     });
     if (m_vfxTuneStrength) connect(m_vfxTuneStrength, &QSlider::valueChanged, this, [this](int v){
@@ -2749,7 +2758,8 @@ void ChannelSandboxDialog::buildUi()
     if (m_vfxTuneKey) connect(m_vfxTuneKey, qOverload<int>(&QComboBox::currentIndexChanged),
         this, [this](int v){ m_state.vfxTuneKey = v; pushChange(); });
 
-    if (m_vfxVocEnable) connect(m_vfxVocEnable, &QCheckBox::toggled, this, [this](bool on){
+    if (m_vfxVocEnable) connect(m_vfxVocEnable, &QCheckBox::toggled, this, [this, vfxAutoMaster](bool on){
+        vfxAutoMaster(on);
         m_state.vfxVocEnabled = on; pushChange();
     });
     if (m_vfxVocCarrier) connect(m_vfxVocCarrier, qOverload<int>(&QComboBox::currentIndexChanged),
@@ -2765,7 +2775,8 @@ void ChannelSandboxDialog::buildUi()
         pushChange();
     });
 
-    if (m_vfxRingEnable) connect(m_vfxRingEnable, &QCheckBox::toggled, this, [this](bool on){
+    if (m_vfxRingEnable) connect(m_vfxRingEnable, &QCheckBox::toggled, this, [this, vfxAutoMaster](bool on){
+        vfxAutoMaster(on);
         m_state.vfxRingEnabled = on; pushChange();
     });
     if (m_vfxRingFreq) connect(m_vfxRingFreq, &QSlider::valueChanged, this, [this](int v){
@@ -2779,7 +2790,8 @@ void ChannelSandboxDialog::buildUi()
         pushChange();
     });
 
-    if (m_vfxTremEnable) connect(m_vfxTremEnable, &QCheckBox::toggled, this, [this](bool on){
+    if (m_vfxTremEnable) connect(m_vfxTremEnable, &QCheckBox::toggled, this, [this, vfxAutoMaster](bool on){
+        vfxAutoMaster(on);
         m_state.vfxTremEnabled = on; pushChange();
     });
     if (m_vfxTremRate) connect(m_vfxTremRate, &QSlider::valueChanged, this, [this](int v){
@@ -2795,7 +2807,8 @@ void ChannelSandboxDialog::buildUi()
     if (m_vfxTremShape) connect(m_vfxTremShape, qOverload<int>(&QComboBox::currentIndexChanged),
         this, [this](int v){ m_state.vfxTremShape = v; pushChange(); });
 
-    if (m_vfxVibEnable) connect(m_vfxVibEnable, &QCheckBox::toggled, this, [this](bool on){
+    if (m_vfxVibEnable) connect(m_vfxVibEnable, &QCheckBox::toggled, this, [this, vfxAutoMaster](bool on){
+        vfxAutoMaster(on);
         m_state.vfxVibEnabled = on; pushChange();
     });
     if (m_vfxVibRate) connect(m_vfxVibRate, &QSlider::valueChanged, this, [this](int v){
@@ -2809,7 +2822,8 @@ void ChannelSandboxDialog::buildUi()
         pushChange();
     });
 
-    if (m_vfxWahEnable) connect(m_vfxWahEnable, &QCheckBox::toggled, this, [this](bool on){
+    if (m_vfxWahEnable) connect(m_vfxWahEnable, &QCheckBox::toggled, this, [this, vfxAutoMaster](bool on){
+        vfxAutoMaster(on);
         m_state.vfxWahEnabled = on; pushChange();
     });
     if (m_vfxWahSens) connect(m_vfxWahSens, &QSlider::valueChanged, this, [this](int v){
@@ -2838,7 +2852,8 @@ void ChannelSandboxDialog::buildUi()
         pushChange();
     });
 
-    if (m_vfxFormEnable) connect(m_vfxFormEnable, &QCheckBox::toggled, this, [this](bool on){
+    if (m_vfxFormEnable) connect(m_vfxFormEnable, &QCheckBox::toggled, this, [this, vfxAutoMaster](bool on){
+        vfxAutoMaster(on);
         m_state.vfxFormEnabled = on; pushChange();
     });
     if (m_vfxFormShift) connect(m_vfxFormShift, &QSlider::valueChanged, this, [this](int v){
@@ -2852,7 +2867,8 @@ void ChannelSandboxDialog::buildUi()
         pushChange();
     });
 
-    if (m_vfxExcEnable) connect(m_vfxExcEnable, &QCheckBox::toggled, this, [this](bool on){
+    if (m_vfxExcEnable) connect(m_vfxExcEnable, &QCheckBox::toggled, this, [this, vfxAutoMaster](bool on){
+        vfxAutoMaster(on);
         m_state.vfxExcEnabled = on; pushChange();
     });
     if (m_vfxExcFreq) connect(m_vfxExcFreq, &QSlider::valueChanged, this, [this](int v){
@@ -2871,7 +2887,8 @@ void ChannelSandboxDialog::buildUi()
         pushChange();
     });
 
-    if (m_vfxRevEnable) connect(m_vfxRevEnable, &QCheckBox::toggled, this, [this](bool on){
+    if (m_vfxRevEnable) connect(m_vfxRevEnable, &QCheckBox::toggled, this, [this, vfxAutoMaster](bool on){
+        vfxAutoMaster(on);
         m_state.vfxRevEnabled = on; pushChange();
     });
     if (m_vfxRevTime) connect(m_vfxRevTime, &QSlider::valueChanged, this, [this](int v){
@@ -2890,7 +2907,8 @@ void ChannelSandboxDialog::buildUi()
         pushChange();
     });
 
-    if (m_vfxShimEnable) connect(m_vfxShimEnable, &QCheckBox::toggled, this, [this](bool on){
+    if (m_vfxShimEnable) connect(m_vfxShimEnable, &QCheckBox::toggled, this, [this, vfxAutoMaster](bool on){
+        vfxAutoMaster(on);
         m_state.vfxShimEnabled = on; pushChange();
     });
     if (m_vfxShimMix) connect(m_vfxShimMix, &QSlider::valueChanged, this, [this](int v){

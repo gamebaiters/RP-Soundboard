@@ -22,6 +22,7 @@ extern const QString &getButtonMime();
 #include <QProgressBar>
 #include <QToolButton>
 #include <QTimer>
+#include <QSettings>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
@@ -74,6 +75,13 @@ private:
     QTimer *m_timer;
     double  m_phase = 0.0;
 };
+
+#include <cmath>
+#include <algorithm>
+
+// (The v-next "glow" halo + "mini-EQ bars" stream effects that lived here
+// were removed on user feedback — the WEB/LIVE badge on the title plus the
+// animated waveform gradient are the stream affordances that stayed.)
 
 // A tiny painted "list" icon (three lines) for the reopen-playlist button —
 // drawn instead of a Unicode glyph so it renders identically on every host /
@@ -222,6 +230,31 @@ Channel::Channel(int channelId, QWidget *parent)
     m_exportBtn->setVisible(false);
     connect(m_exportBtn, &QPushButton::clicked, this, [this]{ emit exportRequested(m_id); });
 
+    // Dedicated "Save audio" button for STREAM channels (green download
+    // pill). Separate from "Export audio": saving the source audio of a
+    // stream and baking a local file's DSP are different actions, and the
+    // DSP export does not apply to streams at all.
+    m_downloadBtn = new QPushButton(
+        QString::fromUtf8("\xE2\xAC\x87") + QStringLiteral("  ") + tr("Save audio"), this);
+    m_downloadBtn->setFixedHeight(22);
+    m_downloadBtn->setMinimumWidth(104);
+    m_downloadBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    m_downloadBtn->setToolTip(tr("Download this video's audio to a file"));
+    m_downloadBtn->setCursor(Qt::PointingHandCursor);
+    m_downloadBtn->setStyleSheet(
+        "QPushButton {"
+        "  padding: 3px 14px; color: #ffffff; border: none; border-radius: 11px;"
+        "  font-weight: bold; letter-spacing: 0.3px;"
+        "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+        "               stop:0 #35c169, stop:1 #1f9a4d);"
+        "}"
+        "QPushButton:hover {"
+        "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+        "               stop:0 #43d179, stop:1 #23ab56); }"
+        "QPushButton:pressed { background: #178a41; padding-top: 4px; }");
+    m_downloadBtn->setVisible(false);
+    connect(m_downloadBtn, &QPushButton::clicked, this, [this]{ emit downloadRequested(m_id); });
+
     m_sandboxEnableCheck = new QCheckBox(tr("Audio Sandbox"), this);
     m_sandboxEnableCheck->setToolTip(tr(
         "Enable the Audio Sandbox on this channel (EQ, spatial audio, "
@@ -249,10 +282,15 @@ Channel::Channel(int channelId, QWidget *parent)
     m_playlistBtn = new QToolButton(this);
     m_playlistBtn->setIcon(makeListIcon());     // painted, not a font glyph
     m_playlistBtn->setIconSize(QSize(16, 16));
+    // Icon + the word "Playlist" so its purpose is obvious at a glance —
+    // the bare ☰ glyph read as a generic menu, not the playlist reopener.
+    m_playlistBtn->setText(tr("Playlist"));
+    m_playlistBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     m_playlistBtn->setToolTip(tr("Show playlist"));
     m_playlistBtn->setAutoRaise(true);
     m_playlistBtn->setVisible(false);
     titleRow->addWidget(m_playlistBtn, 0, Qt::AlignVCenter);
+    titleRow->addWidget(m_downloadBtn, 0, Qt::AlignVCenter);
     titleRow->addWidget(m_exportBtn, 0, Qt::AlignVCenter);
     titleRow->addWidget(m_sandboxEnableCheck, 0, Qt::AlignVCenter);
     titleRow->addWidget(m_sandboxBtn, 0, Qt::AlignVCenter);
@@ -277,10 +315,10 @@ Channel::Channel(int channelId, QWidget *parent)
     auto *loadRowLay = new QHBoxLayout(m_loadingRow);
     loadRowLay->setContentsMargins(0, 0, 0, 0);
     loadRowLay->setSpacing(6);
-    auto *loadingText = new QLabel(tr("Loading link…"), m_loadingRow);
+    m_loadingText = new QLabel(tr("Loading link…"), m_loadingRow);
     // background: transparent so the label sits on the row surface, not a dark box.
-    loadingText->setStyleSheet("color: #3fa7ff; font-weight: bold; background: transparent;");
-    loadRowLay->addWidget(loadingText, 0);
+    m_loadingText->setStyleSheet("color: #3fa7ff; font-weight: bold; background: transparent;");
+    loadRowLay->addWidget(m_loadingText, 0);
     loadRowLay->addWidget(m_loadingBar, 1);
     loadRowLay->addWidget(m_loadCancelBtn, 0);
     m_loadingRow->setVisible(false);
@@ -446,41 +484,17 @@ void Channel::setSandboxFeatureEnabled(bool on) {
 
 void Channel::setExportVisible(bool on) {
     m_exportVisibleSetting = on;
-    // While a downloadable stream is loaded the button is force-shown as a
-    // download control; don't let the global setting hide it.
-    if (m_exportBtn && !m_exportIsDownload) m_exportBtn->setVisible(on);
+    if (m_exportBtn) m_exportBtn->setVisible(on);
 }
 
 void Channel::setExportIsDownload(bool on) {
-    if (!m_exportBtn) return;
+    if (!m_exportBtn || !m_downloadBtn) return;
     m_exportIsDownload = on;
-    if (on) {
-        // A VOD stream is loaded: make the "save to file" action obvious with a
-        // polished green download pill (gradient + rounded + hover/pressed).
-        m_exportBtn->setText(QString::fromUtf8("\xE2\xAC\x87")  // ⬇
-                             + QStringLiteral("  ") + tr("Save audio"));
-        m_exportBtn->setToolTip(tr("Download this video's audio to a file"));
-        m_exportBtn->setCursor(Qt::PointingHandCursor);
-        m_exportBtn->setMinimumWidth(104);
-        m_exportBtn->setStyleSheet(
-            "QPushButton {"
-            "  padding: 3px 14px; color: #ffffff; border: none; border-radius: 11px;"
-            "  font-weight: bold; letter-spacing: 0.3px;"
-            "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
-            "               stop:0 #35c169, stop:1 #1f9a4d);"
-            "}"
-            "QPushButton:hover {"
-            "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
-            "               stop:0 #43d179, stop:1 #23ab56); }"
-            "QPushButton:pressed { background: #178a41; padding-top: 4px; }");
-        m_exportBtn->setVisible(true);
-    } else {
-        m_exportBtn->setText(tr("Export audio"));
-        m_exportBtn->setToolTip(tr("Export this channel's audio with all DSP effects applied to a WAV file"));
-        m_exportBtn->setCursor(Qt::ArrowCursor);
-        m_exportBtn->setStyleSheet("QPushButton { padding: 2px 10px; }");
-        m_exportBtn->setVisible(m_exportVisibleSetting);
-    }
+    // A VOD stream shows BOTH actions: the green "Save audio" (plain source
+    // download) AND "Export audio" (true DSP bake via a temp copy) — they do
+    // different things. Export keeps following its global visibility setting.
+    m_downloadBtn->setVisible(on);
+    m_exportBtn->setVisible(m_exportVisibleSetting);
 }
 
 void Channel::pushTitleToSandboxDialog() {
@@ -546,6 +560,7 @@ void Channel::setFxVisible(bool on) {
     updateGeometry();
 }
 
+
 void Channel::setWaveformVisible(bool on) {
     // Hides waveform paint only; transport + filename + time stay visible.
     m_wave->setWavePaintVisible(on);
@@ -595,7 +610,16 @@ void Channel::restoreName() {
 
 void Channel::setStreamLoading(bool on) {
     if (m_loadingRow) m_loadingRow->setVisible(on);
+    // Hiding the marquee ends the stage: reset to the generic text so the
+    // NEXT load never briefly shows a stale "Buffering…" / "Opening…".
+    if (!on && m_loadingText) m_loadingText->setText(tr("Loading link…"));
 }
+
+void Channel::setStreamLoadingText(const QString &text) {
+    if (m_loadingText)
+        m_loadingText->setText(text.isEmpty() ? tr("Loading link…") : text);
+}
+
 
 void Channel::setPlaylistAvailable(bool on) {
     if (m_playlistBtn) m_playlistBtn->setVisible(on);

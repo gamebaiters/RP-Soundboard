@@ -61,10 +61,10 @@ FxPanel::FxPanel(QWidget *parent)
     m_reset->setToolTip(tr("Reset pitch / speed / reverb to zero"));
     refreshTheme();
 
-    auto *capPitch  = new QLabel(tr("Pitch"),  this);
-    auto *capSpeed  = new QLabel(tr("Speed"),  this);
-    auto *capReverb = new QLabel(tr("Reverb"), this);
-    for (auto *c : {capPitch, capSpeed, capReverb}) {
+    m_capPitch  = new QLabel(tr("Pitch"),  this);
+    m_capSpeed  = new QLabel(tr("Speed"),  this);
+    m_capReverb = new QLabel(tr("Reverb"), this);
+    for (auto *c : {m_capPitch, m_capSpeed, m_capReverb}) {
         c->setMinimumWidth(48);
         c->setMaximumWidth(60);
     }
@@ -76,7 +76,7 @@ FxPanel::FxPanel(QWidget *parent)
     grid->setColumnStretch(0, 0);
     grid->setColumnStretch(1, 1);
     grid->setColumnStretch(2, 0);
-    auto *help = new HelpBubble(tr(
+    m_help = new HelpBubble(tr(
         "Pitch  = changes the perceived note (higher / lower).\n"
         "Speed  = changes how fast the audio plays back.\n"
         "Reverb = adds a room/space effect (0..100).\n"
@@ -84,15 +84,15 @@ FxPanel::FxPanel(QWidget *parent)
         "move 1:1. Reverb is always independent. Reset puts pitch /\n"
         "speed / reverb back to zero."), this);
 
-    grid->addWidget(capPitch,      0, 0);
+    grid->addWidget(m_capPitch,    0, 0);
     grid->addWidget(m_pitch,       0, 1);
     grid->addWidget(m_pitchLabel,  0, 2);
     grid->addWidget(m_sync,        0, 3, 2, 1, Qt::AlignVCenter);
-    grid->addWidget(help,          0, 4, 3, 1, Qt::AlignVCenter);
-    grid->addWidget(capSpeed,      1, 0);
+    grid->addWidget(m_help,        0, 4, 3, 1, Qt::AlignVCenter);
+    grid->addWidget(m_capSpeed,    1, 0);
     grid->addWidget(m_speed,       1, 1);
     grid->addWidget(m_speedLabel,  1, 2);
-    grid->addWidget(capReverb,     2, 0);
+    grid->addWidget(m_capReverb,   2, 0);
     // Reverb slider shares its cell with the engine gear so the grid
     // columns stay aligned with the pitch/speed rows.
     {
@@ -140,9 +140,16 @@ QRect FxPanel::reverbEngineBtnGlobalRect() const {
                  m_reverbEngineBtn->size());
 }
 
-void FxPanel::setPitch(int v)  { QSignalBlocker b(m_pitch);  m_pitch->setValue(v);  m_pitchLabel->setText(fmtFactor(v)); }
-void FxPanel::setSpeed(int v)  { QSignalBlocker b(m_speed);  m_speed->setValue(v);  m_speedLabel->setText(fmtFactor(v)); }
-void FxPanel::setReverb(int v) { QSignalBlocker b(m_reverb); m_reverb->setValue(v); m_reverbLabel->setText(fmtPlain(v));  }
+void FxPanel::setPitch(int v)  { QSignalBlocker b(m_pitch);  m_pitch->setValue(v);  m_pitchLabel->setText(fmtFactor(v)); refreshTooltips(); }
+void FxPanel::setSpeed(int v)  { QSignalBlocker b(m_speed);  m_speed->setValue(v);  m_speedLabel->setText(fmtFactor(v)); refreshTooltips(); }
+void FxPanel::setReverb(int v) { QSignalBlocker b(m_reverb); m_reverb->setValue(v); m_reverbLabel->setText(fmtPlain(v));  refreshTooltips(); }
+
+void FxPanel::refreshTooltips()
+{
+    m_pitch ->setToolTip(tr("Pitch: %1").arg(fmtFactor(m_pitch->value())));
+    m_speed ->setToolTip(tr("Speed: %1").arg(fmtFactor(m_speed->value())));
+    m_reverb->setToolTip(tr("Reverb: %1").arg(m_reverb->value()));
+}
 
 void FxPanel::setSync(bool on) {
     bool wasOn = m_sync->isChecked();
@@ -173,6 +180,7 @@ void FxPanel::onPitchMoved(int v) {
         m_internalSync = false;
         emit speedChanged(v);
     }
+    refreshTooltips();
     emit pitchChanged(v);
 }
 
@@ -186,11 +194,13 @@ void FxPanel::onSpeedMoved(int v) {
         m_internalSync = false;
         emit pitchChanged(v);
     }
+    refreshTooltips();
     emit speedChanged(v);
 }
 
 void FxPanel::onReverbMoved(int v) {
     m_reverbLabel->setText(fmtPlain(v));
+    refreshTooltips();
     emit reverbChanged(v);
 }
 

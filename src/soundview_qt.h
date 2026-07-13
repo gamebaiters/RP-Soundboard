@@ -82,6 +82,9 @@ public:
 	// use this — they still get a progressive waveform.
 	void setLiveStream(bool on);
 	bool isLiveStream() const { return m_liveStream; }
+	// Animated theme-aware gradient on the played-portion tint (all
+	// playback, default ON — follows the custom theme's colours when set).
+	void setStreamGradientEnabled(bool on);
 
 signals:
 	void seekRequested(double fraction);
@@ -166,6 +169,11 @@ private:
 	bool           m_reverse = false;
 	// "Loaded but stopped" affordance — see setGhosted.
 	bool           m_ghosted = false;
+	// Animated gradient on the played tint (all playback; theme-aware).
+	// Phase comes from m_gradClock so no extra timer is needed — the
+	// 30 Hz position poll already repaints during playback.
+	bool           m_streamGradientEnabled = true;
+	QElapsedTimer  m_gradClock;
 
 	// Per-view waveform analyser. Was a process-wide singleton: two
 	// channels loading different files fought over the same bin array

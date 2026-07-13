@@ -63,12 +63,18 @@ private slots:
     void onSyncToggled(bool on);
 
 private:
+    void refreshTooltips();
+
     QSlider     *m_pitch;
     QSlider     *m_speed;
     QSlider     *m_reverb;
     QLabel      *m_pitchLabel;
     QLabel      *m_speedLabel;
     QLabel      *m_reverbLabel;
+    QLabel      *m_capPitch  = nullptr;   // captions (hidden in compact)
+    QLabel      *m_capSpeed  = nullptr;
+    QLabel      *m_capReverb = nullptr;
+    QWidget     *m_help      = nullptr;   // help bubble (hidden in compact)
     QToolButton *m_sync;
     QToolButton *m_reset;
     QToolButton *m_reverbEngineBtn = nullptr;

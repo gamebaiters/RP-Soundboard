@@ -69,6 +69,29 @@ extern "C"
 #endif
 #include "plugin.h"
 #include "ts3log.h"
+
+// ---- Global shutdown abort for blocking network I/O (see inputfile.h) ----
+// One process-wide flag checked by an AVIOInterruptCB installed on every
+// NETWORK AVFormatContext. It is armed ONLY at plugin shutdown, so it can
+// never abort a healthy mid-session read (the per-seek interrupt callback
+// tried in v2.3.0 did exactly that and was removed). With it armed, a
+// producer / seek worker blocked inside avformat_open_input / av_read_frame
+// (rw_timeout is 15 s!) returns within milliseconds, the bounded thread
+// joins succeed, and shutdown never has to TerminateThread a worker that
+// might be holding the CRT heap lock or a schannel handshake — the root
+// cause of the intermittent "TeamSpeak crashed" dialog on a normal close.
+static std::atomic<bool> s_ffShutdownAbort{false};
+static int ffShutdownInterruptCb(void *)
+{
+	return s_ffShutdownAbort.load(std::memory_order_relaxed) ? 1 : 0;
+}
+namespace InputFileNet {
+	void setShutdownAbort(bool on)
+	{
+		s_ffShutdownAbort.store(on, std::memory_order_relaxed);
+	}
+}
+
 static FILE *g_debugFile = nullptr;
 static void dbgOpen()
 {
@@ -1134,6 +1157,21 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 		dbgLog("  network open: reconnect on, rw_timeout=15s, ua=%s, headers=%s",
 		       m_netUserAgent.empty() ? "(default)" : m_netUserAgent.c_str(),
 		       m_netHeaders.empty() ? "(none)" : "(set)");
+	}
+
+	// NETWORK targets: pre-allocate the context so the shutdown interrupt
+	// callback covers the (blocking, up to rw_timeout=15 s) open itself.
+	// It only ever fires at plugin shutdown — never during normal playback
+	// (see s_ffShutdownAbort). On failure avformat_open_input frees the
+	// context and nulls the pointer, matching the old behaviour.
+	if (m_isNetwork && !m_fmtCtx)
+	{
+		m_fmtCtx = avformat_alloc_context();
+		if (m_fmtCtx)
+		{
+			m_fmtCtx->interrupt_callback.callback = ffShutdownInterruptCb;
+			m_fmtCtx->interrupt_callback.opaque   = nullptr;
+		}
 	}
 
 	int ret = avformat_open_input(&m_fmtCtx, filename, NULL,
@@ -2693,7 +2731,7 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 					// using it would "restart" at the same dead spot and the guard
 					// below would never pass.
 					const double restartFrom = 0.0;
-					if (m_netRestartCount < 1 && !url.empty()
+					if (m_netRestartCount < 2 && !url.empty()
 					    && curPos > restartFrom + 3.0)
 					{
 						// The byte-range seek to curPos keeps EOF-ing on this file,

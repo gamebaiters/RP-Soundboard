@@ -256,11 +256,12 @@ MainPage::MainPage(QWidget *parent)
             [this](bool){ syncPreviewBlink(); });
     bottom->addSpacing(12);
     for (int i = 0; i < 4; ++i) bottom->addWidget(m_profileButtons[i]);
-    bottom->addWidget(new HelpBubble(tr(
+    m_profilesHelp = new HelpBubble(tr(
         "Profiles (P1-P4): switch between four independent button-grid\n"
         "configurations. Each profile stores its own set of sounds, names\n"
         "and positions. Channel volume/FX/sandbox settings are shared\n"
-        "across all profiles."), this));
+        "across all profiles."), this);
+    bottom->addWidget(m_profilesHelp);
     bottom->addStretch(1);
     // Rows / cols selectors next to Settings — used to live inside the
     // Settings dialog but the user wanted them in arm's reach without
@@ -276,12 +277,12 @@ MainPage::MainPage(QWidget *parent)
     m_colsSpin->setValue(8);
     m_colsSpin->setMinimumHeight(28);
     m_colsSpin->setToolTip(tr("Number of button columns in the grid"));
-    auto *rowsLbl = new QLabel(tr("Rows:"), this);
-    auto *colsLbl = new QLabel(tr("Cols:"), this);
-    bottom->addWidget(rowsLbl);
+    m_rowsLbl = new QLabel(tr("Rows:"), this);
+    m_colsLbl = new QLabel(tr("Cols:"), this);
+    bottom->addWidget(m_rowsLbl);
     bottom->addWidget(m_rowsSpin);
     bottom->addSpacing(4);
-    bottom->addWidget(colsLbl);
+    bottom->addWidget(m_colsLbl);
     bottom->addWidget(m_colsSpin);
     bottom->addSpacing(8);
     bottom->addWidget(m_settingsBtn);
@@ -386,6 +387,25 @@ void MainPage::refreshTheme() {
     m_channelsHost->setStyleSheet(QString(
         "#channelsHost { background-color: %1; }").arg(d.bg.name()));
     if (m_micChannel) m_micChannel->refreshTheme();
+}
+
+void MainPage::setMuteChecksVisible(bool on) {
+    if (m_muteLocally) m_muteLocally->setVisible(on);
+    if (m_muteMyself)  m_muteMyself->setVisible(on);
+    if (m_previewOnly) m_previewOnly->setVisible(on);
+}
+
+void MainPage::setProfileButtonsVisible(bool on) {
+    for (int i = 0; i < 4; ++i)
+        if (m_profileButtons[i]) m_profileButtons[i]->setVisible(on);
+    if (m_profilesHelp) m_profilesHelp->setVisible(on);
+}
+
+void MainPage::setGridSizeVisible(bool on) {
+    if (m_rowsLbl)  m_rowsLbl->setVisible(on);
+    if (m_rowsSpin) m_rowsSpin->setVisible(on);
+    if (m_colsLbl)  m_colsLbl->setVisible(on);
+    if (m_colsSpin) m_colsSpin->setVisible(on);
 }
 
 void MainPage::setMicFxFeatureVisible(bool on) {

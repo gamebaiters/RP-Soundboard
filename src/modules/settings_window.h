@@ -110,6 +110,11 @@ public slots:
     void setChannelNameLinkDetect(bool on);
     void setStreamAutoplay(bool on);
     void setStreamQuality(const QString &q);
+    void setStreamFxGradient(bool on);
+    void setShowAddChannelButton(bool on);
+    void setShowMuteChecks(bool on);
+    void setShowProfileButtons(bool on);
+    void setShowGridSizeSelectors(bool on);
     void setVadWhilePlaying(bool on);
     void setDuckWhenTalking(bool on);
     void setDuckAmount(int pct);
@@ -169,6 +174,11 @@ signals:
     void resetAllHotkeysRequested();
     void adaptWaveformToFxChanged(bool);
     void showCropMarkersChanged(bool);
+    void streamFxGradientChanged(bool);
+    void showAddChannelButtonChanged(bool);
+    void showMuteChecksChanged(bool);
+    void showProfileButtonsChanged(bool);
+    void showGridSizeSelectorsChanged(bool);
     void multiChannelInfinityChanged(bool);
     void showPauseAllButtonChanged(bool);
     void showStopAllButtonChanged(bool);
@@ -266,6 +276,11 @@ private:
     QCheckBox   *m_channelLinkDetect    = nullptr;
     QCheckBox   *m_streamAutoplay       = nullptr;
     class QComboBox *m_streamQuality    = nullptr;
+    QCheckBox   *m_streamFxGradient     = nullptr;
+    QCheckBox   *m_showAddChannel       = nullptr;
+    QCheckBox   *m_showMuteChecks       = nullptr;
+    QCheckBox   *m_showProfiles         = nullptr;
+    QCheckBox   *m_showGridSize         = nullptr;
     QCheckBox   *m_vadWhilePlaying      = nullptr;
     QCheckBox   *m_duckWhenTalking      = nullptr;
     class QSlider *m_duckAmount         = nullptr;

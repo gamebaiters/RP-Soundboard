@@ -1,3 +1,105 @@
+GameBaiters Soundboard v2.3.3
+=============================
+
+The reliability release. Streaming that recovers on its own instead of
+giving up, an auto-updater that no longer fakes a crash, sandbox effects
+that finally do what they say - and a soundboard you can trim down to
+only the controls you actually use.
+
+Audio sandbox
+-------------
+
+* FIX - The newer sandbox modules did nothing. Voice FX (autotune,
+  formant shifter, vocoder, ring mod, auto-wah, tremolo, vibrato,
+  exciter, reverse delay, shimmer), the noise gate, the de-esser, the
+  transient shaper and the dynamic EQ could be switched on and stay
+  completely silent - on channels AND on microphone presets. They were
+  being force-disabled behind the scenes by an outdated module list
+  saved by an older version. They are now active as intended. If you
+  ever gave up on autotune because "it did nothing", try it again.
+
+* FIX - Autotune now tracks real singing. The pitch detector's range was
+  widened (deep male voices up to high female vocals), it no longer
+  gives up on breathy or mixed-in vocals, and an octave guard stops it
+  from locking an octave too low.
+
+* FIX - Enabling a Voice FX effect now turns the Voice FX module on for
+  you, instead of leaving it silent behind the module's master switch.
+
+* FIX - The formant shifter starts at an audible setting, so turning it
+  on does something (it used to open at a neutral value = no change).
+
+* FIX - Cleaner shimmer diffusion and a steadier dynamic EQ under load.
+
+Streaming (YouTube / links)
+---------------------------
+
+* NEW - Seeks recover by themselves. If a stream's link dies mid-play
+  (they expire), the soundboard silently re-resolves it and resumes at
+  the exact second you were on. The "network error" notice now only
+  appears when the stream truly cannot be played.
+
+* FIX - The waveform cursor no longer freezes while a stream keeps
+  playing after a seek.
+
+* NEW - You can see what it is doing. The loading strip now says
+  "Fetching video info...", "Fetching playlist tracks...", "Opening
+  audio stream...", "Buffering stream..." or "Reconnecting to the
+  stream..." instead of a generic message.
+
+* NEW - Streams are marked with a WEB badge on the title (a pulsing red
+  LIVE badge for live broadcasts).
+
+* NEW - Export audio works on streams too. A streaming channel now has
+  BOTH buttons: "Save audio" downloads the original audio as-is, while
+  "Export audio" bakes the channel's whole effect chain into the file,
+  exactly like it does for a local file.
+
+* FIX - Macros save streaming channels properly. A macro that captured a
+  channel playing a link now re-opens that link (and resumes where it
+  was) instead of failing on an expired address.
+
+* Playlist button on the channel now says "Playlist".
+
+Auto-updater
+------------
+
+* FIX - No more "TeamSpeak crashed" message after an update. The updater
+  used to force-close the client while it was still shutting down; it
+  now waits for TeamSpeak to close properly and only forces it as a last
+  resort, retrying if the old plugin file is still locked.
+
+* FIX - The progress bar renders correctly for everyone. The old bar
+  could sit at 0%, spill outside its frame or never turn green,
+  especially with custom fonts or ClearType settings. It is now drawn by
+  the soundboard itself.
+
+* NEW - The updater tells you what is happening: package name, download
+  size and speed, redirects, and a step-by-step log, plus a clear
+  explanation before TeamSpeak closes.
+
+Interface
+---------
+
+* NEW - Trim the bottom toolbar. Every group can be hidden from
+  Settings > Channels > Main toolbar: "+ Add channel", the mute /
+  preview checkboxes, the P1-P4 profile buttons and the Rows / Cols
+  selectors (Pause all / Stop all were already there). Everything stays
+  on by default - hide only what you do not use.
+
+* NEW - Animated gradient on the played part of the waveform. It follows
+  your custom theme's colours when you have one set, and can be turned
+  off in Settings > Streaming > Appearance.
+
+Stability
+---------
+
+* FIX - TeamSpeak no longer reports a crash when you close it normally.
+  Network playback could keep the client waiting on a stalled connection
+  during shutdown; those connections are now cut immediately so the
+  client exits cleanly.
+
+
 GameBaiters Soundboard v2.3.2
 =============================
 

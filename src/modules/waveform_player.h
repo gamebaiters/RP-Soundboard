@@ -76,6 +76,9 @@ public slots:
     // progressive waveform. on==false restores the normal transport.
     void setLiveStream(bool on);
     bool isLiveStream() const { return m_liveStream; }
+    // Setting: animated theme-aware gradient on the played portion of the
+    // waveform (all playback, default ON). Forwarded to the SoundView.
+    void setStreamGradientEnabled(bool on);
     // Toggle ONLY the waveform visualisation (the SoundView). Filename,
     // time label and transport buttons stay so the user can still
     // play / pause / seek even in the compact "no waveform" mode.
@@ -173,6 +176,16 @@ private:
     // styling reset path explicit so the red bold doesn't leak into
     // subsequent successful playbacks.
     bool         m_errorActive = false;
+
+    // ---- Stream-title indicator: WEB / LIVE badge (LIVE pulses red) ----
+    QString      m_streamTitle;                // raw title (re-rendered on anim)
+    bool         m_streamLabelActive = false;  // label currently shows a stream
+    class QTimer *m_streamAnimTimer = nullptr; // LIVE badge pulse
+    int          m_streamAnimPhase = 0;
+    // Re-render the stream label (badge + title) for the current anim phase.
+    void renderStreamLabel();
+    // Start/stop the pulse timer (runs only for a LIVE badge).
+    void updateStreamAnimTimer();
 
     // Centralised icon + tooltip refresh for the play/pause button.
     // Looks at m_playing / m_paused / m_replayReady and picks the right

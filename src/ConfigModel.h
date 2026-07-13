@@ -230,6 +230,18 @@ public:
 	void setShowPauseAllButton(bool on);
 	inline bool getShowStopAllButton() const { return m_showStopAllButton; }
 	void setShowStopAllButton(bool on);
+	// Main-toolbar group visibility (all default ON): "+ Add channel",
+	// the Mute/Preview checkbox trio, the P1-P4 profile buttons, the
+	// Rows/Cols grid-size selectors. Lets the user slim the bottom bar
+	// down to just what they use.
+	inline bool getShowAddChannelButton() const { return m_showAddChannelButton; }
+	void setShowAddChannelButton(bool on);
+	inline bool getShowMuteChecks() const { return m_showMuteChecks; }
+	void setShowMuteChecks(bool on);
+	inline bool getShowProfileButtons() const { return m_showProfileButtons; }
+	void setShowProfileButtons(bool on);
+	inline bool getShowGridSizeSelectors() const { return m_showGridSizeSelectors; }
+	void setShowGridSizeSelectors(bool on);
 	inline bool getVerticalMeter() const { return m_verticalMeter; }
 	void setVerticalMeter(bool on);
 	inline bool getShowSkipButtons() const { return m_showSkipButtons; }
@@ -257,6 +269,10 @@ public:
 	// OFF (keeps the "load then press play" behaviour).
 	inline bool getStreamAutoplay() const { return m_streamAutoplay; }
 	void setStreamAutoplay(bool on);
+	// Animated gradient on the waveform's played portion (ALL playback,
+	// default ON; follows the custom theme's colours when a theme is set).
+	inline bool getStreamFxGradient() const { return m_streamFxGradient; }
+	void setStreamFxGradient(bool on);
 
 	// Voice behaviour while a sound plays. (1) VAD-while-playing: gate the
 	// user's own mic by voice activity so it's only sent when he talks, while
@@ -359,6 +375,10 @@ private:
 	bool m_multiChannelInfinity = false;
 	bool m_showPauseAllButton   = true;
 	bool m_showStopAllButton    = true;
+	bool m_showAddChannelButton = true;
+	bool m_showMuteChecks       = true;
+	bool m_showProfileButtons   = true;
+	bool m_showGridSizeSelectors= true;
 	bool m_verticalMeter        = false;
 	bool m_showSkipButtons      = true;
 	bool m_spectrogramView      = false;
@@ -368,6 +388,7 @@ private:
 	bool m_streamingEnabled       = true;
 	bool m_channelNameLinkDetect  = true;
 	bool m_streamAutoplay         = false;
+	bool m_streamFxGradient       = true;
 	bool m_vadWhilePlaying        = false;
 	bool m_duckWhenTalking        = false;
 	int  m_duckAmountPercent      = 40;

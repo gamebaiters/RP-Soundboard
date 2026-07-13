@@ -33,12 +33,12 @@ VolumeControl::VolumeControl(QWidget *parent)
     m_remote->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 
-    auto *capLocal  = new QLabel(tr("Local"),  this);
-    auto *capRemote = new QLabel(tr("Remote"), this);
-    capLocal ->setMinimumWidth(48);
-    capRemote->setMinimumWidth(48);
-    capLocal ->setMaximumWidth(60);
-    capRemote->setMaximumWidth(60);
+    m_capLocal  = new QLabel(tr("Local"),  this);
+    m_capRemote = new QLabel(tr("Remote"), this);
+    m_capLocal ->setMinimumWidth(48);
+    m_capRemote->setMinimumWidth(48);
+    m_capLocal ->setMaximumWidth(60);
+    m_capRemote->setMaximumWidth(60);
     m_localLabel->setText(fmtPct(m_local->value()));
     m_remoteLabel->setText(fmtPct(m_remote->value()));
     m_localLabel->setMinimumWidth(36);
@@ -59,18 +59,18 @@ VolumeControl::VolumeControl(QWidget *parent)
     grid->setColumnStretch(0, 0);   // caption fixed
     grid->setColumnStretch(1, 1);   // slider grows
     grid->setColumnStretch(2, 0);   // value fixed
-    auto *help = new HelpBubble(tr(
+    m_help = new HelpBubble(tr(
         "Local volume = what you hear on your machine.\n"
         "Remote volume = what the other people in voice hear.\n"
         "Click the chain icon to link the two: moving one slider then\n"
         "moves the other by the same amount, preserving the offset."), this);
 
-    grid->addWidget(capLocal,      0, 0);
+    grid->addWidget(m_capLocal,    0, 0);
     grid->addWidget(m_local,       0, 1);
     grid->addWidget(m_localLabel,  0, 2);
     grid->addWidget(m_link,        0, 3, 2, 1, Qt::AlignVCenter);
-    grid->addWidget(help,          0, 4, 2, 1, Qt::AlignVCenter);
-    grid->addWidget(capRemote,     1, 0);
+    grid->addWidget(m_help,        0, 4, 2, 1, Qt::AlignVCenter);
+    grid->addWidget(m_capRemote,   1, 0);
     grid->addWidget(m_remote,      1, 1);
     grid->addWidget(m_remoteLabel, 1, 2);
 
@@ -83,8 +83,16 @@ int  VolumeControl::local()  const { return m_local->value(); }
 int  VolumeControl::remote() const { return m_remote->value(); }
 bool VolumeControl::linked() const { return m_link->isChecked(); }
 
-void VolumeControl::setLocal(int v)  { QSignalBlocker b(m_local);  m_local->setValue(v);  m_localLabel->setText(fmtPct(v));  }
-void VolumeControl::setRemote(int v) { QSignalBlocker b(m_remote); m_remote->setValue(v); m_remoteLabel->setText(fmtPct(v)); }
+void VolumeControl::setLocal(int v)  { QSignalBlocker b(m_local);  m_local->setValue(v);  m_localLabel->setText(fmtPct(v));  refreshTooltips(); }
+void VolumeControl::setRemote(int v) { QSignalBlocker b(m_remote); m_remote->setValue(v); m_remoteLabel->setText(fmtPct(v)); refreshTooltips(); }
+
+void VolumeControl::refreshTooltips()
+{
+    // Always set (cheap): in compact mode the tooltip is the ONLY value
+    // readout, in full mode it is a nice extra.
+    m_local ->setToolTip(tr("Local volume: %1%").arg(m_local->value()));
+    m_remote->setToolTip(tr("Remote volume: %1%").arg(m_remote->value()));
+}
 
 void VolumeControl::setLinked(bool on) {
     bool wasOn = m_link->isChecked();
@@ -129,6 +137,7 @@ void VolumeControl::onLocalSliderMoved(int v) {
     if (m_link->isChecked() && !m_internalSync) {
         applyLinkDelta(m_local, m_remote, v);
     }
+    refreshTooltips();
     emit localChanged(v);
 }
 
@@ -137,6 +146,7 @@ void VolumeControl::onRemoteSliderMoved(int v) {
     if (m_link->isChecked() && !m_internalSync) {
         applyLinkDelta(m_remote, m_local, v);
     }
+    refreshTooltips();
     emit remoteChanged(v);
 }
 

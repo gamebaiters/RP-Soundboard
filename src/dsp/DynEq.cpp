@@ -85,8 +85,7 @@ void DynEq::processStereo(float &l, float &r) {
         // Update biquad every ~16 samples for CPU budget - the internal
         // BiquadPeaking coefficient ramp smooths sub-sample updates so
         // slower control-rate updates read as musical breathing.
-        static int s_updateCounter = 0;
-        if ((s_updateCounter++ & 15) == 0) updateBandGain(b);
+        if ((m_updateCounter++ & 15) == 0) updateBandGain(b);
         l = m_bpL[b].process(l);
         r = m_bpR[b].process(r);
     }

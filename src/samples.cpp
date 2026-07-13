@@ -701,6 +701,13 @@ void Sampler::shutdown()
 	// touching slot state we're about to tear down.
 	m_shuttingDown.store(true, std::memory_order_release);
 
+	// Abort any blocking FFmpeg NETWORK I/O (open/read/seek on a stream)
+	// so the bounded joins below succeed instead of TerminateThread-ing a
+	// worker mid-network-call (heap/SSL state corruption → the intermittent
+	// "TS3 crashed" dialog on a normal close). Idempotent: sb_kill already
+	// armed it; direct Sampler teardown paths get the same protection.
+	InputFileNet::setShutdownAbort(true);
+
 	// Stop the dedicated seek worker. cv.notify_all + atomic stop flag
 	// breaks out of its wait predicate; the worker exits its outer
 	// loop without committing any in-flight scan result (the recheck
@@ -3186,7 +3193,17 @@ void Sampler::seekWorkerProc()
 					std::memory_order_acq_rel);
 				if (std::isnan(v)) continue;
 				PlaybackSlot &s = m_slots[i];
-				if (s.state == eSILENT || !s.inputFile) continue;
+				if (s.state == eSILENT || !s.inputFile) {
+					// Seek dropped (slot stopped / file gone) — the GUI
+					// cursor lock must STILL be released, or
+					// pendingSeekActive stays true forever and the
+					// waveform cursor freezes at the stale click target
+					// on the next playback (YouTube-stream frozen-cursor
+					// bug: a network seek is a slow reopen, so the slot
+					// rotating mid-seek is common there).
+					emit onSeekCommitted(i);
+					continue;
+				}
 				// Capture (not clear) the release re-home flag: it must stay
 				// set through the slow scan so the cursor stays pinned to the
 				// head and tape ingest stays held. Cleared at prime-commit.
@@ -3215,7 +3232,15 @@ void Sampler::seekWorkerProc()
 				if (w.prime)
 					s.tapePrimeSeek.store(false, std::memory_order_release);
 			if (m_shuttingDown.load(std::memory_order_relaxed)) return;
-			if (s.state == eSILENT || s.inputFile != w.file) continue;
+			if (s.state == eSILENT || s.inputFile != w.file) {
+				// Slot rotated mid-scan (stop / new play / reverse swap /
+				// network-recovery reopen): the scan result is discarded,
+				// but the GUI cursor lock MUST still be released or the
+				// cursor freezes at the stale target forever while the
+				// new audio plays.
+				emit onSeekCommitted(w.slot);
+				continue;
+			}
 				// RELEASE RE-HOME (backward-scratch let-go). The decoder is
 				// now positioned at the ring's frontier file position. The
 				// tape is spinning up on its own ring and IS the audible
@@ -3237,6 +3262,10 @@ void Sampler::seekWorkerProc()
 						std::numeric_limits<double>::quiet_NaN();
 					s.tapePrimeSeek.store(false, std::memory_order_release);
 					s.producerThread.wake();
+					// Harmless for the vinyl gesture (it never sets the GUI
+					// cursor lock) but releases a stale one if a waveform
+					// click seek got coalesced into this prime commit.
+					emit onSeekCommitted(w.slot);
 					continue;
 				}
 			{

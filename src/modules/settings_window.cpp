@@ -333,11 +333,27 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         "While this mode is ON, the '+ Add channel' button is hidden."), this)));
 
     // -- Main toolbar --
+    // Every group of the bottom bar is individually hideable so the user
+    // can slim it down to just what they actually use.
     channelsLay->addWidget(subHeader(tr("Main toolbar"), this));
     channelsLay->addLayout(indented(checkRow(m_showPauseAllButton, tr(
         "Show or hide the 'Pause all' button in the main toolbar."), this)));
     channelsLay->addLayout(indented(checkRow(m_showStopAllButton, tr(
         "Show or hide the 'Stop all' button in the main toolbar."), this)));
+    m_showAddChannel = new QCheckBox(tr("Show \"+ Add channel\" button"), this);
+    channelsLay->addLayout(indented(checkRow(m_showAddChannel, tr(
+        "Hide it if you use a fixed set of channels (or the multi-channel\n"
+        "infinity mode, which already hides it)."), this)));
+    m_showMuteChecks = new QCheckBox(tr("Show mute / preview checkboxes"), this);
+    channelsLay->addLayout(indented(checkRow(m_showMuteChecks, tr(
+        "The 'Mute locally' / 'Mute myself' / 'Preview only' trio in the\n"
+        "toolbar. The states keep working when hidden."), this)));
+    m_showProfiles = new QCheckBox(tr("Show profile buttons (P1-P4)"), this);
+    channelsLay->addLayout(indented(checkRow(m_showProfiles, tr(
+        "Hide them if you only ever use one grid profile."), this)));
+    m_showGridSize = new QCheckBox(tr("Show Rows / Cols grid-size selectors"), this);
+    channelsLay->addLayout(indented(checkRow(m_showGridSize, tr(
+        "Hide them once your grid has the size you want."), this)));
 
     // ============== Button grid section ==============
     // Spinboxes moved to MainPage's bottom row. The QFormLayout below
@@ -713,6 +729,13 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     streamLay->addLayout(indented(checkRow(m_streamAutoplay, tr(
         "When ON, a file loaded from a link starts playing immediately.\n"
         "OFF = it loads paused, ready for you to press play."), this)));
+    // ---- Appearance: the animated played-waveform gradient ----
+    streamLay->addWidget(subHeader(tr("Appearance"), this));
+    m_streamFxGradient = new QCheckBox(tr("Animated gradient on the played waveform"), this);
+    streamLay->addLayout(indented(checkRow(m_streamFxGradient, tr(
+        "The already-played part of the waveform gets a slow colour flow\n"
+        "(any playback, not just streams). Follows your custom theme's\n"
+        "colours when a theme is set."), this)));
     streamLay->addWidget(subHeader(tr("Engine (yt-dlp)"), this));
     {
         auto *qr = new QHBoxLayout;
@@ -822,6 +845,10 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_multiChannelInfinity, &QCheckBox::toggled, this, &SettingsWindow::multiChannelInfinityChanged);
     connect(m_showPauseAllButton,   &QCheckBox::toggled, this, &SettingsWindow::showPauseAllButtonChanged);
     connect(m_showStopAllButton,    &QCheckBox::toggled, this, &SettingsWindow::showStopAllButtonChanged);
+    connect(m_showAddChannel,       &QCheckBox::toggled, this, &SettingsWindow::showAddChannelButtonChanged);
+    connect(m_showMuteChecks,       &QCheckBox::toggled, this, &SettingsWindow::showMuteChecksChanged);
+    connect(m_showProfiles,         &QCheckBox::toggled, this, &SettingsWindow::showProfileButtonsChanged);
+    connect(m_showGridSize,         &QCheckBox::toggled, this, &SettingsWindow::showGridSizeSelectorsChanged);
     connect(m_verticalMeter,        &QCheckBox::toggled, this, &SettingsWindow::verticalMeterChanged);
     connect(m_showSkipButtons,      &QCheckBox::toggled, this, &SettingsWindow::showSkipButtonsChanged);
     connect(m_spectrogramView,      &QCheckBox::toggled, this, &SettingsWindow::spectrogramViewChanged);
@@ -833,6 +860,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_streamAutoplay,       &QCheckBox::toggled, this, &SettingsWindow::streamAutoplayChanged);
     connect(m_streamQuality, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
         [this](int){ emit streamQualityChanged(streamQuality()); });
+    connect(m_streamFxGradient, &QCheckBox::toggled, this, &SettingsWindow::streamFxGradientChanged);
     connect(m_vadWhilePlaying,      &QCheckBox::toggled, this, &SettingsWindow::vadWhilePlayingChanged);
     connect(m_duckWhenTalking,      &QCheckBox::toggled, this, &SettingsWindow::duckWhenTalkingChanged);
     connect(m_duckAmount,           &QSlider::valueChanged, this, &SettingsWindow::duckAmountChanged);
@@ -943,6 +971,11 @@ void SettingsWindow::setStreamQuality(const QString &q) {
     int idx = m_streamQuality->findData(q);
     m_streamQuality->setCurrentIndex(idx >= 0 ? idx : 1);   // default "balanced"
 }
+void SettingsWindow::setStreamFxGradient(bool on) { QSignalBlocker b(m_streamFxGradient); m_streamFxGradient->setChecked(on); }
+void SettingsWindow::setShowAddChannelButton(bool on)   { QSignalBlocker b(m_showAddChannel); m_showAddChannel->setChecked(on); }
+void SettingsWindow::setShowMuteChecks(bool on)         { QSignalBlocker b(m_showMuteChecks); m_showMuteChecks->setChecked(on); }
+void SettingsWindow::setShowProfileButtons(bool on)     { QSignalBlocker b(m_showProfiles);   m_showProfiles->setChecked(on);   }
+void SettingsWindow::setShowGridSizeSelectors(bool on)  { QSignalBlocker b(m_showGridSize);   m_showGridSize->setChecked(on);   }
 void SettingsWindow::setVadWhilePlaying(bool on) { QSignalBlocker b(m_vadWhilePlaying); m_vadWhilePlaying->setChecked(on); }
 void SettingsWindow::setDuckWhenTalking(bool on) { QSignalBlocker b(m_duckWhenTalking); m_duckWhenTalking->setChecked(on); }
 void SettingsWindow::setDuckAmount(int pct) {

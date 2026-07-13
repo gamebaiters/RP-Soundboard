@@ -9,6 +9,10 @@
 #include <QSizePolicy>
 #include <QIcon>
 #include <QSignalBlocker>
+#include <QTimer>
+#include <QColor>
+
+#include <cmath>
 
 #include "../soundview_qt.h"
 
@@ -278,9 +282,9 @@ void WaveformPlayer::setStreamMode(bool on) {
     // Reverse + vinyl ARE available on streams: the tape ring keeps the recent
     // seconds in RAM (smooth within the window) and the streaming-reverse /
     // backfill paths seek the direct URL over HTTP range for anything older
-    // (may stutter - fine for a stream). So this is intentionally a no-op; the
-    // controls stay enabled. Kept as a hook in case a future build wants to
-    // surface a "stream" affordance on the transport.
+    // (may stutter - fine for a stream). The transport stays enabled and the
+    // played-portion gradient applies to ALL playback now, so this is a no-op
+    // hook again (the WEB/LIVE badge is driven by setStreamLabel).
     Q_UNUSED(on);
 }
 
@@ -302,6 +306,9 @@ void WaveformPlayer::setLiveStream(bool on) {
     if (m_back5)    m_back5->setEnabled(!on);
     if (m_fwd5)     m_fwd5->setEnabled(!on);
     if (m_fwd10)    m_fwd10->setEnabled(!on);
+    // The badge style renders WEB vs (pulsing) LIVE from this flag.
+    if (m_streamLabelActive) renderStreamLabel();
+    updateStreamAnimTimer();
 }
 
 void WaveformPlayer::setSound(const SoundInfo &info) {
@@ -317,6 +324,9 @@ void WaveformPlayer::setFilename(const QString &name) {
         m_errorActive = false;
         m_filenameLabel->setStyleSheet(QString());
     }
+    // A plain filename replaces any stream label: stop its animation.
+    m_streamLabelActive = false;
+    updateStreamAnimTimer();
     m_fullPath = name;
     // Display only the basename so the channel header doesn't get cluttered
     // with C:/Users/.../foo.mp3 style absolute paths.
@@ -335,16 +345,55 @@ void WaveformPlayer::setStreamLabel(const QString &title) {
         m_filenameLabel->setStyleSheet(QString());
     }
     m_fullPath = title;
-    // Blue globe prefix (azure) + the escaped title. Rich text so the prefix
-    // can be coloured independently of the theme text colour. fromUtf8 for the
-    // emoji avoids the MSVC narrow-literal encoding trap.
-    const QString globe = QString::fromUtf8("\xF0\x9F\x8C\x90");   // 🌐
-    m_filenameLabel->setTextFormat(Qt::RichText);
-    m_filenameLabel->setText(
-        "<span style='color:#3fa7ff; font-weight:bold;'>" + globe + "</span> "
-        + title.toHtmlEscaped());
+    m_streamTitle = title;
+    m_streamLabelActive = true;
+    renderStreamLabel();
     m_filenameLabel->setToolTip(tr("Internet stream") + ": " + title);
     refreshClearButton();
+    updateStreamAnimTimer();
+}
+
+void WaveformPlayer::setStreamGradientEnabled(bool on) {
+    m_wave->setStreamGradientEnabled(on);
+}
+
+// Rebuild the stream-title rich text: a WEB (azure) or LIVE (pulsing red)
+// badge pill before the plain title. LIVE is re-rendered by the anim timer,
+// so this stays cheap: pure string building on a short title.
+void WaveformPlayer::renderStreamLabel() {
+    if (!m_streamLabelActive) return;
+    m_filenameLabel->setTextFormat(Qt::RichText);
+    QString bg = QStringLiteral("#3fa7ff");
+    QString fg = QStringLiteral("#0b1016");
+    QString txt = tr("WEB");
+    if (m_liveStream) {
+        const double ph = 0.5 + 0.5 * std::sin(m_streamAnimPhase * 0.55);
+        auto lerp = [ph](int a, int b){ return a + int((b - a) * ph); };
+        bg = QColor(lerp(0xe0, 0x7a), lerp(0x41, 0x1f), lerp(0x41, 0x1f)).name();
+        fg = QStringLiteral("#ffffff");
+        txt = tr("LIVE");
+    }
+    m_filenameLabel->setText(
+        "<span style='background-color:" + bg + "; color:" + fg
+        + "; font-weight:bold;'>&nbsp;" + txt + "&nbsp;</span> "
+        + m_streamTitle.toHtmlEscaped());
+}
+
+void WaveformPlayer::updateStreamAnimTimer() {
+    const bool needsAnim = m_streamLabelActive && m_liveStream;
+    if (needsAnim) {
+        if (!m_streamAnimTimer) {
+            m_streamAnimTimer = new QTimer(this);
+            m_streamAnimTimer->setInterval(90);
+            connect(m_streamAnimTimer, &QTimer::timeout, this, [this]{
+                ++m_streamAnimPhase;
+                renderStreamLabel();
+            });
+        }
+        if (!m_streamAnimTimer->isActive()) m_streamAnimTimer->start();
+    } else if (m_streamAnimTimer && m_streamAnimTimer->isActive()) {
+        m_streamAnimTimer->stop();
+    }
 }
 
 void WaveformPlayer::setError(const QString &message) {
@@ -354,6 +403,8 @@ void WaveformPlayer::setError(const QString &message) {
     // h=-1 grey trap on invalid QColors, and red is theme-agnostic
     // anyway.
     m_errorActive = true;
+    m_streamLabelActive = false;   // error banner replaces the stream label
+    updateStreamAnimTimer();
     m_fullPath.clear();
     const QString prefixed = QString::fromUtf8("\xE2\x9A\xA0 ") + message;
     m_filenameLabel->setText(prefixed);

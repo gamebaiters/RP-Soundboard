@@ -328,7 +328,10 @@ struct SandboxState
 
     // Formant shifter (spectral envelope warp, pitch preserved)
     bool  vfxFormEnabled = false;
-    float vfxFormShift   = 0.0f;     // -12..+12 "semitones" of warp
+    // Default +4: at 0 the warp is the mathematical identity, so enabling
+    // the effect with the untouched slider produced literally no change —
+    // reported as "the formant shifter doesn't do anything".
+    float vfxFormShift   = 4.0f;     // -12..+12 "semitones" of warp
     float vfxFormMix     = 1.0f;     // 0..1
 
     // Shimmer reverb (pitch-shifted feedback tail)

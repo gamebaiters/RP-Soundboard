@@ -4,6 +4,14 @@
 // Copyright (c) 2015 Marius Graefe
 // All rights reserved
 // Contact: rp_soundboard@mgraefe.de
+//
+// GameBaiters rework (v2.3.3): the window is now built in code (no .ui).
+// The QProgressBar was replaced with a custom-painted bar — on the Windows
+// native style (and especially with user font scaling / ClearType tweaks)
+// the QSS-styled chunk repainted unreliably: stuck at 0%, fill leaking
+// outside the groove, missing terminal state. Same fix as the export
+// dialog's ExportBar. The window is also far more verbose now: stage text,
+// MB / percent / speed, and a live step log.
 //----------------------------------
 
 #pragma once
@@ -15,14 +23,13 @@
 #include <QUrl>
 #include <QFileInfo>
 #include <QFile>
+#include <QElapsedTimer>
 #include <QNetworkRequest>
 #include <QNetworkReply>
 
-#include "ui_updater_qt.h"
-
-namespace Ui {
-	class updaterWindow;
-}
+class QLabel;
+class QPushButton;
+class QPlainTextEdit;
 
 
 class UpdaterWindow : public QDialog
@@ -40,15 +47,28 @@ public:
 public slots:
 	void onReadyRead();
 	void onDownloadProgress(qint64 bytes, qint64 total);
-	void onClickedCancel(QAbstractButton*);
+	void onClickedCancel();
 	void onFinished();
 
 signals:
 	void finished();
-	
+
 private:
 	bool executeFile();
-	Ui::updaterWindow *ui;
+	// One line into the visible step log + the plugin log (verbose updater).
+	void appendLog(const QString &line);
+	void setStatus(const QString &text);
+
+	QLabel         *m_titleLabel  = nullptr;
+	QLabel         *m_statusLabel = nullptr;
+	QWidget        *m_bar         = nullptr;  // custom-painted bar (UpdaterBar)
+	QPlainTextEdit *m_log         = nullptr;  // live step log
+	QPushButton    *m_cancelBtn   = nullptr;
+
+	QElapsedTimer   m_speedTimer;             // download speed estimation
+	qint64          m_lastBytes   = 0;
+	double          m_speedBps    = 0.0;
+
 	QUrl m_url;
 	QFileInfo m_fileinfo;
 	QFile *m_file;

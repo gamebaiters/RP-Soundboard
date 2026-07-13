@@ -60,10 +60,8 @@ set(sources
 	src/ts3log.h
 	src/UpdateChecker.cpp
 	src/UpdateChecker.h
-	src/updater.ui
 	src/updater_qt.cpp
 	src/updater_qt.h
-	src/updater_qt.ui
 
 	# --- Modular UI (Phase 2+) ---
 	src/modules/module_registry.h

@@ -149,9 +149,13 @@ void SoundView::paintEvent(QPaintEvent *evt)
 				// keeps the azure→violet look. RGB lerp only — no HSL
 				// math, so the Qt h=-1 grey trap can't bite.
 				if (!m_gradClock.isValid()) m_gradClock.start();
+				// 0..100 speed slider -> 0.25x..4x of the base rate (50 = 1x).
+				const double rate = 0.0012
+					* std::pow(4.0, (m_gradSpeed - 50) / 50.0);
 				const double ph = 0.5 + 0.5
-					* std::sin((double)m_gradClock.elapsed() * 0.0012);
-				const int alpha = playedTint.alpha();
+					* std::sin((double)m_gradClock.elapsed() * rate);
+				// 0..100 intensity slider -> alpha 12..140 (30 = old look).
+				const int alpha = 12 + m_gradIntensity * 128 / 100;
 				QColor cA(0x3f, 0xa7, 0xff, alpha);   // azure  (default)
 				QColor cB(0x8a, 0x5c, 0xf6, alpha);   // violet (default)
 				{
@@ -159,16 +163,37 @@ void SoundView::paintEvent(QPaintEvent *evt)
 					if (tc.enabled) {
 						cA = tc.accent;
 						cB = tc.waveform;
-						// Near-identical picks would make the gradient
-						// invisible — push the second stop brighter.
-						const int dr = cA.red()   - cB.red();
-						const int dg = cA.green() - cB.green();
-						const int db = cA.blue()  - cB.blue();
-						if (dr * dr + dg * dg + db * db < 48 * 48)
-							cB = cB.lighter(160);
-						cA.setAlpha(alpha);
-						cB.setAlpha(alpha);
 					}
+					// Explicit user picks (Settings) override the auto pair.
+					if (m_gradColA.isValid()) cA = m_gradColA;
+					if (m_gradColB.isValid()) cB = m_gradColB;
+					auto dist2 = [](const QColor &x, const QColor &y){
+						const int dr = x.red()   - y.red();
+						const int dg = x.green() - y.green();
+						const int db = x.blue()  - y.blue();
+						return dr * dr + dg * dg + db * db;
+					};
+					// Near-identical stops would make the flow invisible —
+					// push the second stop apart (direction chosen so a
+					// light pick darkens instead of clipping to white).
+					if (dist2(cA, cB) < 48 * 48)
+						cB = (cB.lightness() > 150) ? cB.darker(160)
+						                            : cB.lighter(160);
+					// THE "changed colours broke the animation" bug: a stop
+					// too close to the panel background painted the moving
+					// tint invisibly (accent ≈ background is a common theme
+					// pick). Force contrast against the actual background
+					// fill for BOTH stops. RGB only — no HSL h=-1 trap.
+					auto contrastFix = [&dist2, &bgFill](QColor c){
+						if (dist2(c, bgFill) < 40 * 40)
+							return (bgFill.lightness() > 127)
+							       ? c.darker(170) : c.lighter(190);
+						return c;
+					};
+					cA = contrastFix(cA);
+					cB = contrastFix(cB);
+					cA.setAlpha(alpha);
+					cB.setAlpha(alpha);
 				}
 				auto mix = [](const QColor &x, const QColor &y, double t){
 					return QColor(
@@ -678,6 +703,16 @@ void SoundView::setStreamGradientEnabled(bool on)
 	if (m_streamGradientEnabled == on)
 		return;
 	m_streamGradientEnabled = on;
+	update();
+}
+
+void SoundView::setStreamGradientStyle(const QColor &colA, const QColor &colB,
+                                       int speed, int intensity)
+{
+	m_gradColA = colA;
+	m_gradColB = colB;
+	m_gradSpeed = qBound(0, speed, 100);
+	m_gradIntensity = qBound(0, intensity, 100);
 	update();
 }
 

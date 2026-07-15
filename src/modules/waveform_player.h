@@ -5,6 +5,7 @@
 #pragma once
 
 #include <QWidget>
+#include <QColor>
 #include "../SoundInfo.h"
 #include "../dsp/SandboxState.h"
 
@@ -79,6 +80,19 @@ public slots:
     // Setting: animated theme-aware gradient on the played portion of the
     // waveform (all playback, default ON). Forwarded to the SoundView.
     void setStreamGradientEnabled(bool on);
+    // Animation style (custom colors / auto, speed, intensity) — forwarded
+    // to the SoundView.
+    void setStreamGradientStyle(const QColor &colA, const QColor &colB,
+                                int speed, int intensity);
+    // Setting: format/quality badge before a LOCAL file's name, the local
+    // counterpart of the WEB badge a stream gets. Mode = badge complexity:
+    // 0 none, 1 format only ("FLAC"), 2 quality only ("16bit/44.1kHz"),
+    // 3 both as two coloured pills. Re-renders the current filename
+    // immediately so the change is visible without a reload.
+    void setFormatBadgeMode(int mode);
+    // Setting: the WEB / LIVE pill before a stream's title. Off = plain
+    // title. Re-renders immediately.
+    void setStreamBadgeEnabled(bool on);
     // Toggle ONLY the waveform visualisation (the SoundView). Filename,
     // time label and transport buttons stay so the user can still
     // play / pause / seek even in the compact "no waveform" mode.
@@ -186,6 +200,10 @@ private:
     void renderStreamLabel();
     // Start/stop the pulse timer (runs only for a LIVE badge).
     void updateStreamAnimTimer();
+
+    // ---- Local-file indicator: format / quality badge (settings-gated) ----
+    int  m_formatBadgeMode = 3;  // 0 none / 1 format / 2 quality / 3 both
+    bool m_streamBadge     = true; // WEB / LIVE pill on stream titles
 
     // Centralised icon + tooltip refresh for the play/pause button.
     // Looks at m_playing / m_paused / m_replayReady and picks the right

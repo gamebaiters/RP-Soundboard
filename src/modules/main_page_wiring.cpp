@@ -299,6 +299,16 @@ static void loadStreamIntoSlot(MainPage *page, Sampler *sampler, ConfigModel *mo
                     : QObject::tr("Fetching video info…"));
     s_slotPendingUrl[slot] = pageUrl;              // for the Cancel button
 
+    // Fine-grained stage narration from the resolver (engine spawn, site
+    // contact, extraction, queued-behind-update). ctx-scoped: dies with the
+    // resolve, so a stale stage can never overwrite a newer load's strip.
+    QObject::connect(&R, &StreamResolver::resolveProgress, ctx,
+        [page, slot, pageUrl](const QString &u, const QString &stage){
+            if (u != pageUrl) return;
+            if (slot < page->channels().size())
+                if (auto *ch = page->channels().at(slot))
+                    ch->setStreamLoadingText(stage);
+        });
     QObject::connect(&R, &StreamResolver::resolved, ctx,
         [page, sampler, model, slot, pageUrl, ctx, greenChannelName, autoPlay](
             const QString &u, const ResolvedStream &s){
@@ -309,8 +319,18 @@ static void loadStreamIntoSlot(MainPage *page, Sampler *sampler, ConfigModel *mo
             if (!ch) return;
             // Resolve done — the next (visible) stage is FFmpeg connecting to
             // the CDN, which can take a second or two. Keep the marquee up
-            // with the new stage text; onStartPlaying hides it.
-            ch->setStreamLoadingText(QObject::tr("Opening audio stream…"));
+            // with the new stage text (with the found title, so the user sees
+            // WHAT was found); onStartPlaying hides it.
+            QString found = s.title;
+            if (found.size() > 34) found = found.left(32) + QStringLiteral("…");
+            if (s.isLive)
+                ch->setStreamLoadingText(found.isEmpty()
+                    ? QObject::tr("Connecting to the live stream…")
+                    : QObject::tr("Connecting to live: %1").arg(found));
+            else
+                ch->setStreamLoadingText(found.isEmpty()
+                    ? QObject::tr("Opening audio stream…")
+                    : QObject::tr("Opening: %1").arg(found));
             ch->setStreamLoading(true);
             SoundInfo snd;
             snd.filename          = s.directUrl;
@@ -851,6 +871,12 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     w->setStreamAutoplay      (model->getStreamAutoplay());
     w->setStreamQuality       (StreamResolver::preferredQuality());
     w->setStreamFxGradient    (model->getStreamFxGradient());
+    w->setWaveAnimStyle       (QColor(model->getWaveAnimColorA()),
+                               QColor(model->getWaveAnimColorB()),
+                               model->getWaveAnimSpeed(),
+                               model->getWaveAnimIntensity());
+    w->setFormatBadgeMode     (model->getFormatBadgeMode());
+    w->setShowStreamBadge     (model->getShowStreamBadge());
     w->setVadWhilePlaying     (model->getVadWhilePlaying());
     w->setDuckWhenTalking     (model->getDuckWhenTalking());
     w->setDuckAmount          (model->getDuckAmountPercent());
@@ -899,6 +925,12 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
         ch->waveform()->setSpectrogramView(model->getSpectrogramView());
         ch->setVinylButtonVisible(model->getShowVinylButton());
         ch->waveform()->setStreamGradientEnabled(model->getStreamFxGradient());
+        ch->waveform()->setStreamGradientStyle(QColor(model->getWaveAnimColorA()),
+                                               QColor(model->getWaveAnimColorB()),
+                                               model->getWaveAnimSpeed(),
+                                               model->getWaveAnimIntensity());
+        ch->waveform()->setFormatBadgeMode(model->getFormatBadgeMode());
+        ch->waveform()->setStreamBadgeEnabled(model->getShowStreamBadge());
     }
     w->setResetChVolume(model->getResetChVolume());
     w->setResetChFx(model->getResetChFx());
@@ -1104,6 +1136,9 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         for (auto *ch : page->channels()) {
             ch->refreshTheme();
             ch->waveform()->update();
+            // Rich-text badges are not QSS-styled, so refreshTheme() cannot
+            // retint them: re-render the file label against the new accent.
+            ch->waveform()->setFormatBadgeMode(model->getFormatBadgeMode());
         }
         page->buttonGrid()->refreshAppearance();
     });
@@ -1117,6 +1152,9 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         for (auto *ch : page->channels()) {
             ch->refreshTheme();
             ch->waveform()->update();
+            // Rich-text badges are not QSS-styled, so refreshTheme() cannot
+            // retint them: re-render the file label against the new accent.
+            ch->waveform()->setFormatBadgeMode(model->getFormatBadgeMode());
         }
         page->buttonGrid()->refreshAppearance();
     });
@@ -1199,6 +1237,9 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         for (auto *ch : page->channels()) {
             ch->refreshTheme();
             ch->waveform()->update();
+            // Rich-text badges are not QSS-styled, so refreshTheme() cannot
+            // retint them: re-render the file label against the new accent.
+            ch->waveform()->setFormatBadgeMode(model->getFormatBadgeMode());
         }
         page->buttonGrid()->refreshAppearance();
     });
@@ -1226,6 +1267,27 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
     QObject::connect(w, &SettingsWindow::streamFxGradientChanged, [model, page](bool v){
         model->setStreamFxGradient(v);
         for (auto *ch : page->channels()) ch->waveform()->setStreamGradientEnabled(v);
+    });
+    // Waveform animation style (colors / speed / intensity). Invalid
+    // colors persist as empty strings = auto (follow the theme).
+    QObject::connect(w, &SettingsWindow::waveAnimStyleChanged,
+                     [model, page](const QColor &a, const QColor &b, int speed, int intensity){
+        model->setWaveAnimColorA(a.isValid() ? a.name() : QString());
+        model->setWaveAnimColorB(b.isValid() ? b.name() : QString());
+        model->setWaveAnimSpeed(speed);
+        model->setWaveAnimIntensity(intensity);
+        for (auto *ch : page->channels())
+            ch->waveform()->setStreamGradientStyle(a, b, speed, intensity);
+    });
+    // Format / quality badge before a local file's name (theme-aware).
+    QObject::connect(w, &SettingsWindow::formatBadgeModeChanged, [model, page](int mode){
+        model->setFormatBadgeMode(mode);
+        for (auto *ch : page->channels()) ch->waveform()->setFormatBadgeMode(mode);
+    });
+    // WEB / LIVE pill on stream titles.
+    QObject::connect(w, &SettingsWindow::showStreamBadgeChanged, [model, page](bool v){
+        model->setShowStreamBadge(v);
+        for (auto *ch : page->channels()) ch->waveform()->setStreamBadgeEnabled(v);
     });
     QObject::connect(w, &SettingsWindow::multiChannelInfinityChanged, [model, page](bool v){
         model->setMultiChannelInfinity(v);
@@ -4179,6 +4241,12 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         ch->waveform()->setAdaptToFx(model->getAdaptWaveformToFx());
         ch->waveform()->setShowCropMarkers(model->getShowCropMarkers());
         ch->waveform()->setStreamGradientEnabled(model->getStreamFxGradient());
+        ch->waveform()->setStreamGradientStyle(QColor(model->getWaveAnimColorA()),
+                                               QColor(model->getWaveAnimColorB()),
+                                               model->getWaveAnimSpeed(),
+                                               model->getWaveAnimIntensity());
+        ch->waveform()->setFormatBadgeMode(model->getFormatBadgeMode());
+        ch->waveform()->setStreamBadgeEnabled(model->getShowStreamBadge());
         if (model->getAdaptWaveformToFx()) {
             ch->waveform()->setSandboxState(ch->sandboxState());
             // Seed the live FxPanel state too so the waveform reflects

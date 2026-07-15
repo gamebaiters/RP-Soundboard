@@ -24,6 +24,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QHash>
 #include <QSet>
 #include <QDateTime>
@@ -92,6 +93,41 @@ public:
 	// back to the bare name (PATH lookup) if the bundled copy is missing.
 	static QString ytDlpPath();
 
+	// PERSISTENT cache dir for the engine (NOT the temp scratch, which is wiped
+	// every session). yt-dlp caches the deciphered YouTube player / nsig JS
+	// here; with no cache it re-downloads and re-interprets that JS on EVERY
+	// resolve, which is the single biggest cause of slow + flaky link loading
+	// (worst on macOS, where the engine is a self-extracting bundle to begin
+	// with). Small, self-contained, under the app's own cache location.
+	static QString cacheDir();
+
+	// Flags every yt-dlp invocation carries: persistent cache, no colour codes,
+	// and --ignore-config so a yt-dlp config file the user happens to have on
+	// their system (very common on macOS via Homebrew) can never rewrite our
+	// format selection or output paths behind our back.
+	static QStringList commonArgs();
+
+	// Watchdog budgets. macOS gets far more headroom: yt-dlp_macos is a
+	// self-extracting PyInstaller bundle whose cold start alone can take
+	// several seconds (plus Gatekeeper on first run), so the old flat 25 s
+	// killed legitimate resolves and surfaced them as "couldn't load".
+	static int resolveTimeoutMs();
+	static int playlistTimeoutMs();
+
+	// Startup routine, once per session: pay the engine's cold-start cost
+	// (self-extraction, Gatekeeper scan, page cache) in the background, and run
+	// the engine self-update AT MOST ONCE A DAY. It used to run on every single
+	// startup — on macOS that meant `-U` could still be rewriting the ~40 MB
+	// binary when the user pasted their first link, and the resolve then spawned
+	// a half-replaced executable (hang / bogus failure).
+	void warmUp();
+
+	// Abort an in-flight self-update. A user action always outranks the
+	// updater: a resolve arriving mid-update is queued and, if the update has
+	// not finished within a short grace, the update is cancelled so the link
+	// loads NOW (the next session will update instead).
+	void cancelUpdate();
+
 	// Dedicated scratch dir (under the OS temp) used as the working directory
 	// for EVERY yt-dlp process, so any stray file it might write is contained
 	// there and never pollutes the user's disk. Created on demand.
@@ -138,6 +174,11 @@ public slots:
 signals:
 	void resolved(const QString &pageUrl, const ResolvedStream &stream);
 	void failed(const QString &pageUrl, const QString &error);
+	// Fine-grained resolve stages ("Starting the stream engine…",
+	// "Contacting the site…", "Extracting the audio track info…", ...) so
+	// the channel's loading strip can narrate what is actually happening
+	// instead of sitting on one generic message. Purely informational.
+	void resolveProgress(const QString &pageUrl, const QString &stage);
 	void versionReady(const QString &version);      // "" = unavailable
 	void updateStatus(const QString &line);         // progress line
 	void updateFinished(bool ok, const QString &message);
@@ -150,15 +191,30 @@ private:
 	explicit StreamResolver(QObject *parent = nullptr);
 	void startProcess(const QString &pageUrl);
 	void finishProcess(QProcess *proc, const QString &pageUrl);
+	// Parse whatever the resolve has printed SO FAR. Returns true once a
+	// complete, usable JSON object is in `out` — the resolve is then answered
+	// immediately, without waiting for the engine process to exit (its own
+	// teardown costs another second or more on macOS).
+	static bool parseResolveJson(const QByteArray &out, ResolvedStream &s);
+	// Detach a finished/answered resolve proc: drop bookkeeping, let it exit on
+	// its own and self-delete (killing a self-extracting engine mid-run would
+	// leave its extraction dir behind on disk).
+	void retireProcess(QProcess *proc);
+	// Start every resolve that was parked while the self-update was running.
+	void flushQueuedResolves();
 
 	QHash<QString, ResolvedStream> m_cache;     // key = videoKey()
 	QHash<QProcess *, QString>     m_inflight;  // running resolve proc -> pageUrl
+	QHash<QProcess *, QByteArray>  m_outBuf;    // incremental stdout per resolve
 	QHash<QProcess *, QString>     m_playlistInflight; // playlist resolve proc -> url
 	QSet<QProcess *>               m_aux;       // running version/update procs
 	QProcess *                     m_download = nullptr; // active downloadAudio proc
+	QProcess *                     m_updateProc = nullptr; // active `-U` proc
+	QStringList                    m_queuedResolves;    // parked during an update
+	bool                           m_updating = false;
+	bool                           m_warmedUp = false;
 
 	static const qint64 kTtlSec    = 5 * 3600;  // < ~6 h googlevideo expiry
-	static const int    kTimeoutMs = 25000;     // watchdog kill
 };
 
 #endif // rpsbsrc__stream_resolver_H__

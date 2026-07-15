@@ -195,6 +195,8 @@ set(sources
 	src/modules/audio_exporter.cpp
 	src/modules/audio_encoder_ffmpeg.h
 	src/modules/audio_encoder_ffmpeg.cpp
+	src/modules/audio_probe.h
+	src/modules/audio_probe.cpp
 	src/modules/export_progress_dialog.h
 	src/modules/export_progress_dialog.cpp
 	src/modules/pipeline_widget.h

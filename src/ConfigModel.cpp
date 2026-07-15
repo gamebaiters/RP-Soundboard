@@ -142,6 +142,12 @@ ConfigModel::ConfigModel()
 	m_channelNameLinkDetect = true;
 	m_streamAutoplay = false;
 	m_streamFxGradient = true;
+	m_waveAnimColorA.clear();
+	m_waveAnimColorB.clear();
+	m_waveAnimSpeed = 50;
+	m_waveAnimIntensity = 30;
+	m_formatBadgeMode = 3;
+	m_showStreamBadge = true;
 	m_loudnessNormalize = false;
 
 	m_resetChVolume = true;
@@ -238,6 +244,19 @@ void ConfigModel::readConfig(const QString &file)
 	m_channelNameLinkDetect = settings.value("channel_name_link_detect",  true).toBool();
 	m_streamAutoplay        = settings.value("stream_autoplay",           false).toBool();
 	m_streamFxGradient      = settings.value("stream_fx_gradient",        true).toBool();
+	m_waveAnimColorA        = settings.value("wave_anim_color_a",         QString()).toString();
+	m_waveAnimColorB        = settings.value("wave_anim_color_b",         QString()).toString();
+	m_waveAnimSpeed         = qBound(0, settings.value("wave_anim_speed",     50).toInt(), 100);
+	m_waveAnimIntensity     = qBound(0, settings.value("wave_anim_intensity", 30).toInt(), 100);
+	// Badge complexity (0 none / 1 format / 2 quality / 3 both). Migrates
+	// the short-lived v2.3.3 bool key: an explicit false becomes "none".
+	{
+		const bool legacyOn = settings.value("show_format_badge", true).toBool();
+		m_formatBadgeMode = settings.value("format_badge_mode",
+		                                   legacyOn ? 3 : 0).toInt();
+		if (m_formatBadgeMode < 0 || m_formatBadgeMode > 3) m_formatBadgeMode = 3;
+	}
+	m_showStreamBadge       = settings.value("show_stream_badge",         true).toBool();
 	m_vadWhilePlaying       = settings.value("vad_while_playing",         false).toBool();
 	m_duckWhenTalking       = settings.value("duck_when_talking",         false).toBool();
 	m_duckAmountPercent     = settings.value("duck_amount_percent",       40).toInt();
@@ -353,6 +372,12 @@ void ConfigModel::writeConfigImmediate(const QString &file)
 	settings.setValue("channel_name_link_detect",  m_channelNameLinkDetect);
 	settings.setValue("stream_autoplay",           m_streamAutoplay);
 	settings.setValue("stream_fx_gradient",        m_streamFxGradient);
+	settings.setValue("format_badge_mode",         m_formatBadgeMode);
+	settings.setValue("show_stream_badge",         m_showStreamBadge);
+	settings.setValue("wave_anim_color_a",         m_waveAnimColorA);
+	settings.setValue("wave_anim_color_b",         m_waveAnimColorB);
+	settings.setValue("wave_anim_speed",           m_waveAnimSpeed);
+	settings.setValue("wave_anim_intensity",       m_waveAnimIntensity);
 	settings.setValue("vad_while_playing",         m_vadWhilePlaying);
 	settings.setValue("duck_when_talking",         m_duckWhenTalking);
 	settings.setValue("duck_amount_percent",       m_duckAmountPercent);
@@ -961,6 +986,12 @@ void ConfigModel::setStreamingEnabled(bool on)        { m_streamingEnabled      
 void ConfigModel::setChannelNameLinkDetect(bool on)   { m_channelNameLinkDetect  = on; writeConfig(); }
 void ConfigModel::setStreamAutoplay(bool on)          { m_streamAutoplay         = on; writeConfig(); }
 void ConfigModel::setStreamFxGradient(bool on)        { m_streamFxGradient       = on; writeConfig(); }
+void ConfigModel::setFormatBadgeMode(int mode)        { m_formatBadgeMode = (mode < 0 || mode > 3) ? 3 : mode; writeConfig(); }
+void ConfigModel::setShowStreamBadge(bool on)         { m_showStreamBadge        = on; writeConfig(); }
+void ConfigModel::setWaveAnimColorA(const QString &c) { m_waveAnimColorA         = c;  writeConfig(); }
+void ConfigModel::setWaveAnimColorB(const QString &c) { m_waveAnimColorB         = c;  writeConfig(); }
+void ConfigModel::setWaveAnimSpeed(int v)             { m_waveAnimSpeed     = qBound(0, v, 100); writeConfig(); }
+void ConfigModel::setWaveAnimIntensity(int v)         { m_waveAnimIntensity = qBound(0, v, 100); writeConfig(); }
 void ConfigModel::setVadWhilePlaying(bool on)         { m_vadWhilePlaying        = on; writeConfig(); }
 void ConfigModel::setDuckWhenTalking(bool on)         { m_duckWhenTalking        = on; writeConfig(); }
 void ConfigModel::setDuckAmountPercent(int pct)       { m_duckAmountPercent      = pct; writeConfig(); }

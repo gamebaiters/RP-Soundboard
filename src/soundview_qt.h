@@ -85,6 +85,11 @@ public:
 	// Animated theme-aware gradient on the played-portion tint (all
 	// playback, default ON — follows the custom theme's colours when set).
 	void setStreamGradientEnabled(bool on);
+	// Animation style from Settings. Invalid colors = auto (theme
+	// accent/waveform pair, or the default azure→violet). speed and
+	// intensity are the 0..100 slider values (50 / 30 = defaults).
+	void setStreamGradientStyle(const QColor &colA, const QColor &colB,
+	                            int speed, int intensity);
 
 signals:
 	void seekRequested(double fraction);
@@ -174,6 +179,12 @@ private:
 	// 30 Hz position poll already repaints during playback.
 	bool           m_streamGradientEnabled = true;
 	QElapsedTimer  m_gradClock;
+	// User style overrides (Settings › Streaming › Appearance). Invalid
+	// color = auto (theme-driven).
+	QColor         m_gradColA;
+	QColor         m_gradColB;
+	int            m_gradSpeed = 50;      // 0..100, 50 = 1x
+	int            m_gradIntensity = 30;  // 0..100 -> tint alpha
 
 	// Per-view waveform analyser. Was a process-wide singleton: two
 	// channels loading different files fought over the same bin array

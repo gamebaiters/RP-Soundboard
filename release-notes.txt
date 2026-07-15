@@ -1,3 +1,84 @@
+GameBaiters Soundboard v2.3.4
+=============================
+
+The stability release. The crash that made a "ghost" of you on the
+server is gone, macOS no longer freezes while loading links, and the
+file badges + waveform animation are now fully yours to style.
+
+Stability
+---------
+
+* FIX - TeamSpeak could crash the moment you disconnected from a server
+  while the soundboard had unsaved changes. The crash also left a
+  "ghost" of you on the server - a clone with your identity that kept
+  timing out and reappearing in the logs. Settings are now saved right
+  after the disconnect completes instead of in the middle of it.
+
+* FIX - Disconnecting while a stream was loaded could stall TeamSpeak
+  for several seconds (or crash it) while the network stream was being
+  closed. The close is now aborted instantly and safely.
+
+* FIX - macOS: loading a link could freeze the whole soundboard UI for
+  up to 15 seconds (or until the stream gave up). One stuck network
+  open was blocking every other channel. The UI now never waits on a
+  busy worker - macOS behaves like Windows.
+
+File badges (new)
+-----------------
+
+* NEW - Coloured format/quality badges before local file names. FLAC is
+  green, MP3 orange, OGG purple, OPUS magenta, AAC red, WAV steel blue -
+  and the quality pill is coloured by tier: gold for hi-res lossless,
+  green for lossless, teal / amber / red for high / mid / low bitrate.
+
+* NEW - You choose how much to show: Settings > Channels > "File badge
+  before the file name" - nothing, format only, quality only, or both.
+
+* NEW - The WEB / LIVE badge on stream titles can now be turned off too
+  (Settings > Channels).
+
+* NEW - Badge colours blend toward your custom theme's accent when a
+  theme is active, so they always sit well in your palette.
+
+Waveform animation
+------------------
+
+* FIX - The animated colour flow on the played waveform could turn
+  invisible with certain custom theme colours (an accent close to the
+  background made the moving tint disappear). It now guarantees
+  contrast against the actual background, whatever colours you pick.
+
+* NEW - Full animation customization in Settings > Streaming >
+  Appearance: pick your own two animation colours (or leave them on
+  Auto to follow the theme), and set the animation speed and intensity
+  with sliders.
+
+Streaming (YouTube / links)
+---------------------------
+
+* NEW - The loading strip now narrates every stage of a link load:
+  "Starting the stream engine...", "Contacting the site...",
+  "Extracting the audio track info...", then "Opening: <title>" with
+  the actual video title (or "Connecting to live: <title>" for live
+  broadcasts) - so you always know what it is doing and what it found.
+
+* FIX - Faster and more reliable link loading. The streaming engine now
+  keeps a persistent cache (no more re-downloading the same data on
+  every link), updates itself at most once a day instead of at every
+  start, and a link pasted during an engine update no longer hangs -
+  the update steps aside and the link loads.
+
+* FIX - macOS: link resolving now gets the extra time it legitimately
+  needs on first use, instead of being cut off and reported as a
+  failure.
+
+Localization
+------------
+
+* NEW - Every new option and message in this release is fully
+  translated in Italian.
+
+
 GameBaiters Soundboard v2.3.3
 =============================
 

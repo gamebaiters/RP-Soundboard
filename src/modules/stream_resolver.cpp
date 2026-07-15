@@ -150,15 +150,123 @@ QString StreamResolver::ytDlpPath()
 		// (this is why streaming "wasn't included" on macOS/Linux). Restore the
 		// exec bit on demand, and on macOS also clear the Gatekeeper quarantine
 		// flag so the unsigned binary is allowed to run.
-		const QByteArray p = exe.toUtf8();
-		::chmod(p.constData(), 0755);
+		//
+		// Done ONCE per session: this runs on the GUI thread before every spawn,
+		// and on macOS the syscalls hit a ~40 MB binary that may still be cold.
+		static bool s_perms = false;
+		if (!s_perms) {
+			s_perms = true;
+			const QByteArray p = exe.toUtf8();
+			::chmod(p.constData(), 0755);
 #ifdef __APPLE__
-		::removexattr(p.constData(), "com.apple.quarantine", 0);
+			::removexattr(p.constData(), "com.apple.quarantine", 0);
 #endif
+		}
 #endif
 		return exe;
 	}
 	return fallback; // last-ditch: let the OS resolve it on PATH
+}
+
+//----------------------------------------------------------------
+QString StreamResolver::cacheDir()
+{
+	QString base = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+	if (base.isEmpty()) base = QDir::tempPath();
+	QString dir = base + "/gbsb_ytdlp";
+	QDir().mkpath(dir);
+	return dir;
+}
+
+//----------------------------------------------------------------
+QStringList StreamResolver::commonArgs()
+{
+	return QStringList{
+		// PERSISTENT cache. Was --no-cache-dir: every single resolve then
+		// re-downloaded and re-interpreted YouTube's player JS (pure-Python
+		// jsinterp — seconds of CPU), and a failed nsig extraction is exactly
+		// what surfaces as a random "couldn't load this link".
+		"--cache-dir", cacheDir(),
+		// A yt-dlp config on the user's machine (Homebrew installs one on macOS
+		// often enough) would silently override our format / output selection.
+		"--ignore-config",
+		"--no-color",
+		"--socket-timeout", "15",
+		"--extractor-retries", "3",
+	};
+}
+
+//----------------------------------------------------------------
+int StreamResolver::resolveTimeoutMs()
+{
+#ifdef __APPLE__
+	return 75000;   // self-extracting bundle + Gatekeeper: 25 s was too tight
+#else
+	return 40000;
+#endif
+}
+
+int StreamResolver::playlistTimeoutMs()
+{
+#ifdef __APPLE__
+	return 120000;
+#else
+	return 60000;
+#endif
+}
+
+//----------------------------------------------------------------
+void StreamResolver::warmUp()
+{
+	if (m_warmedUp) return;
+	m_warmedUp = true;
+	// Fire-and-forget `--version`. The point is not the version string: it is
+	// paying the engine's cold-start cost (PyInstaller self-extraction on
+	// macOS/Linux, the first-run Gatekeeper scan, and getting the binary into
+	// the OS page cache) NOW, in the background, instead of on the first link
+	// the user pastes.
+	logInfo("[stream] warming up the engine");
+	queryVersion();
+
+	// Self-update AT MOST ONCE A DAY (it used to run on every startup). The
+	// engine binary is rewritten in place by `-U`; on macOS it is a ~40 MB
+	// self-extracting bundle, so an update still running when the user pasted
+	// their first link left the resolve spawning a half-replaced executable.
+	QSettings st("GameBaiters", "Soundboard");
+	const qint64 last = st.value("stream/last_engine_update", 0).toLongLong();
+	const qint64 now  = QDateTime::currentSecsSinceEpoch();
+	if (last > 0 && now - last < 24 * 3600) {
+		logInfo("[stream] engine auto-update skipped (last check %lld h ago)",
+		        (long long)((now - last) / 3600));
+		return;
+	}
+	st.setValue("stream/last_engine_update", now);
+	updateEngine();
+}
+
+//----------------------------------------------------------------
+void StreamResolver::cancelUpdate()
+{
+	if (!m_updateProc) return;
+	QProcess *p = m_updateProc;
+	m_updateProc = nullptr;
+	m_updating   = false;
+	m_aux.remove(p);
+	p->disconnect();
+	if (p->state() != QProcess::NotRunning) { p->kill(); p->waitForFinished(1500); }
+	p->deleteLater();
+	logInfo("[stream] engine auto-update cancelled (a link is waiting)");
+	emit updateFinished(false, tr("Update postponed."));
+}
+
+//----------------------------------------------------------------
+void StreamResolver::flushQueuedResolves()
+{
+	if (m_queuedResolves.isEmpty()) return;
+	const QStringList urls = m_queuedResolves;
+	m_queuedResolves.clear();
+	for (const QString &u : urls)
+		resolve(u);
 }
 
 //----------------------------------------------------------------
@@ -228,6 +336,22 @@ void StreamResolver::resolve(const QString &pageUrl)
 	if (m_inflight.values().contains(url))
 		return;
 
+	// NEVER spawn the engine while it is self-updating: `-U` rewrites the very
+	// binary we are about to launch. Park the link, and give the update a short
+	// grace to land — if it hasn't, the update loses (a user waiting on a link
+	// outranks a background update, which simply runs next session).
+	if (m_updating) {
+		if (!m_queuedResolves.contains(url)) m_queuedResolves << url;
+		emit resolveProgress(url, tr("Finishing a stream engine update…"));
+		logInfo("[stream] link queued behind the engine update: %s",
+		        url.toUtf8().constData());
+		QTimer::singleShot(5000, this, [this]() {
+			if (m_updating) cancelUpdate();   // emits nothing else; then:
+			flushQueuedResolves();
+		});
+		return;
+	}
+
 	startProcess(url);
 }
 
@@ -245,18 +369,17 @@ void StreamResolver::startProcess(const QString &pageUrl)
 		});
 #endif
 
-	const QStringList args = {
-		"-f", formatSelector(),               // quality from settings
-		"--no-playlist",
-		"--no-warnings",
-		"--no-progress",
-		"--no-cache-dir",                     // never write a yt-dlp cache tree
-		"--skip-download",                    // RESOLVE only — never touch disk
-		"--no-write-info-json", "--no-write-thumbnail", "--no-write-playlist-metafiles",
-		// One line of JSON with exactly the fields we need; url respects -f.
-		"--print", "%(.{title,duration,is_live,url,http_headers})j",
-		pageUrl
-	};
+	QStringList args = commonArgs();
+	args << "-f" << formatSelector()          // quality from settings
+	     << "--no-playlist"
+	     << "--no-warnings"
+	     << "--no-progress"
+	     << "--skip-download"                 // RESOLVE only — never touch disk
+	     << "--no-write-info-json" << "--no-write-thumbnail"
+	     << "--no-write-playlist-metafiles"
+	     // One line of JSON with exactly the fields we need; url respects -f.
+	     << "--print" << "%(.{title,duration,is_live,url,http_headers})j"
+	     << pageUrl;
 
 	proc->setWorkingDirectory(workDir());   // contain any stray write
 
@@ -265,6 +388,7 @@ void StreamResolver::startProcess(const QString &pageUrl)
 	           pageUrl.toUtf8().constData());
 
 	m_inflight.insert(proc, pageUrl);
+	m_outBuf.insert(proc, QByteArray());
 
 	// Watchdog: kill a hung resolve so a dead URL fails instead of leaking.
 	QTimer *wd = new QTimer(proc);
@@ -273,12 +397,51 @@ void StreamResolver::startProcess(const QString &pageUrl)
 		if (proc->state() != QProcess::NotRunning)
 			proc->kill();
 	});
-	wd->start(kTimeoutMs);
+	wd->start(resolveTimeoutMs());
+
+	// Narrate the resolve to the loading strip: engine spawn -> site
+	// contact -> extraction. Stages are informational only.
+	connect(proc, &QProcess::started, this, [this, pageUrl]() {
+		emit resolveProgress(pageUrl, tr("Contacting the site…"));
+	});
+
+	// ANSWER AS SOON AS THE JSON LANDS. The engine still has work to do after
+	// printing (a self-extracting build tears its extraction dir down, which
+	// costs another second-plus on macOS); waiting for exit made every resolve
+	// pay for that, and made the whole feature hostage to the process-exit
+	// notification actually being delivered inside the TS3 host.
+	connect(proc, &QProcess::readyReadStandardOutput, this,
+		[this, proc, pageUrl]() {
+			auto it = m_outBuf.find(proc);
+			if (it == m_outBuf.end()) return;   // already answered
+			const bool firstBytes = it->isEmpty();
+			*it += proc->readAllStandardOutput();
+			ResolvedStream s;
+			if (!parseResolveJson(*it, s)) {
+				// Something is coming out but the JSON isn't complete:
+				// the extractor is working through the page.
+				if (firstBytes)
+					emit resolveProgress(pageUrl,
+						tr("Extracting the audio track info…"));
+				return;
+			}
+			retireProcess(proc);                // let it exit + self-delete
+			s.resolvedAt = QDateTime::currentDateTime();
+			m_cache.insert(videoKey(pageUrl), s);
+			logInfo("[stream] resolved: '%s' (%.0fs%s) <- %s",
+			        s.title.toUtf8().constData(), s.durationSec,
+			        s.isLive ? ", LIVE" : "",
+			        pageUrl.toUtf8().constData());
+			extremeLog("[stream] direct url: %s", s.directUrl.toUtf8().constData());
+			emit resolved(pageUrl, s);
+		});
 
 	connect(proc, &QProcess::errorOccurred, this,
 		[this, proc, pageUrl](QProcess::ProcessError e) {
 			if (e == QProcess::FailedToStart) {
+				if (!m_inflight.contains(proc)) return;
 				m_inflight.remove(proc);
+				m_outBuf.remove(proc);
 				proc->deleteLater();
 				emit failed(pageUrl, tr("Streaming engine unavailable."));
 			}
@@ -290,42 +453,38 @@ void StreamResolver::startProcess(const QString &pageUrl)
 			finishProcess(proc, pageUrl);
 		});
 
+	emit resolveProgress(pageUrl, tr("Starting the stream engine…"));
 	proc->start(ytDlpPath(), args);
 }
 
 //----------------------------------------------------------------
-void StreamResolver::finishProcess(QProcess *proc, const QString &pageUrl)
+// Drop a resolve proc from the bookkeeping but let it run to completion on its
+// own: killing a self-extracting engine mid-run strands its extraction dir in
+// the OS temp. The finished handler sees no bookkeeping entry and just reaps it.
+void StreamResolver::retireProcess(QProcess *proc)
 {
 	m_inflight.remove(proc);
-	const QByteArray out = proc->readAllStandardOutput();
-	const QByteArray err = proc->readAllStandardError();
-	const int code = proc->exitCode();
-	proc->deleteLater();
+	m_outBuf.remove(proc);
+	m_aux.insert(proc);   // so shutdown() still reaps it if TS3 closes right now
+}
 
-	if (code != 0 || out.trimmed().isEmpty()) {
-		logWarning("[stream] resolve failed (exit %d): %s", code,
-		           pageUrl.toUtf8().constData());
-		if (!err.trimmed().isEmpty())
-			extremeLog("[stream] yt-dlp stderr: %s", err.trimmed().constData());
-		emit failed(pageUrl, tr("Couldn't load this link."));
-		return;
-	}
+//----------------------------------------------------------------
+bool StreamResolver::parseResolveJson(const QByteArray &out, ResolvedStream &s)
+{
+	// yt-dlp prints one JSON object line (odd extractors may print stray lines
+	// first -> scan for the first '{'), and this can be called on a PARTIAL
+	// buffer, so a failed parse just means "not complete yet".
+	const int brace = out.indexOf('{');
+	if (brace < 0) return false;
+	const int nl = out.indexOf('\n', brace);
+	if (nl < 0) return false;                       // line not terminated yet
 
-	// yt-dlp prints one JSON object line (may be preceded by stray lines on odd
-	// extractors -> scan for the first '{').
-	int brace = out.indexOf('{');
-	QJsonParseError perr;
-	QJsonDocument doc = (brace >= 0)
-		? QJsonDocument::fromJson(out.mid(brace), &perr)
-		: QJsonDocument();
-	if (!doc.isObject()) {
-		emit failed(pageUrl, tr("Couldn't load this link."));
-		return;
-	}
+	QJsonDocument doc = QJsonDocument::fromJson(out.mid(brace, nl - brace));
+	if (!doc.isObject()) return false;
 
 	const QJsonObject o = doc.object();
-	ResolvedStream s;
 	s.directUrl = o.value("url").toString();
+	if (s.directUrl.isEmpty()) return false;
 	s.title     = o.value("title").toString();
 	// duration may be int, double or null
 	const QJsonValue dur = o.value("duration");
@@ -335,11 +494,6 @@ void StreamResolver::finishProcess(QProcess *proc, const QString &pageUrl)
 	s.isLive = o.value("is_live").toBool(false);
 	if (!s.isLive && s.durationSec <= 0.0 && s.directUrl.contains(".m3u8"))
 		s.isLive = true;
-
-	if (s.directUrl.isEmpty()) {
-		emit failed(pageUrl, tr("Couldn't load this link."));
-		return;
-	}
 
 	// Flatten http_headers -> User-Agent + CRLF-joined remainder. Strip headers
 	// that would fight FFmpeg's own transport: Accept-Encoding (we build FFmpeg
@@ -360,17 +514,47 @@ void StreamResolver::finishProcess(QProcess *proc, const QString &pageUrl)
 	}
 	if (!extra.isEmpty())
 		s.headers = extra.join("\r\n") + "\r\n";
+	return true;
+}
 
-	s.resolvedAt = QDateTime::currentDateTime();
-	m_cache.insert(videoKey(pageUrl), s);
+//----------------------------------------------------------------
+void StreamResolver::finishProcess(QProcess *proc, const QString &pageUrl)
+{
+	// Already answered from the streaming parser (the common case now): this is
+	// just the reaper.
+	if (!m_inflight.contains(proc)) {
+		m_aux.remove(proc);       // retireProcess() parked it there
+		proc->deleteLater();
+		return;
+	}
+	m_inflight.remove(proc);
+	QByteArray out = m_outBuf.take(proc);
+	out += proc->readAllStandardOutput();
+	out += '\n';   // the parser wants a terminated line; the stream is complete
+	const QByteArray err = proc->readAllStandardError();
+	const int code = proc->exitCode();
+	proc->deleteLater();
 
-	logInfo("[stream] resolved: '%s' (%.0fs%s) <- %s",
-	        s.title.toUtf8().constData(), s.durationSec,
-	        s.isLive ? ", LIVE" : "",
-	        pageUrl.toUtf8().constData());
-	extremeLog("[stream] direct url: %s", s.directUrl.toUtf8().constData());
+	// A non-zero exit with a complete JSON line is still a win (the engine can
+	// fail on a teardown step AFTER printing what we asked for).
+	ResolvedStream s;
+	if (parseResolveJson(out, s)) {
+		s.resolvedAt = QDateTime::currentDateTime();
+		m_cache.insert(videoKey(pageUrl), s);
+		logInfo("[stream] resolved: '%s' (%.0fs%s) <- %s",
+		        s.title.toUtf8().constData(), s.durationSec,
+		        s.isLive ? ", LIVE" : "",
+		        pageUrl.toUtf8().constData());
+		extremeLog("[stream] direct url: %s", s.directUrl.toUtf8().constData());
+		emit resolved(pageUrl, s);
+		return;
+	}
 
-	emit resolved(pageUrl, s);
+	logWarning("[stream] resolve failed (exit %d): %s", code,
+	           pageUrl.toUtf8().constData());
+	if (!err.trimmed().isEmpty())
+		extremeLog("[stream] yt-dlp stderr: %s", err.trimmed().constData());
+	emit failed(pageUrl, tr("Couldn't load this link."));
 }
 
 //----------------------------------------------------------------
@@ -398,7 +582,7 @@ void StreamResolver::queryVersion()
 	connect(wd, &QTimer::timeout, proc, [proc]{
 		if (proc->state() != QProcess::NotRunning) proc->kill();
 	});
-	wd->start(kTimeoutMs);
+	wd->start(resolveTimeoutMs());
 
 	connect(proc, &QProcess::errorOccurred, this, [this, proc](QProcess::ProcessError e){
 		if (e == QProcess::FailedToStart) {
@@ -419,14 +603,19 @@ void StreamResolver::queryVersion()
 			emit versionReady(v);
 		});
 
-	proc->start(ytDlpPath(), QStringList{ "--version", "--no-cache-dir" });
+	proc->start(ytDlpPath(), QStringList{ "--version" } + commonArgs());
 }
 
 //----------------------------------------------------------------
 void StreamResolver::updateEngine()
 {
+	if (m_updating) return;   // one at a time
 	QProcess *proc = makeHidden(this);
 	m_aux.insert(proc);
+	// Tracked so resolve() can refuse to spawn the engine while its binary is
+	// being rewritten underneath us.
+	m_updateProc = proc;
+	m_updating   = true;
 	logInfo("[stream] yt-dlp self-update starting");
 	emit updateStatus(tr("Checking for updates…"));
 
@@ -448,14 +637,17 @@ void StreamResolver::updateEngine()
 	connect(proc, &QProcess::errorOccurred, this, [this, proc](QProcess::ProcessError e){
 		if (e == QProcess::FailedToStart) {
 			m_aux.remove(proc);
+			if (m_updateProc == proc) { m_updateProc = nullptr; m_updating = false; }
 			proc->deleteLater();
 			logWarning("[stream] update: engine unavailable");
 			emit updateFinished(false, tr("Streaming engine unavailable."));
+			flushQueuedResolves();
 		}
 	});
 	connect(proc, static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished),
 		this, [this, proc](int code, QProcess::ExitStatus){
 			m_aux.remove(proc);
+			if (m_updateProc == proc) { m_updateProc = nullptr; m_updating = false; }
 			const QString out = QString::fromUtf8(proc->readAllStandardOutput()).trimmed();
 			const QString er  = QString::fromUtf8(proc->readAllStandardError()).trimmed();
 			proc->deleteLater();
@@ -465,9 +657,11 @@ void StreamResolver::updateEngine()
 			emit updateFinished(ok, ok ? (out.isEmpty() ? tr("Up to date.")
 			                                             : out.section('\n', -1))
 			                           : tr("Update failed."));
+			// A link the user pasted mid-update is now safe to resolve.
+			flushQueuedResolves();
 		});
 
-	proc->start(ytDlpPath(), QStringList{ "-U", "--no-cache-dir" });
+	proc->start(ytDlpPath(), QStringList{ "-U" } + commonArgs());
 }
 
 //----------------------------------------------------------------
@@ -481,16 +675,14 @@ void StreamResolver::resolvePlaylist(const QString &pageUrl)
 	m_playlistInflight.insert(proc, url);   // for cancelResolve(url)
 
 	// --flat-playlist: never touches the videos, only enumerates ids/titles.
-	const QStringList args = {
-		"--flat-playlist",
-		"--skip-download",              // enumerate only — never download
-		"--no-warnings",
-		"--no-progress",
-		"--no-cache-dir",
-		"--no-write-info-json", "--no-write-playlist-metafiles",
-		"--print", "%(.{id,title,url,webpage_url,playlist_title})j",
-		url
-	};
+	QStringList args = commonArgs();
+	args << "--flat-playlist"
+	     << "--skip-download"           // enumerate only — never download
+	     << "--no-warnings"
+	     << "--no-progress"
+	     << "--no-write-info-json" << "--no-write-playlist-metafiles"
+	     << "--print" << "%(.{id,title,url,webpage_url,playlist_title})j"
+	     << url;
 	logInfo("[stream] resolving playlist: %s", url.toUtf8().constData());
 
 	QTimer *wd = new QTimer(proc);
@@ -498,7 +690,7 @@ void StreamResolver::resolvePlaylist(const QString &pageUrl)
 	connect(wd, &QTimer::timeout, proc, [proc]{
 		if (proc->state() != QProcess::NotRunning) proc->kill();
 	});
-	wd->start(60000);
+	wd->start(playlistTimeoutMs());
 
 	connect(proc, &QProcess::errorOccurred, this, [this, proc, url](QProcess::ProcessError e){
 		if (e == QProcess::FailedToStart) {
@@ -561,17 +753,15 @@ void StreamResolver::downloadAudio(const QString &pageUrl, const QString &destFi
 	// yt-dlp never spawns an external ffmpeg child (which could linger as a
 	// ghost on kill, and isn't guaranteed on PATH). The chosen format is
 	// audio-only (m4a) so the .m4a file is already a clean playable audio file.
-	const QStringList args = {
-		"-f", formatSelector(),
-		"--no-playlist",
-		"--no-warnings",
-		"--no-cache-dir",
-		"--no-part",
-		"--newline",                 // one progress line per update (parseable)
-		"-o", destFile,
-		"--force-overwrites",
-		pageUrl
-	};
+	QStringList args = commonArgs();
+	args << "-f" << formatSelector()
+	     << "--no-playlist"
+	     << "--no-warnings"
+	     << "--no-part"
+	     << "--newline"              // one progress line per update (parseable)
+	     << "-o" << destFile
+	     << "--force-overwrites"
+	     << pageUrl;
 	logInfo("[stream] download start -> %s", destFile.toUtf8().constData());
 	emit downloadProgress(pageUrl, -1);
 
@@ -618,6 +808,7 @@ void StreamResolver::cancelResolve(const QString &pageUrl)
 				QProcess *p = it.key();
 				it = m.erase(it);
 				m_aux.remove(p);
+				m_outBuf.remove(p);
 				if (p) {
 					p->disconnect();   // its finished lambda must not run now
 					if (p->state() != QProcess::NotRunning) { p->kill(); p->waitForFinished(1500); }
@@ -663,9 +854,13 @@ void StreamResolver::shutdown()
 	for (auto it = m_inflight.begin(); it != m_inflight.end(); ++it)
 		killProc(it.key());
 	m_inflight.clear();
+	m_outBuf.clear();
 	for (QProcess *p : m_aux)
 		killProc(p);
 	m_aux.clear();
+	m_updateProc = nullptr;
+	m_updating   = false;
+	m_queuedResolves.clear();
 	// Playlist procs were also inserted into m_aux (killed above); just drop
 	// the dangling pointers here so no double-free happens.
 	m_playlistInflight.clear();

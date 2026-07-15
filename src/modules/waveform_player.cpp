@@ -1,6 +1,8 @@
 #include "waveform_player.h"
+#include "audio_probe.h"
 #include "help_bubble.h"
 #include "icon_factory.h"
+#include "theme.h"
 
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -333,10 +335,86 @@ void WaveformPlayer::setFilename(const QString &name) {
     QString display = name;
     int slash = qMax(name.lastIndexOf('/'), name.lastIndexOf('\\'));
     if (slash >= 0) display = name.mid(slash + 1);
-    m_filenameLabel->setTextFormat(Qt::PlainText);
-    m_filenameLabel->setText(display.isEmpty() ? tr("(no file)") : display);
-    m_filenameLabel->setToolTip(name);
+    if (display.isEmpty()) {
+        m_filenameLabel->setTextFormat(Qt::PlainText);
+        m_filenameLabel->setText(tr("(no file)"));
+        m_filenameLabel->setToolTip(QString());
+        refreshClearButton();
+        return;
+    }
+
+    // Format badge: same affordance as the stream WEB badge, for local files.
+    // The probe is a header read, memoised per file - free after the first hit.
+    AudioProbeInfo pi;
+    if (m_formatBadgeMode > 0) pi = AudioProbe::probe(name);
+    if (pi.valid) {
+        // One pill per active badge half, each with its own colour: the
+        // format pill takes the per-format hue (FLAC green, MP3 orange,
+        // ...), the quality pill the quality-tier colour (gold hi-res ..
+        // dull red low-bitrate). When a custom theme is active each colour
+        // is blended 25% toward the theme accent so the palette sits in
+        // the theme instead of fighting it — pure RGB blend, no HSL (the
+        // Qt h=-1 grey trap).
+        const Theme::Colors tc = Theme::colors();
+        auto pill = [&tc](const QString &text, QColor bg) -> QString {
+            if (text.isEmpty()) return QString();
+            if (tc.enabled && tc.accent.isValid()) {
+                const QColor &a = tc.accent;
+                bg = QColor((bg.red()   * 3 + a.red())   / 4,
+                            (bg.green() * 3 + a.green()) / 4,
+                            (bg.blue()  * 3 + a.blue())  / 4);
+            }
+            // Auto-contrast the text against whatever background we ended
+            // up with (a light blend with white text would be unreadable).
+            const double lum = (0.299 * bg.red() + 0.587 * bg.green()
+                              + 0.114 * bg.blue()) / 255.0;
+            const QString fg = (lum > 0.6) ? QStringLiteral("#101418")
+                                           : QStringLiteral("#ffffff");
+            return "<span style='background-color:" + bg.name() + "; color:"
+                 + fg + "; font-weight:bold;'>&nbsp;" + text.toHtmlEscaped()
+                 + "&nbsp;</span>";
+        };
+        QString pills;
+        if (m_formatBadgeMode == 1 || m_formatBadgeMode == 3)
+            pills += pill(pi.formatBadge(), pi.formatColor());
+        if (m_formatBadgeMode == 2 || m_formatBadgeMode == 3) {
+            const QString q = pill(pi.qualityBadge(), pi.qualityColor());
+            if (!pills.isEmpty() && !q.isEmpty()) pills += QStringLiteral("&nbsp;");
+            pills += q;
+        }
+        m_filenameLabel->setTextFormat(Qt::RichText);
+        m_filenameLabel->setText(pills.isEmpty()
+            ? display.toHtmlEscaped()
+            : pills + ' ' + display.toHtmlEscaped());
+        QString tip = name + "\n" + pi.badge();
+        if (pi.channels > 0)
+            tip += QString(" · %1").arg(pi.channels == 1 ? tr("mono")
+                                      : pi.channels == 2 ? tr("stereo")
+                                      : tr("%1 channels").arg(pi.channels));
+        m_filenameLabel->setToolTip(tip);
+    } else {
+        m_filenameLabel->setTextFormat(Qt::PlainText);
+        m_filenameLabel->setText(display);
+        m_filenameLabel->setToolTip(name);
+    }
     refreshClearButton();
+}
+
+// Also the "re-render the badge" entry point: the theme wiring calls this with
+// the unchanged value after a colour change so the badge picks up the new
+// accent immediately (no early-out on an equal value).
+void WaveformPlayer::setFormatBadgeMode(int mode) {
+    m_formatBadgeMode = qBound(0, mode, 3);
+    // Re-render the currently loaded name so the change takes effect at once.
+    // A stream label / error banner owns the label right now - leave it alone.
+    if (!m_streamLabelActive && !m_errorActive && !m_fullPath.isEmpty())
+        setFilename(m_fullPath);
+}
+
+void WaveformPlayer::setStreamBadgeEnabled(bool on) {
+    m_streamBadge = on;
+    if (m_streamLabelActive) renderStreamLabel();
+    updateStreamAnimTimer();
 }
 
 void WaveformPlayer::setStreamLabel(const QString &title) {
@@ -357,11 +435,22 @@ void WaveformPlayer::setStreamGradientEnabled(bool on) {
     m_wave->setStreamGradientEnabled(on);
 }
 
+void WaveformPlayer::setStreamGradientStyle(const QColor &colA, const QColor &colB,
+                                            int speed, int intensity) {
+    m_wave->setStreamGradientStyle(colA, colB, speed, intensity);
+}
+
 // Rebuild the stream-title rich text: a WEB (azure) or LIVE (pulsing red)
 // badge pill before the plain title. LIVE is re-rendered by the anim timer,
 // so this stays cheap: pure string building on a short title.
 void WaveformPlayer::renderStreamLabel() {
     if (!m_streamLabelActive) return;
+    // WEB / LIVE pill disabled from settings: plain title only.
+    if (!m_streamBadge) {
+        m_filenameLabel->setTextFormat(Qt::PlainText);
+        m_filenameLabel->setText(m_streamTitle);
+        return;
+    }
     m_filenameLabel->setTextFormat(Qt::RichText);
     QString bg = QStringLiteral("#3fa7ff");
     QString fg = QStringLiteral("#0b1016");
@@ -380,7 +469,8 @@ void WaveformPlayer::renderStreamLabel() {
 }
 
 void WaveformPlayer::updateStreamAnimTimer() {
-    const bool needsAnim = m_streamLabelActive && m_liveStream;
+    // No pill = nothing pulsing = no timer.
+    const bool needsAnim = m_streamLabelActive && m_liveStream && m_streamBadge;
     if (needsAnim) {
         if (!m_streamAnimTimer) {
             m_streamAnimTimer = new QTimer(this);

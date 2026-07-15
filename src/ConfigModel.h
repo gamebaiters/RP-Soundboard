@@ -273,6 +273,25 @@ public:
 	// default ON; follows the custom theme's colours when a theme is set).
 	inline bool getStreamFxGradient() const { return m_streamFxGradient; }
 	void setStreamFxGradient(bool on);
+	// Format / quality badge before a LOCAL file's name on the channel
+	// ("FLAC 16bit/44.1kHz") - the local counterpart of the stream WEB badge.
+	// Theme-aware colour. Default ON.
+	// Badge complexity: 0 none / 1 format only / 2 quality only / 3 both.
+	inline int getFormatBadgeMode() const { return m_formatBadgeMode; }
+	void setFormatBadgeMode(int mode);
+	inline bool getShowStreamBadge() const { return m_showStreamBadge; }
+	void setShowStreamBadge(bool on);
+	// Waveform played-portion animation style. Colors are "#rrggbb"
+	// strings, EMPTY = auto (follow the theme accent/waveform pair).
+	// Speed / intensity are 0..100 sliders (50 / 30 = defaults).
+	inline QString getWaveAnimColorA()   const { return m_waveAnimColorA; }
+	inline QString getWaveAnimColorB()   const { return m_waveAnimColorB; }
+	inline int     getWaveAnimSpeed()    const { return m_waveAnimSpeed; }
+	inline int     getWaveAnimIntensity() const { return m_waveAnimIntensity; }
+	void setWaveAnimColorA(const QString &c);
+	void setWaveAnimColorB(const QString &c);
+	void setWaveAnimSpeed(int v);
+	void setWaveAnimIntensity(int v);
 
 	// Voice behaviour while a sound plays. (1) VAD-while-playing: gate the
 	// user's own mic by voice activity so it's only sent when he talks, while
@@ -389,6 +408,12 @@ private:
 	bool m_channelNameLinkDetect  = true;
 	bool m_streamAutoplay         = false;
 	bool m_streamFxGradient       = true;
+	int  m_formatBadgeMode        = 3;
+	bool m_showStreamBadge        = true;
+	QString m_waveAnimColorA;          // empty = auto (theme)
+	QString m_waveAnimColorB;          // empty = auto (theme)
+	int  m_waveAnimSpeed          = 50;
+	int  m_waveAnimIntensity      = 30;
 	bool m_vadWhilePlaying        = false;
 	bool m_duckWhenTalking        = false;
 	int  m_duckAmountPercent      = 40;

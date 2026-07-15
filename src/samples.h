@@ -301,6 +301,10 @@ private:
 		// epoch mismatch) and discards its half-built buffer.
 		std::thread                        reverseWorker;
 		std::shared_ptr<std::atomic<bool>> reverseWorkerCancel;
+		// Flipped by the worker body as its LAST action. Retire-list
+		// trims join only workers whose done flag is set (see
+		// m_retiredWorkers).
+		std::shared_ptr<std::atomic<bool>> reverseWorkerDone;
 		// Monotonic counter bumped on every setSlotReverse /
 		// stopSlotInternal / playSoundInSlot. The async worker captures
 		// the value at spawn time and verifies it matches under the
@@ -483,13 +487,25 @@ private:
 	// can see "Sampler is dying" and quietly discard its work instead
 	// of touching the slot's m_mutex / inputFile after teardown.
 	std::atomic<bool> m_shuttingDown{false};
-	// Retired reverse workers. setSlotReverse used to join() the previous
-	// worker on the GUI thread (10-100 ms freeze on rapid toggles); now
-	// the old thread is parked here and joined opportunistically (list
-	// overflow) or at shutdown - each worker self-terminates within
-	// ~100 ms of its cancel token flipping, so joins here are short.
+	// Retired background workers (reverse toggles + async network-open
+	// plays). setSlotReverse used to join() the previous worker on the
+	// GUI thread (10-100 ms freeze on rapid toggles); now the old thread
+	// is parked here. `done` is flipped by the worker body as its last
+	// action: mid-session trims join ONLY finished workers. This matters
+	// on macOS/Linux — POSIX std::thread has no timed join, so joining a
+	// worker still stuck inside a network open() (rw_timeout is 15 s)
+	// froze the GUI for the full stall (the macOS "loading a link hangs
+	// the soundboard" bug). Shutdown joins everything: the network-abort
+	// interrupt callback makes those joins return in milliseconds.
+	struct RetiredWorker {
+		std::thread t;
+		std::shared_ptr<std::atomic<bool>> done; // may be null (legacy)
+	};
 	std::mutex m_retiredMutex;
-	std::vector<std::thread> m_retiredWorkers;
+	std::vector<RetiredWorker> m_retiredWorkers;
+	// Join + drop finished retired workers only (never blocks on a
+	// stuck one). Caller must hold m_retiredMutex.
+	void reapFinishedRetiredLocked();
 
 	// Dedicated seek worker. One std::thread shared across all slots
 	// processes pendingSeekSec values async — Sampler::seek (GUI

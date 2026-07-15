@@ -111,6 +111,10 @@ public slots:
     void setStreamAutoplay(bool on);
     void setStreamQuality(const QString &q);
     void setStreamFxGradient(bool on);
+    void setFormatBadgeMode(int mode);
+    void setShowStreamBadge(bool on);
+    // Waveform animation style. Invalid colors = auto (theme-driven).
+    void setWaveAnimStyle(const QColor &a, const QColor &b, int speed, int intensity);
     void setShowAddChannelButton(bool on);
     void setShowMuteChecks(bool on);
     void setShowProfileButtons(bool on);
@@ -175,6 +179,10 @@ signals:
     void adaptWaveformToFxChanged(bool);
     void showCropMarkersChanged(bool);
     void streamFxGradientChanged(bool);
+    void formatBadgeModeChanged(int);
+    void showStreamBadgeChanged(bool);
+    // Waveform animation style edit (invalid colors = auto/theme).
+    void waveAnimStyleChanged(const QColor &a, const QColor &b, int speed, int intensity);
     void showAddChannelButtonChanged(bool);
     void showMuteChecksChanged(bool);
     void showProfileButtonsChanged(bool);
@@ -277,6 +285,17 @@ private:
     QCheckBox   *m_streamAutoplay       = nullptr;
     class QComboBox *m_streamQuality    = nullptr;
     QCheckBox   *m_streamFxGradient     = nullptr;
+    class QComboBox *m_formatBadgeMode  = nullptr;
+    QCheckBox   *m_showStreamBadge      = nullptr;
+    // Waveform animation style controls (Streaming › Appearance).
+    QColor       m_waveAnimA;           // invalid = auto (theme)
+    QColor       m_waveAnimB;           // invalid = auto (theme)
+    QPushButton *m_waveAnimABtn         = nullptr;
+    QPushButton *m_waveAnimBBtn         = nullptr;
+    class QSlider *m_waveAnimSpeed      = nullptr;
+    class QSlider *m_waveAnimIntensity  = nullptr;
+    class QLabel  *m_waveAnimSpeedLabel = nullptr;
+    class QLabel  *m_waveAnimIntensityLabel = nullptr;
     QCheckBox   *m_showAddChannel       = nullptr;
     QCheckBox   *m_showMuteChecks       = nullptr;
     QCheckBox   *m_showProfiles         = nullptr;

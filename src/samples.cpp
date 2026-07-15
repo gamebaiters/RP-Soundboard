@@ -220,24 +220,27 @@ void Sampler::setSlotReverse(int slot, bool on)
 	PlaybackSlot &s = m_slots[slot];
 	if (s.reverseWorker.joinable()) {
 		std::lock_guard<std::mutex> rl(m_retiredMutex);
-		m_retiredWorkers.push_back(std::move(s.reverseWorker));
-		if (m_retiredWorkers.size() > 8) {
-			// All of these have long since seen their cancel token (we
-			// only get here after 8 further toggles) - joins are instant.
-			for (auto &t : m_retiredWorkers)
-				if (t.joinable()) t.join();
-			m_retiredWorkers.clear();
-		}
+		m_retiredWorkers.push_back({std::move(s.reverseWorker),
+		                            s.reverseWorkerDone});
+		if (m_retiredWorkers.size() > 8)
+			reapFinishedRetiredLocked();
 	}
 
 	// Phase 3 — spawn the new worker. All heavy work (CreateInputFile,
 	// open + preDecodeAndReverse for the reverse case, or just open()
 	// for the forward case) runs OUTSIDE m_mutex on this thread. GUI
-	// + audio both return / continue immediately.
+	// + audio both return / continue immediately. The done flag is the
+	// worker's LAST action; the retire-list reaper joins only workers
+	// that have flipped it (POSIX join has no timeout).
+	auto done = std::make_shared<std::atomic<bool>>(false);
+	s.reverseWorkerDone = done;
 	s.reverseWorker = std::thread(
-		&Sampler::reverseWorkerProc, this,
-		slot, epoch, on, lastSound, resumeSec,
-		pitchBase, speedFactor, reverbMix, newCancel);
+		[this, slot, epoch, on, lastSound, resumeSec,
+		 pitchBase, speedFactor, reverbMix, newCancel, done]{
+			reverseWorkerProc(slot, epoch, on, lastSound, resumeSec,
+			                  pitchBase, speedFactor, reverbMix, newCancel);
+			done->store(true, std::memory_order_release);
+		});
 }
 
 
@@ -594,8 +597,8 @@ Sampler::~Sampler()
 	}
 	{
 		std::lock_guard<std::mutex> rl(m_retiredMutex);
-		for (auto &t : m_retiredWorkers)
-			if (t.joinable()) t.join();
+		for (auto &w : m_retiredWorkers)
+			if (w.t.joinable()) w.t.join();
 		m_retiredWorkers.clear();
 	}
 }
@@ -657,40 +660,67 @@ static void joinThreadBounded(std::thread &t, int timeoutMs)
 }
 
 
+//---------------------------------------------------------------
+// Join + drop every retired worker whose done flag is set (those
+// joins return instantly). Unfinished workers stay parked: joining
+// one mid-network-stall would freeze the calling (GUI) thread on
+// macOS/Linux, where std::thread has no timed join. Caller must
+// hold m_retiredMutex. Shutdown still joins everything — by then
+// the network-abort callback has broken any blocked I/O.
+//---------------------------------------------------------------
+void Sampler::reapFinishedRetiredLocked()
+{
+	std::vector<RetiredWorker> keep;
+	keep.reserve(m_retiredWorkers.size());
+	for (auto &w : m_retiredWorkers) {
+		const bool finished = w.done && w.done->load(std::memory_order_acquire);
+		if (finished && w.t.joinable())
+			w.t.join();
+		else if (w.t.joinable())
+			keep.push_back(std::move(w));
+	}
+	m_retiredWorkers.swap(keep);
+}
+
+
 void Sampler::playSoundInSlotAsync(int slot, const SoundInfo &sound,
 	int volLocal, int volRemote,
 	float pitchFactor, float speedFactor, float reverbMix,
 	bool applyFx, bool autoPlay)
 {
+	auto done = std::make_shared<std::atomic<bool>>(false);
 	std::thread th([this, slot, sound, volLocal, volRemote,
-	                pitchFactor, speedFactor, reverbMix, applyFx, autoPlay]{
-		if (m_shuttingDown.load(std::memory_order_acquire)) return;
-		// The heavy network open() happens here, OFF the GUI thread.
-		if (!playSoundInSlot(slot, sound, false)) return;
-		if (m_shuttingDown.load(std::memory_order_acquire)) return;
-		setSlotVolumeLocal(slot, volLocal);
-		setSlotVolumeRemote(slot, volRemote);
-		if (applyFx) {
-			setSlotPitchFactor(slot, pitchFactor);
-			setSlotSpeedFactor(slot, speedFactor);
-			setSlotReverbMix  (slot, reverbMix);
-		} else {
-			setSlotPitchFactor(slot, 1.0f);
-			setSlotSpeedFactor(slot, 1.0f);
-			setSlotReverbMix  (slot, 0.0f);
+	                pitchFactor, speedFactor, reverbMix, applyFx, autoPlay,
+	                done]{
+		if (!m_shuttingDown.load(std::memory_order_acquire)) {
+			// The heavy network open() happens here, OFF the GUI thread.
+			if (playSoundInSlot(slot, sound, false) &&
+			    !m_shuttingDown.load(std::memory_order_acquire)) {
+				setSlotVolumeLocal(slot, volLocal);
+				setSlotVolumeRemote(slot, volRemote);
+				if (applyFx) {
+					setSlotPitchFactor(slot, pitchFactor);
+					setSlotSpeedFactor(slot, speedFactor);
+					setSlotReverbMix  (slot, reverbMix);
+				} else {
+					setSlotPitchFactor(slot, 1.0f);
+					setSlotSpeedFactor(slot, 1.0f);
+					setSlotReverbMix  (slot, 0.0f);
+				}
+				if (!autoPlay) pausePlayback(slot);
+			}
 		}
-		if (!autoPlay) pausePlayback(slot);
+		done->store(true, std::memory_order_release);
 	});
 	// Track it like the reverse workers: shutdown bounded-joins these, so a
-	// stuck network open() can never become a ghost thread or a UAF. Trim the
-	// list when it grows so finished workers don't accumulate over a session.
+	// stuck network open() can never become a ghost thread or a UAF. The
+	// trim joins FINISHED workers only — the old joinThreadBounded trim was
+	// a plain join() on POSIX, so one worker stuck in a 15 s network open
+	// froze the whole GUI on macOS (the "loading a link hangs" bug).
 	std::lock_guard<std::mutex> rl(m_retiredMutex);
-	m_retiredWorkers.push_back(std::move(th));
-	if (m_retiredWorkers.size() > 12) {
-		for (auto &t : m_retiredWorkers)
-			joinThreadBounded(t, 100);
-		m_retiredWorkers.clear();
-	}
+	m_retiredWorkers.push_back({std::move(th), done});
+	if (m_retiredWorkers.size() > 12)
+		reapFinishedRetiredLocked();
 }
 
 void Sampler::shutdown()
@@ -753,8 +783,8 @@ void Sampler::shutdown()
 	}
 	{
 		std::lock_guard<std::mutex> rl(m_retiredMutex);
-		for (auto &t : m_retiredWorkers)
-			joinThreadBounded(t, 200);
+		for (auto &w : m_retiredWorkers)
+			joinThreadBounded(w.t, 200);
 		m_retiredWorkers.clear();
 	}
 

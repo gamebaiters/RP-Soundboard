@@ -35,6 +35,7 @@
 #include <QTranslator>
 #include <QLocale>
 #include <QSettings>
+#include <QTimer>
 
 #include "main.h"
 #include "plugin.h"
@@ -477,15 +478,14 @@ CAPI void sb_init()
 		updateChecker = new UpdateChecker();
 		updateChecker->startCheck(false, configModel);
 
-		// Pre-warm the streaming engine: run yt-dlp --version now (background,
-		// off the GUI thread) so the OS caches the binary and the FIRST real
-		// link resolve doesn't pay the cold PyInstaller/disk-read start cost.
-		StreamResolver::instance().queryVersion();
-		// Silent auto-update on EVERY startup: run `yt-dlp -U` in the background
-		// (hidden process, tracked in m_aux → killed on shutdown, never a ghost).
-		// No UI is attached at init, so a failure is just logged. Keeps the
-		// resolver current with YouTube changes without any user action.
-		StreamResolver::instance().updateEngine();
+		// Pre-warm the streaming engine (background, off the GUI thread) so the
+		// OS caches the binary and the FIRST real link resolve doesn't pay the
+		// cold self-extraction / disk-read start cost, and run the silent engine
+		// self-update — but at most once a day, and never while a link the user
+		// pasted is waiting on it (warmUp owns both rules; it used to update on
+		// every single startup, which on macOS could leave `-U` rewriting the
+		// engine binary at the exact moment a resolve tried to spawn it).
+		StreamResolver::instance().warmUp();
 	});
 }
 
@@ -850,10 +850,6 @@ CAPI void sb_onConnectStatusChange(uint64 serverConnectionHandlerID, int newStat
 	{
 		if (newStatus == STATUS_DISCONNECTED)
 		{
-			// Persist any dirty model state before the disconnect path
-			// runs (event-triggered save policy).
-			ConfigModel::flushPendingWrite();
-
 			// Invalidate the talk state BEFORE stopping playback. The
 			// stop emits queued onStopPlaying signals; without the
 			// invalidation those would run setTalkTransMode -> ts3Functions
@@ -861,7 +857,31 @@ CAPI void sb_onConnectStatusChange(uint64 serverConnectionHandlerID, int newStat
 			// directsound / WASAPI teardown and crashing the client on
 			// close.
 			if (tsMgr) tsMgr->onConnectionLost();
+
+			// Closing a NETWORK stream can block in avformat teardown
+			// (rw_timeout is 15 s) — never inside this TS3 callback.
+			// Arm the process-wide abort CB for the duration of the
+			// stop so blocked I/O returns in ms, then DISARM so
+			// streaming keeps working after a reconnect.
+			InputFileNet::setShutdownAbort(true);
 			sb_stopPlayback();
+			InputFileNet::setShutdownAbort(false);
+
+			// Persist any dirty model state (event-triggered save
+			// policy) — but NOT synchronously inside this TS3 callback.
+			// A full-ini QSettings write can stall the GUI thread for
+			// hundreds of ms; TS3's disconnect teardown meanwhile
+			// continues on its own threads, and the DirectSound backend
+			// worker sits in a COM call that needs this (blocked) STA
+			// thread. That starvation crashed the client on disconnect
+			// (minidump 2026-07-15: NULL read in directsound_win64.dll
+			// +0xD527, GUI thread inside writeConfigImmediate) — the
+			// crash left a zombie session on the server: the "ghost
+			// user" with the user's own identity that kept timing out.
+			// Deferring one event-loop turn runs the write after TS3's
+			// callback returns; a client quit is still covered by the
+			// sb_kill top-of-function flush.
+			QTimer::singleShot(0, []() { ConfigModel::flushPendingWrite(); });
 		}
 		sb_enableInterface(newStatus == STATUS_CONNECTION_ESTABLISHED);
 	}

@@ -55,6 +55,9 @@ private:
     void onPastePreset();               // apply from clipboard
 
     QCheckBox   *m_enable      = nullptr;
+    QSlider     *m_gain        = nullptr;   // mic boost, -20..+20 dB
+    QLabel      *m_gainLabel   = nullptr;
+    class QFrame *m_frame      = nullptr;   // for the enabled red glow
     QLabel      *m_liveBadge   = nullptr;
     ChannelMeter *m_meter      = nullptr;
     QSlider     *m_pitch       = nullptr;
@@ -71,4 +74,19 @@ private:
     QTimer      *m_meterTimer  = nullptr;
     ChannelSandboxDialog *m_dialog = nullptr;
     bool m_loading = false;
+
+    // Background ambience (V3): environment loop mixed under the voice.
+    QLabel      *m_ambCaption  = nullptr;
+    QComboBox   *m_ambBox      = nullptr;
+    QSlider     *m_ambVol      = nullptr;
+    QLabel      *m_ambVolLabel = nullptr;
+
+    // Responsive collapse: hides secondary controls when the window is
+    // squeezed so the panel never overlaps (see applyCompact).
+    void applyCompact();
+    QLabel      *m_levelCaption  = nullptr;
+    QLabel      *m_reverbCaption = nullptr;
+
+protected:
+    void resizeEvent(class QResizeEvent *e) override;
 };

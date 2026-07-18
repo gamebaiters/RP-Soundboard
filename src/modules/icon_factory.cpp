@@ -232,6 +232,194 @@ QIcon vinyl(const QColor &labelColor)
     return finish(pm);
 }
 
+// ---- Line-art action set --------------------------------------------
+// Same visual language as the mic-channel preset glyphs: a light
+// 1.5 px stroke on an 18 px canvas, here scaled onto the shared 64 px
+// canvas (stroke ~5.5) so they mix with the filled transport set.
+
+namespace {
+QPen linePen(const QColor &c) {
+    QPen pen(c, 5.5);
+    pen.setJoinStyle(Qt::RoundJoin);
+    pen.setCapStyle(Qt::RoundCap);
+    return pen;
+}
+}
+
+QIcon save(const QColor &c)
+{
+    QPixmap pm = canvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(linePen(c));
+    p.setBrush(Qt::NoBrush);
+    // Floppy body with the clipped top-right corner.
+    QPainterPath body;
+    body.moveTo(12, 12);
+    body.lineTo(43, 12);
+    body.lineTo(52, 21);
+    body.lineTo(52, 52);
+    body.lineTo(12, 52);
+    body.closeSubpath();
+    p.drawPath(body);
+    p.drawRect(QRectF(22, 12, 17, 10));     // shutter
+    p.drawRect(QRectF(20, 34, 24, 18));     // label
+    return finish(pm);
+}
+
+QIcon trash(const QColor &c)
+{
+    QPixmap pm = canvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(linePen(c));
+    // Lid + handle.
+    p.drawLine(QPointF(13, 19), QPointF(51, 19));
+    p.drawLine(QPointF(25, 19), QPointF(27, 13));
+    p.drawLine(QPointF(39, 19), QPointF(37, 13));
+    p.drawLine(QPointF(27, 13), QPointF(37, 13));
+    // Tapered can + ribs.
+    p.drawLine(QPointF(18, 23), QPointF(21, 52));
+    p.drawLine(QPointF(46, 23), QPointF(43, 52));
+    p.drawLine(QPointF(21, 52), QPointF(43, 52));
+    p.drawLine(QPointF(27, 27), QPointF(28, 47));
+    p.drawLine(QPointF(32, 27), QPointF(32, 47));
+    p.drawLine(QPointF(37, 27), QPointF(36, 47));
+    return finish(pm);
+}
+
+QIcon copyDoc(const QColor &c)
+{
+    QPixmap pm = canvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(linePen(c));
+    p.setBrush(Qt::NoBrush);
+    // Back sheet, then front sheet overlapping.
+    p.drawRoundedRect(QRectF(14, 11, 26, 32), 3, 3);
+    p.drawRoundedRect(QRectF(24, 21, 26, 32), 3, 3);
+    return finish(pm);
+}
+
+QIcon paste(const QColor &c)
+{
+    QPixmap pm = canvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(linePen(c));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(QRectF(15, 14, 34, 38), 4, 4);   // board
+    p.setBrush(c);
+    p.drawRoundedRect(QRectF(25, 8, 14, 11), 3, 3);    // clip
+    p.setBrush(Qt::NoBrush);
+    p.drawLine(QPointF(22, 31), QPointF(42, 31));      // text lines
+    p.drawLine(QPointF(22, 40), QPointF(38, 40));
+    return finish(pm);
+}
+
+QIcon folderOpen(const QColor &c)
+{
+    QPixmap pm = canvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(linePen(c));
+    p.setBrush(Qt::NoBrush);
+    QPainterPath f;
+    f.moveTo(12, 20);
+    f.lineTo(26, 20);      // tab
+    f.lineTo(30, 25);
+    f.lineTo(52, 25);
+    f.lineTo(52, 50);
+    f.lineTo(12, 50);
+    f.closeSubpath();
+    p.drawPath(f);
+    return finish(pm);
+}
+
+QIcon download(const QColor &c)
+{
+    QPixmap pm = canvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    // Tray.
+    p.setPen(linePen(c));
+    p.drawLine(QPointF(14, 52), QPointF(50, 52));
+    p.drawLine(QPointF(14, 52), QPointF(14, 42));
+    p.drawLine(QPointF(50, 52), QPointF(50, 42));
+    // Filled down arrow.
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    p.drawRect(QRectF(28, 10, 8, 18));
+    QPolygonF head;
+    head << QPointF(19, 26) << QPointF(45, 26) << QPointF(32, 40);
+    p.drawPolygon(head);
+    return finish(pm);
+}
+
+QIcon exportAudio(const QColor &c)
+{
+    QPixmap pm = canvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    // Tray.
+    p.setPen(linePen(c));
+    p.drawLine(QPointF(14, 52), QPointF(50, 52));
+    p.drawLine(QPointF(14, 52), QPointF(14, 42));
+    p.drawLine(QPointF(50, 52), QPointF(50, 42));
+    // Filled up arrow (out of the tray = export).
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    QPolygonF head;
+    head << QPointF(19, 24) << QPointF(45, 24) << QPointF(32, 10);
+    p.drawPolygon(head);
+    p.drawRect(QRectF(28, 24, 8, 16));
+    return finish(pm);
+}
+
+QIcon record(const QColor &c)
+{
+    QPixmap pm = canvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    const qreal r = (kSize - kInset * 2.0) / 2.0 - 3.0;
+    p.drawEllipse(QPointF(kSize / 2.0, kSize / 2.0), r, r);
+    return finish(pm);
+}
+
+QIcon soundboard()
+{
+    // 2x2 launchpad pads inside a soft dark tile. Bold shapes + four
+    // distinct colors survive the 20 px downscale of the host toolbar
+    // and read unmistakably as "soundboard".
+    QPixmap pm = canvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    // Backing tile so the pads pop on both light and dark toolbars.
+    p.setPen(QPen(QColor(0x1A, 0x1C, 0x20), 3.0));
+    p.setBrush(QColor(0x2A, 0x2D, 0x33));
+    p.drawRoundedRect(QRectF(6, 6, 52, 52), 9, 9);
+    // Pads.
+    const qreal padS = 20.0, gap = 4.0;
+    const qreal x0 = 32.0 - padS - gap / 2.0;
+    const qreal y0 = 32.0 - padS - gap / 2.0;
+    const QColor cols[4] = {
+        QColor(0x57, 0xC4, 0x5E),   // green  (top-left)
+        QColor(0x3F, 0xA7, 0xFF),   // azure  (top-right)
+        QColor(0xE6, 0xA8, 0x3C),   // amber  (bottom-left)
+        QColor(0xD9, 0x53, 0x4F),   // red    (bottom-right)
+    };
+    p.setPen(Qt::NoPen);
+    for (int i = 0; i < 4; ++i) {
+        qreal x = x0 + (i % 2) * (padS + gap);
+        qreal y = y0 + (i / 2) * (padS + gap);
+        p.setBrush(cols[i]);
+        p.drawRoundedRect(QRectF(x, y, padS, padS), 4.5, 4.5);
+    }
+    return finish(pm);
+}
+
 QIcon sandbox(const QColor &c)
 {
     // Three mixer faders: the universal "audio effects rack" glyph.

@@ -435,9 +435,8 @@ void WaveformPlayer::setStreamGradientEnabled(bool on) {
     m_wave->setStreamGradientEnabled(on);
 }
 
-void WaveformPlayer::setStreamGradientStyle(const QColor &colA, const QColor &colB,
-                                            int speed, int intensity) {
-    m_wave->setStreamGradientStyle(colA, colB, speed, intensity);
+void WaveformPlayer::setStreamGradientStyle(int speed, int intensity) {
+    m_wave->setStreamGradientStyle(speed, intensity);
 }
 
 // Rebuild the stream-title rich text: a WEB (azure) or LIVE (pulsing red)

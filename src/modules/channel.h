@@ -120,6 +120,10 @@ public:
     // Show / hide the sandbox button (driven by the global "Enable
     // audio sandbox feature" setting).
     void                setSandboxFeatureEnabled(bool on);
+    // Temporary-channel affordance: accent-coloured glowing border so
+    // throw-away channels (per-button temp flag) read as different from
+    // the user's persistent channels at a glance.
+    void                setTempGlow(bool on);
     void                setExportVisible(bool on);
     // Switch the channel's Export button into a prominent green "Save audio"
     // download control (VOD stream loaded) or back to the normal Export button.
@@ -175,6 +179,12 @@ private:
     // Drives the meter width directly from the channel width so the
     // meter yields space to the volume / FX controls first.
     void updateMeterWidth();
+    // Responsive collapse: hides secondary controls (meter -> FX panel
+    // -> title-row action buttons) when the channel row gets too
+    // narrow, so nothing ever overlaps. Settings-driven visibility is
+    // remembered in the m_*Wanted / *Setting flags and restored the
+    // moment the window is wide enough again.
+    void applyCompact();
 
 private:
     int             m_id;
@@ -212,4 +222,10 @@ private:
     bool                          m_sandboxFeatureEnabled = true;
     bool                          m_exportVisibleSetting = false;
     bool                          m_exportIsDownload = false;
+
+    // Settings-wanted visibility, before the responsive collapse.
+    bool                          m_fxWanted = true;
+    bool                          m_meterWanted = true;
+    bool                          m_playlistAvailable = false;
+    bool                          m_tempGlow = false;
 };

@@ -81,6 +81,15 @@ QString variantStyleSheet();
 // soundboard widgets so it never leaks into the host TeamSpeak client.
 QString compositeStyleSheet();
 
+// Font rule generated from the SYSTEM UI font (or the user's override),
+// scoped to soundboard widgets. Part of compositeStyleSheet.
+QString fontStyleSheet();
+// User font-size override in points; 0 = follow the system font.
+// Persisted by ConfigModel (ui_font_pt) and pushed here at startup /
+// when the Settings spin box changes.
+void setUiFontPointSize(int pt);
+int  uiFontPointSize();
+
 // Deprecated. Kept as a no-op so existing call sites still compile;
 // applying the theme app-wide leaks colors into the host TeamSpeak
 // client which is exactly what we want to avoid.

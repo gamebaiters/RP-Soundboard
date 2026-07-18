@@ -262,8 +262,18 @@ void ChannelSandboxDialog::autoRecordTick()
 void ChannelSandboxDialog::updateAutoStatus()
 {
     if (!m_autoStatus) return;
-    if (m_autoRecBtn)  m_autoRecBtn->setText(m_autoRecording ? tr("Stop rec") : tr("Record"));
-    if (m_autoPlayBtn) m_autoPlayBtn->setText(m_autoPlaying ? tr("Stop") : tr("Play"));
+    if (m_autoRecBtn) {
+        m_autoRecBtn->setIcon(m_autoRecording ? IconFactory::stop()
+                                              : IconFactory::record());
+        m_autoRecBtn->setToolTip(m_autoRecording ? tr("Stop recording")
+                                                 : tr("Record knob moves"));
+    }
+    if (m_autoPlayBtn) {
+        m_autoPlayBtn->setIcon(m_autoPlaying ? IconFactory::stop()
+                                             : IconFactory::play());
+        m_autoPlayBtn->setToolTip(m_autoPlaying ? tr("Stop playback")
+                                                : tr("Replay the recorded moves"));
+    }
     if (m_autoRecording) {
         m_autoStatus->setText(tr("Recording... %1 snapshots").arg(m_autoEvents.size()));
     } else if (m_autoPlaying) {
@@ -586,8 +596,20 @@ void ChannelSandboxDialog::buildUi()
         "matched Q (= 2.145) so adjacent bands sum to about +/-12 dB\n"
         "at the seam without exploding into earrape. Big jumps reset\n"
         "the band's IIR state to kill cascading transients."), eqBox));
-    auto *copyEqBtn = new QPushButton(tr("Copy EQ"), eqBox);
-    auto *pasteEqBtn = new QPushButton(tr("Paste EQ"), eqBox);
+    // Icon-only (painted glyph set, words live in the tooltips).
+    auto makeIconBtn = [](const QIcon &icon, const QString &tip,
+                          QWidget *parent) {
+        auto *b = new QPushButton(parent);
+        b->setIcon(icon);
+        b->setIconSize(QSize(18, 18));
+        b->setFixedSize(30, 26);
+        b->setToolTip(tip);
+        return b;
+    };
+    auto *copyEqBtn = makeIconBtn(IconFactory::copyDoc(),
+        tr("Copy EQ curve to the clipboard"), eqBox);
+    auto *pasteEqBtn = makeIconBtn(IconFactory::paste(),
+        tr("Paste an EQ curve from the clipboard"), eqBox);
     eqHeader->addWidget(copyEqBtn);
     eqHeader->addWidget(pasteEqBtn);
     connect(copyEqBtn, &QPushButton::clicked, this, &ChannelSandboxDialog::onCopyEq);
@@ -629,10 +651,10 @@ void ChannelSandboxDialog::buildUi()
         m_eqPresetBox->lineEdit()->setReadOnly(true);
         m_eqPresetBox->lineEdit()->setFocusPolicy(Qt::NoFocus);
     }
-    auto *eqPresetSaveBtn   = new QPushButton(tr("Save..."), eqBox);
-    auto *eqPresetDeleteBtn = new QPushButton(tr("Delete"),  eqBox);
-    eqPresetSaveBtn->setMaximumWidth(64);
-    eqPresetDeleteBtn->setMaximumWidth(64);
+    auto *eqPresetSaveBtn   = makeIconBtn(IconFactory::save(),
+        tr("Save the current 16 bands as a custom EQ preset"), eqBox);
+    auto *eqPresetDeleteBtn = makeIconBtn(IconFactory::trash(),
+        tr("Delete the selected custom EQ preset"), eqBox);
     eqHeader->addWidget(m_eqPresetBox);
     eqHeader->addWidget(eqPresetSaveBtn);
     eqHeader->addWidget(eqPresetDeleteBtn);
@@ -879,7 +901,10 @@ void ChannelSandboxDialog::buildUi()
         "Pipeline order — drag to reorder, click a block to open it:"), m_dspGroup);
     pipeLabel->setStyleSheet("font-weight: bold; font-size: 11px;");
     pipeRow->addWidget(pipeLabel, 1);
-    m_resetOrderBtn = new QPushButton(tr("Reset order"), m_dspGroup);
+    m_resetOrderBtn = new QPushButton(m_dspGroup);
+    m_resetOrderBtn->setIcon(IconFactory::reload());
+    m_resetOrderBtn->setIconSize(QSize(18, 18));
+    m_resetOrderBtn->setFixedSize(30, 26);
     m_resetOrderBtn->setToolTip(tr(
         "Restore the default DSP processing order. Effect parameters\n"
         "are left untouched — only the chain order is reset."));
@@ -1917,8 +1942,18 @@ void ChannelSandboxDialog::buildUi()
         info->setWordWrap(true);
         lay->addWidget(info);
         auto *row = new QHBoxLayout;
-        m_autoRecBtn  = new QPushButton(tr("Record"));
-        m_autoPlayBtn = new QPushButton(tr("Play"));
+        auto iconBtn = [](const QIcon &icon, const QString &tip) {
+            auto *b = new QPushButton;
+            b->setIcon(icon);
+            b->setIconSize(QSize(18, 18));
+            b->setFixedSize(30, 26);
+            b->setToolTip(tip);
+            return b;
+        };
+        m_autoRecBtn  = iconBtn(IconFactory::record(),
+                                tr("Record knob moves"));
+        m_autoPlayBtn = iconBtn(IconFactory::play(),
+                                tr("Replay the recorded moves"));
         m_autoLoopChk = new QCheckBox(tr("Loop"));
         row->addWidget(m_autoRecBtn);
         row->addWidget(m_autoPlayBtn);
@@ -1926,8 +1961,10 @@ void ChannelSandboxDialog::buildUi()
         row->addStretch(1);
         lay->addLayout(row);
         auto *row2 = new QHBoxLayout;
-        m_autoSaveBtn = new QPushButton(tr("Save..."));
-        m_autoLoadBtn = new QPushButton(tr("Load..."));
+        m_autoSaveBtn = iconBtn(IconFactory::save(),
+                                tr("Save the automation as .json"));
+        m_autoLoadBtn = iconBtn(IconFactory::folderOpen(),
+                                tr("Load an automation .json"));
         row2->addWidget(m_autoSaveBtn);
         row2->addWidget(m_autoLoadBtn);
         row2->addStretch(1);
@@ -2014,10 +2051,18 @@ void ChannelSandboxDialog::buildUi()
     m_sandboxPresetBox->setMinimumWidth(180);
     m_sandboxPresetBox->setToolTip(tr("Load a saved sandbox preset"));
     presetRow->addWidget(m_sandboxPresetBox, 1);
-    auto *presetSaveBtn = new QPushButton(tr("Save"), this);
-    presetSaveBtn->setToolTip(tr("Save current sandbox settings as a named preset"));
-    auto *presetDeleteBtn = new QPushButton(tr("Delete"), this);
-    presetDeleteBtn->setToolTip(tr("Delete the selected preset"));
+    auto bottomIconBtn = [this](const QIcon &icon, const QString &tip) {
+        auto *b = new QPushButton(this);
+        b->setIcon(icon);
+        b->setIconSize(QSize(18, 18));
+        b->setFixedSize(30, 26);
+        b->setToolTip(tip);
+        return b;
+    };
+    auto *presetSaveBtn = bottomIconBtn(IconFactory::save(),
+        tr("Save current sandbox settings as a named preset"));
+    auto *presetDeleteBtn = bottomIconBtn(IconFactory::trash(),
+        tr("Delete the selected preset"));
     presetRow->addWidget(presetSaveBtn);
     presetRow->addWidget(presetDeleteBtn);
     root->addLayout(presetRow);
@@ -2093,8 +2138,10 @@ void ChannelSandboxDialog::buildUi()
         "Volume, FX panel, file and the channel's other state are\n"
         "left untouched."));
     btnRow->addWidget(m_resetBtn);
-    auto *copySbxBtn = new QPushButton(tr("Copy Sandbox"), this);
-    auto *pasteSbxBtn = new QPushButton(tr("Paste Sandbox"), this);
+    auto *copySbxBtn = bottomIconBtn(IconFactory::copyDoc(),
+        tr("Copy the whole sandbox state to the clipboard"));
+    auto *pasteSbxBtn = bottomIconBtn(IconFactory::paste(),
+        tr("Paste a sandbox state from the clipboard"));
     btnRow->addWidget(copySbxBtn);
     btnRow->addWidget(pasteSbxBtn);
     connect(copySbxBtn, &QPushButton::clicked, this, &ChannelSandboxDialog::onCopySandbox);

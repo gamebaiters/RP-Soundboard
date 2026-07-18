@@ -164,9 +164,6 @@ void SoundView::paintEvent(QPaintEvent *evt)
 						cA = tc.accent;
 						cB = tc.waveform;
 					}
-					// Explicit user picks (Settings) override the auto pair.
-					if (m_gradColA.isValid()) cA = m_gradColA;
-					if (m_gradColB.isValid()) cB = m_gradColB;
 					auto dist2 = [](const QColor &x, const QColor &y){
 						const int dr = x.red()   - y.red();
 						const int dg = x.green() - y.green();
@@ -706,11 +703,8 @@ void SoundView::setStreamGradientEnabled(bool on)
 	update();
 }
 
-void SoundView::setStreamGradientStyle(const QColor &colA, const QColor &colB,
-                                       int speed, int intensity)
+void SoundView::setStreamGradientStyle(int speed, int intensity)
 {
-	m_gradColA = colA;
-	m_gradColB = colB;
 	m_gradSpeed = qBound(0, speed, 100);
 	m_gradIntensity = qBound(0, intensity, 100);
 	update();

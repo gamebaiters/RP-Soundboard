@@ -80,10 +80,9 @@ public slots:
     // Setting: animated theme-aware gradient on the played portion of the
     // waveform (all playback, default ON). Forwarded to the SoundView.
     void setStreamGradientEnabled(bool on);
-    // Animation style (custom colors / auto, speed, intensity) — forwarded
-    // to the SoundView.
-    void setStreamGradientStyle(const QColor &colA, const QColor &colB,
-                                int speed, int intensity);
+    // Animation motion (speed, intensity) — forwarded to the SoundView.
+    // Colours are always theme-driven.
+    void setStreamGradientStyle(int speed, int intensity);
     // Setting: format/quality badge before a LOCAL file's name, the local
     // counterpart of the WEB badge a stream gets. Mode = badge complexity:
     // 0 none, 1 format only ("FLAC"), 2 quality only ("16bit/44.1kHz"),

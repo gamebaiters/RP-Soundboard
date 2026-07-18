@@ -24,6 +24,7 @@
 #include "../samples.h"
 #include "../SoundInfo.h"
 #include "../MicFx.h"
+#include "../TsToolbarButton.h"
 #include "../dsp/SlotDsp.h"
 #include "../config_qt.h"
 #include "../main.h"
@@ -117,6 +118,36 @@ struct LastPlayedCtx {
 };
 static QHash<int, LastPlayedCtx> s_lastPlayedCtx;
 
+// Tail-only reaper for auto-spawned channels (infinity mode + per-button
+// temporary channels). Sampler slots are POSITIONAL: removing a channel
+// that is NOT the last one renumbers every following widget while their
+// audio stays on the old slot, and the removeChannelRequested handler
+// compensates by STOPPING every slot above the removed one - which
+// killed still-playing temporary channels and desynced pause/stop
+// (the per-channel lambdas capture their slot at wire time). So a
+// finished auto channel is only MARKED done ("infinityDone"); actual
+// removal happens exclusively from the TAIL, where nothing renumbers.
+// Non-tail finished channels linger silently until the tail clears,
+// then the sweep removes the whole finished run in one pass.
+static void reapTempChannelsFromTail(MainPage *page, Sampler *sampler)
+{
+    while (true) {
+        const int last = page->channels().size() - 1;
+        if (last < 0) break;
+        Channel *ch = page->channelAt(last);
+        if (!ch) break;
+        if (!ch->property("infinityAuto").toBool()) break;
+        if (!ch->property("infinityDone").toBool()) break;
+        if (sampler && sampler->getState(last) != Sampler::eSILENT) break;
+        ch->setProperty("infinityAuto", false);
+        ch->setProperty("infinityDone", false);
+        // Full cleanup path (stops the slot, drops bookkeeping, removes
+        // the widget). Synchronous - the loop reaps the next tail.
+        ch->requestRemove();
+        if (page->channels().size() - 1 == last) break;   // removal failed
+    }
+}
+
 // --- URL / YouTube live-stream per-slot state (v2.3.1) --------------------
 // slot -> canonical page URL currently loaded as a live stream in that slot.
 static QHash<int, QString> s_slotStreamUrl;
@@ -155,6 +186,17 @@ static QString s_pendingAssignTitle;
 // per slot, so a genuinely broken stream still errors out instead of
 // resolve-looping forever. Cleared on every MANUAL load of the slot.
 static QHash<int, qint64> s_slotNetRetryMs;
+// slot -> "the user wanted playback to start" for the stream load in flight,
+// captured at resolve time. The one-shot open-failure retry below re-loads
+// with the ORIGINAL play/paused intent instead of guessing.
+static QHash<int, bool> s_slotLoadWantedPlay;
+// Slots whose current MANUAL load already consumed its one automatic
+// "invalidate + fresh re-resolve" retry after a failed stream OPEN. A cached
+// direct URL can be poisoned (googlevideo link died before its 5 h TTL, or a
+// format the CDN rejects for our client): without invalidation + retry, every
+// click on that playlist entry re-failed instantly from the same cached URL
+// for hours — "this one track always errors, the rest are fine".
+static QSet<int> s_slotOpenRetryDone;
 
 // Clear a slot's live-stream state and put the channel's real name back
 // (restoreName is a no-op if the channel isn't showing a green link) and drop
@@ -291,7 +333,10 @@ static void loadStreamIntoSlot(MainPage *page, Sampler *sampler, ConfigModel *mo
     if (greenChannelName) ch0->showStreamLink(pageUrl);
     // A MANUAL load resets the auto-reconnect budget for this slot; the auto
     // retry itself must not, or a broken stream would reconnect-loop forever.
-    if (!isAutoRetry) s_slotNetRetryMs.remove(slot);
+    if (!isAutoRetry) {
+        s_slotNetRetryMs.remove(slot);
+        s_slotOpenRetryDone.remove(slot);
+    }
 
     StreamResolver &R = StreamResolver::instance();
     QObject *ctx = beginSlotResolve(page, slot,    // aborts any prior resolve
@@ -343,6 +388,7 @@ static void loadStreamIntoSlot(MainPage *page, Sampler *sampler, ConfigModel *mo
             s_slotStreamLoading.insert(slot);
             s_slotStreamTitle[slot] = s.title.isEmpty() ? pageUrl : s.title;
             s_slotStreamUrl[slot]   = pageUrl;
+            s_slotLoadWantedPlay[slot] = autoPlay;
             if (s.isLive) s_slotStreamLive.insert(slot);
             else          s_slotStreamLive.remove(slot);
             // Open the network stream OFF the GUI thread so nothing freezes.
@@ -865,15 +911,16 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     w->setSpectrogramView     (model->getSpectrogramView());
     w->setShowVinylButton     (model->getShowVinylButton());
     w->setMicFxFeatureEnabled (model->getMicFxFeatureEnabled());
+    w->setTsToolbarButton     (model->getTsToolbarButton());
+    w->setUiFontPt            (model->getUiFontPt());
+    Theme::setUiFontPointSize (model->getUiFontPt());
     w->setLoudnessNormalize   (model->getLoudnessNormalize());
     w->setStreamingEnabled    (model->getStreamingEnabled());
     w->setChannelNameLinkDetect(model->getChannelNameLinkDetect());
     w->setStreamAutoplay      (model->getStreamAutoplay());
     w->setStreamQuality       (StreamResolver::preferredQuality());
     w->setStreamFxGradient    (model->getStreamFxGradient());
-    w->setWaveAnimStyle       (QColor(model->getWaveAnimColorA()),
-                               QColor(model->getWaveAnimColorB()),
-                               model->getWaveAnimSpeed(),
+    w->setWaveAnimStyle       (model->getWaveAnimSpeed(),
                                model->getWaveAnimIntensity());
     w->setFormatBadgeMode     (model->getFormatBadgeMode());
     w->setShowStreamBadge     (model->getShowStreamBadge());
@@ -925,9 +972,7 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
         ch->waveform()->setSpectrogramView(model->getSpectrogramView());
         ch->setVinylButtonVisible(model->getShowVinylButton());
         ch->waveform()->setStreamGradientEnabled(model->getStreamFxGradient());
-        ch->waveform()->setStreamGradientStyle(QColor(model->getWaveAnimColorA()),
-                                               QColor(model->getWaveAnimColorB()),
-                                               model->getWaveAnimSpeed(),
+        ch->waveform()->setStreamGradientStyle(model->getWaveAnimSpeed(),
                                                model->getWaveAnimIntensity());
         ch->waveform()->setFormatBadgeMode(model->getFormatBadgeMode());
         ch->waveform()->setStreamBadgeEnabled(model->getShowStreamBadge());
@@ -1121,6 +1166,47 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         pushSettingsToWindow(page, model);
         pushSoundsToGrid(page, model);
     });
+    QObject::connect(w, &SettingsWindow::fullBackupRequested, [w, model]{
+        const QString def = QStringLiteral("soundboard-backup-%1.gbsb")
+            .arg(QDate::currentDate().toString(QStringLiteral("yyyyMMdd")));
+        QString p = QFileDialog::getSaveFileName(w,
+            QObject::tr("Full soundboard backup"), def,
+            QObject::tr("Soundboard backup (*.gbsb);;All files (*.*)"));
+        if (p.isEmpty()) return;
+        if (ConfigIO::fullBackupToFile(p, *model))
+            QMessageBox::information(w, QObject::tr("Full backup"),
+                QObject::tr("Backup saved. It contains EVERYTHING: buttons,"
+                            " channels, presets, Mic FX, theme and every"
+                            " setting."));
+        else
+            QMessageBox::warning(w, QObject::tr("Full backup"),
+                QObject::tr("Failed to write %1").arg(p));
+    });
+    QObject::connect(w, &SettingsWindow::fullRestoreRequested, [w, model, page]{
+        QString p = QFileDialog::getOpenFileName(w,
+            QObject::tr("Restore full backup"), QString(),
+            QObject::tr("Soundboard backup (*.gbsb);;All files (*.*)"));
+        if (p.isEmpty()) return;
+        if (QMessageBox::question(w, QObject::tr("Restore full backup"),
+                QObject::tr("This OVERWRITES the entire current soundboard"
+                            " configuration with the backup. Continue?"))
+                != QMessageBox::Yes)
+            return;
+        auto r = ConfigIO::fullRestoreFromFile(p);
+        if (r != ConfigIO::ImportResult::Ok) {
+            QMessageBox::warning(w, QObject::tr("Restore"), ConfigIO::humanError(r));
+            return;
+        }
+        // Reload what can be applied live; the rest (channel layout,
+        // splitter, sections) is read at startup.
+        model->readConfig();
+        pushSettingsToWindow(page, model);
+        pushSoundsToGrid(page, model);
+        MicFx::instance().loadSettings();
+        QMessageBox::information(w, QObject::tr("Restore"),
+            QObject::tr("Backup restored. Restart TeamSpeak to apply"
+                        " every last setting (channels, layout, ...)."));
+    });
     QObject::connect(w, &SettingsWindow::themeChanged, [model, page](bool enabled, const QColor &accent, const QColor &waveform, const QColor &background, int contrast, const QColor &text, const QColor &button){
         model->setTheme(enabled, accent.name(), waveform.name(), background.name(), contrast, text.isValid() ? text.name() : QString(), button.isValid() ? button.name() : QString());
         Theme::Colors c;
@@ -1268,16 +1354,14 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         model->setStreamFxGradient(v);
         for (auto *ch : page->channels()) ch->waveform()->setStreamGradientEnabled(v);
     });
-    // Waveform animation style (colors / speed / intensity). Invalid
-    // colors persist as empty strings = auto (follow the theme).
+    // Waveform animation motion (speed / intensity). Colours always
+    // follow the theme (or the default palette when the theme is off).
     QObject::connect(w, &SettingsWindow::waveAnimStyleChanged,
-                     [model, page](const QColor &a, const QColor &b, int speed, int intensity){
-        model->setWaveAnimColorA(a.isValid() ? a.name() : QString());
-        model->setWaveAnimColorB(b.isValid() ? b.name() : QString());
+                     [model, page](int speed, int intensity){
         model->setWaveAnimSpeed(speed);
         model->setWaveAnimIntensity(intensity);
         for (auto *ch : page->channels())
-            ch->waveform()->setStreamGradientStyle(a, b, speed, intensity);
+            ch->waveform()->setStreamGradientStyle(speed, intensity);
     });
     // Format / quality badge before a local file's name (theme-aware).
     QObject::connect(w, &SettingsWindow::formatBadgeModeChanged, [model, page](int mode){
@@ -1345,6 +1429,14 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         // stops (MicFx forces its master toggle off).
         page->setMicFxFeatureVisible(v);
         MicFx::instance().setFeatureEnabled(v);
+    });
+    QObject::connect(w, &SettingsWindow::uiFontPtChanged, [model](int v){
+        model->setUiFontPt(v);
+        Theme::setUiFontPointSize(v);   // repaints every soundboard window
+    });
+    QObject::connect(w, &SettingsWindow::tsToolbarButtonChanged, [model](bool v){
+        model->setTsToolbarButton(v);
+        TsToolbarButton::setUserEnabled(v);
     });
     QObject::connect(w, &SettingsWindow::loudnessNormalizeChanged, [model](bool v){
         model->setLoudnessNormalize(v);
@@ -1450,7 +1542,21 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
         if (n0 <= 0) return;
         int slot = -1;
         const bool infinity = model && model->getMultiChannelInfinity();
-        if (infinity) {
+        // Per-button MANDATORY temporary channel: every click spawns a
+        // fresh glowing channel just for this playback, regardless of
+        // silent channels and of the global infinity mode. Cleanup
+        // reuses the infinity auto-remove path (the "infinityAuto"
+        // property) so the channel deletes itself on stop / natural end.
+        if (info->tempChannel && !info->isMacro && !info->isPlaylist) {
+            Channel *newCh = page->addChannel();
+            slot = page->channels().size() - 1;
+            if (newCh) {
+                newCh->setProperty("infinityAuto", true);
+                newCh->setTempGlow(true);
+                newCh->setSkipButtonsVisible(model->getShowSkipButtons());
+                newCh->setMeterVertical(model->getVerticalMeter());
+            }
+        } else if (infinity) {
             if (sampler->getState(0) == Sampler::eSILENT) {
                 slot = 0;
             } else {
@@ -1619,6 +1725,19 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
             if (!snd.isStreamUrl) clearSlotStream(page, slot);
             s_slotToBtnIdx[slot] = idx;
             auto *ch = page->channels().at(slot);
+            // Per-button full sandbox package: push it onto the channel
+            // AND the sampler slot before playback starts, so the first
+            // audible block is already processed (fxRemember pattern,
+            // scaled up to the whole 21-stage chain).
+            if (snd.sandboxRemember && !snd.sandboxState.isEmpty()) {
+                QJsonDocument sd = QJsonDocument::fromJson(snd.sandboxState);
+                if (sd.isObject()) {
+                    SandboxState st = SandboxState::fromJson(sd.object());
+                    st.enabled = true;
+                    ch->setSandboxState(st);
+                    sampler->setSlotSandboxState(slot, st);
+                }
+            }
             const bool globalFx = model->getGlobalFxEnabled();
             // Compute the FX factors to apply after open — on the GUI thread so
             // the widget reads are safe even when the open runs on a worker.
@@ -1648,6 +1767,12 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
                     pf, sf, rv, applyFx, /*autoPlay*/true);
                 return;
             }
+            // Push the FX factors BEFORE opening the file: the decoder
+            // builds its filter graph at open() time, so anything set
+            // afterwards only affects audio decoded from that point on
+            // - the already-buffered start would keep the old rate.
+            sampler->setSlotPitchFactor(slot, applyFx ? pf : 1.0f);
+            sampler->setSlotSpeedFactor(slot, applyFx ? sf : 1.0f);
             if (!sampler->playSoundInSlot(slot, snd, false))
                 return;
             sampler->setSlotVolumeLocal (slot, ch->volume()->local());
@@ -2723,7 +2848,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             // Deferred via singleShot(0) so this handler finishes ALL
             // its state cleanup (wave paint, replay flag, s_slotToBtnIdx)
             // before we start shifting channel indices under it.
-            auto infinityCheck = [page](int checkSlot){
+            auto infinityCheck = [page, sampler](int checkSlot){
                 auto *ch = page->channelAt(checkSlot);
                 if (!ch) return;
                 if (!ch->property("infinityAuto").toBool()) return;
@@ -2737,9 +2862,14 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                     ch->setProperty("infinityPendingRemove", false);
                     return;
                 }
-                ch->setProperty("infinityAuto", false);
+                // MARK done only - removal is tail-only (see
+                // reapTempChannelsFromTail) so a finished middle channel
+                // can never renumber / stop the still-playing ones.
                 ch->setProperty("infinityPendingRemove", false);
-                QTimer::singleShot(0, page, [ch]{ ch->requestRemove(); });
+                ch->setProperty("infinityDone", true);
+                QTimer::singleShot(0, page, [page, sampler]{
+                    reapTempChannelsFromTail(page, sampler);
+                });
             };
             // STALE-STOP GUARD. onStopPlaying is queued (Qt::QueuedConnection)
             // so the handler can fire AFTER a fresh playback has already
@@ -2843,7 +2973,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
         // The banner clears the next time setFilename / setSound runs
         // on this channel (i.e. when anything else is played here).
         QObject::connect(sampler, &Sampler::onPlaybackError, page,
-                         [page](int slot, QString filename){
+                         [page, sampler, model](int slot, QString filename){
             if (slot < 0 || slot >= page->channels().size()) return;
             QString base = filename;
             int sl = qMax(base.lastIndexOf('/'), base.lastIndexOf('\\'));
@@ -2854,6 +2984,28 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                             || s_slotStreamUrl.contains(slot);
             QString reason;
             if (isNet) {
+                // The direct URL we tried to open is dead — drop it from the
+                // resolver cache NOW, or every reload inside the 5 h TTL
+                // would re-fail instantly from the same poisoned entry.
+                const QString pageUrl = s_slotStreamUrl.value(slot);
+                if (!pageUrl.isEmpty())
+                    StreamResolver::instance().invalidate(pageUrl);
+                // One automatic fresh-resolve retry per manual load: covers
+                // the poisoned-cache / early-expired-URL case transparently.
+                // A slot that fails its retry too falls through to the toast.
+                if (!pageUrl.isEmpty() && !s_slotOpenRetryDone.contains(slot)) {
+                    s_slotOpenRetryDone.insert(slot);
+                    const bool wantPlay = s_slotLoadWantedPlay.value(slot, false);
+                    QTimer::singleShot(0, page,
+                        [page, sampler, model, slot, pageUrl, wantPlay]{
+                        loadStreamIntoSlot(page, sampler, model, slot, pageUrl,
+                                           /*greenChannelName*/false,
+                                           /*autoPlay*/wantPlay,
+                                           /*keepPlaylist*/true,
+                                           /*isAutoRetry*/true);
+                    });
+                    return;
+                }
                 // A network URL never "exists" on disk — don't report File not
                 // found; clear the stream state and restore the channel name.
                 reason = QObject::tr("Network stream error");
@@ -4241,9 +4393,7 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         ch->waveform()->setAdaptToFx(model->getAdaptWaveformToFx());
         ch->waveform()->setShowCropMarkers(model->getShowCropMarkers());
         ch->waveform()->setStreamGradientEnabled(model->getStreamFxGradient());
-        ch->waveform()->setStreamGradientStyle(QColor(model->getWaveAnimColorA()),
-                                               QColor(model->getWaveAnimColorB()),
-                                               model->getWaveAnimSpeed(),
+        ch->waveform()->setStreamGradientStyle(model->getWaveAnimSpeed(),
                                                model->getWaveAnimIntensity());
         ch->waveform()->setFormatBadgeMode(model->getFormatBadgeMode());
         ch->waveform()->setStreamBadgeEnabled(model->getShowStreamBadge());

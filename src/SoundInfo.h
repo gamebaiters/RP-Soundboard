@@ -87,6 +87,19 @@ public:
 	QString streamTitle;
 	double  streamDurationSec;
 
+	// Mandatory temporary channel: every trigger of this button spawns a
+	// fresh throw-away channel (glowing border) that removes itself the
+	// moment its playback finishes or is stopped - unlimited overlapping
+	// instances. Persisted.
+	bool tempChannel = false;
+
+	// Full per-button Audio Sandbox package. When sandboxRemember is on,
+	// sandboxState holds a compact-JSON SandboxState that is pushed onto
+	// whatever channel this button plays into (same idea as fxRemember
+	// but for the whole 21-stage chain). Persisted.
+	bool       sandboxRemember = false;
+	QByteArray sandboxState;
+
 	// --- TRANSIENT resolved-play parameters (NOT serialized) ------------
 	// The wiring fills these on the SoundInfo COPY it hands to the Sampler for
 	// an actual stream play: `filename` is swapped to the resolved direct URL

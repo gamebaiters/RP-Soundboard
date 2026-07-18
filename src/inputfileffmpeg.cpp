@@ -28,6 +28,7 @@
 #include "inputfile.h"
 #include "SampleBuffer.h"
 #include "SampleSource.h"
+#include "ThreadQoS.h"
 #include "main.h"
 #include <mutex>
 #include <atomic>
@@ -1150,6 +1151,11 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 		av_dict_set(&openOpts, "reconnect_on_network_error", "1", 0);
 		av_dict_set(&openOpts, "reconnect_delay_max", "5", 0);
 		av_dict_set(&openOpts, "rw_timeout", "15000000", 0); // 15 s (microseconds)
+		// 1 MB socket/read buffer instead of FFmpeg's small default: on
+		// high-bandwidth-delay links (and macOS, where the default recv
+		// window starts small) the tiny buffer capped throughput well below
+		// what the connection could carry.
+		av_dict_set(&openOpts, "buffer_size", "1048576", 0);
 		av_dict_set(&openOpts, "user_agent",
 		            m_netUserAgent.empty() ? "Mozilla/5.0" : m_netUserAgent.c_str(), 0);
 		if (!m_netHeaders.empty())
@@ -1683,6 +1689,7 @@ void InputFileFFmpeg::stopStreamingReverse()
 
 void InputFileFFmpeg::chunkWorkerLoop()
 {
+	sbPromoteThreadQoS();   // macOS: inherited low QoS throttles network reads
 	int consecutiveEmpty = 0;
 	// Hard-failure counter: bumped on every decode error / empty
 	// chunk that is NOT followed by a successful decode. Used to cap

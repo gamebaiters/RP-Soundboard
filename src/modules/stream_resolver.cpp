@@ -552,9 +552,24 @@ void StreamResolver::finishProcess(QProcess *proc, const QString &pageUrl)
 
 	logWarning("[stream] resolve failed (exit %d): %s", code,
 	           pageUrl.toUtf8().constData());
-	if (!err.trimmed().isEmpty())
+	QString detail;
+	if (!err.trimmed().isEmpty()) {
 		extremeLog("[stream] yt-dlp stderr: %s", err.trimmed().constData());
-	emit failed(pageUrl, tr("Couldn't load this link."));
+		// Surface the extractor's own reason (private / deleted video, age
+		// gate, geo block, ...) instead of a blind "couldn't load": yt-dlp
+		// prints an "ERROR:" line on every hard failure.
+		const QStringList lines = QString::fromUtf8(err).split('\n');
+		for (const QString &ln : lines) {
+			const QString t = ln.trimmed();
+			if (t.startsWith(QLatin1String("ERROR:"), Qt::CaseInsensitive)) {
+				detail = t.mid(6).trimmed();
+				break;
+			}
+		}
+		if (detail.size() > 140) detail = detail.left(138) + QStringLiteral("…");
+	}
+	emit failed(pageUrl, detail.isEmpty() ? tr("Couldn't load this link.")
+	                                      : detail);
 }
 
 //----------------------------------------------------------------

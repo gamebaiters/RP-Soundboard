@@ -334,3 +334,143 @@ QWidget[isGBSoundboard="true"] QToolButton#settingsButton:hover {
 QWidget[isGBSoundboard="true"] QToolButton#settingsButton:pressed {
     background-color: #1f1f1f;
 }
+
+/* ================= HOST-THEME ISOLATION HARDENING =================
+   The TS3 client theme lives on qApp and cascades into our windows.
+   These windows carry this sheet as a WIDGET stylesheet (wins over the
+   app sheet on conflicts), so every property a host theme is known to
+   mangle is pinned down explicitly here: fonts (OLED themes force
+   9pt/500), checkbox "iOS switch" indicators, slider page fills. */
+
+/* Font: NOT declared here. Theme::fontStyleSheet() generates the rule
+   at runtime from the SYSTEM UI font (family + point size), so the
+   soundboard always matches the desktop's own text size and follows
+   DPI scaling - a hardcoded px size rendered everything microscopic on
+   scaled displays. The generated rule still overrides whatever the
+   host theme tries to impose. */
+
+QWidget[isGBSoundboard="true"] QCheckBox::indicator,
+QWidget[isGBSoundboard="true"] QGroupBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #777777;
+    border-radius: 3px;
+    background-color: #1e1e1e;
+    image: none;
+}
+QWidget[isGBSoundboard="true"] QCheckBox::indicator:hover,
+QWidget[isGBSoundboard="true"] QGroupBox::indicator:hover {
+    border-color: #4a90e2;
+}
+QWidget[isGBSoundboard="true"] QCheckBox::indicator:checked,
+QWidget[isGBSoundboard="true"] QGroupBox::indicator:checked {
+    background-color: #4a90e2;
+    border-color: #6ab0ff;
+    image: url(:/icon/img/check_14.png);
+}
+QWidget[isGBSoundboard="true"] QCheckBox::indicator:disabled,
+QWidget[isGBSoundboard="true"] QGroupBox::indicator:disabled {
+    background-color: #2a2a2a;
+    border-color: #2e2e2e;
+}
+
+/* SLIDERS - pin EVERY layout property. Qt merges non-conflicting
+   properties across app+widget sheets, so anything we leave unset
+   leaks in from the host theme. The concrete bug: the TS3 dark theme
+   sets "padding-left/right: 5px" + an accent background on the groove;
+   those 5px of padding survived the merge and a slider at ZERO still
+   showed a 5px filled stub. Everything pinned = nothing to leak. */
+QWidget[isGBSoundboard="true"] QSlider {
+    background: transparent;
+    border: none;
+}
+QWidget[isGBSoundboard="true"] QSlider::groove:horizontal,
+QWidget[isGBSoundboard="true"] QSlider::groove:vertical {
+    border: none;
+    border-image: none;
+    padding: 0px;
+    margin: 0px;
+}
+QWidget[isGBSoundboard="true"] QSlider::handle:horizontal,
+QWidget[isGBSoundboard="true"] QSlider::handle:vertical {
+    border-image: none;
+    padding: 0px;
+}
+QWidget[isGBSoundboard="true"] QSlider::sub-page:horizontal,
+QWidget[isGBSoundboard="true"] QSlider::sub-page:vertical {
+    border: none;
+    border-image: none;
+    padding: 0px;
+    margin: 0px;
+}
+QWidget[isGBSoundboard="true"] QSlider::sub-page:vertical {
+    background: #4a90e2;
+    border-radius: 3px;
+}
+
+/* BIPOLAR sliders (pitch / speed / mic gain: minimum < 0, zero in the
+   MIDDLE). Qt always paints sub-page from the left edge to the centre
+   of the handle, so a bipolar slider sitting at 0 looked "half full"
+   even though it is neutral. Sliders tagged sliderPolarity="bipolar"
+   (set automatically for any slider whose minimum is negative) drop
+   the accent fill entirely - the handle position alone tells the
+   value, exactly like a pan pot. */
+QWidget[isGBSoundboard="true"] QSlider[sliderPolarity="bipolar"]::sub-page:horizontal,
+QWidget[isGBSoundboard="true"] QSlider[sliderPolarity="bipolar"]::sub-page:vertical {
+    background: #1e1e1e;
+    border: none;
+    border-image: none;
+    border-radius: 2px;
+    padding: 0px;
+    margin: 0px;
+}
+QWidget[isGBSoundboard="true"] QSlider::add-page:horizontal,
+QWidget[isGBSoundboard="true"] QSlider::add-page:vertical {
+    background: #1e1e1e;
+    border: none;
+    border-image: none;
+    border-radius: 2px;
+    padding: 0px;
+    margin: 0px;
+}
+
+/* Host QSplitter styling must not thicken/paint our grid divider. */
+QWidget[isGBSoundboard="true"] QSplitter::handle {
+    image: none;
+}
+
+/* Universal shield: many popular TS3 themes (DarkenTS & co.) skin
+   widgets via border-image. The soundboard never uses border-image,
+   so blanket-reset it on our whole subtree - whatever theme the host
+   runs, its picture-frames can't bleed into our controls. */
+QWidget[isGBSoundboard="true"] * {
+    border-image: none;
+}
+
+/* Button borders: host themes colour :checked / :hover states (green
+   "active", red "recording" and friends). Those leaked onto our mic-FX
+   toggle and the settings button. Pin the border for the generic
+   button states; the soundboard's own variants (macro / special /
+   syncRole / profileRole) use more specific selectors and still win. */
+QWidget[isGBSoundboard="true"] QPushButton:checked,
+QWidget[isGBSoundboard="true"] QToolButton:checked {
+    border: 1px solid #4a90e2;
+    background-color: #3a5a7a;
+    color: #ffffff;
+}
+QWidget[isGBSoundboard="true"] QPushButton:hover,
+QWidget[isGBSoundboard="true"] QToolButton:hover {
+    border: 1px solid #777777;
+}
+QWidget[isGBSoundboard="true"] QPushButton:checked:hover,
+QWidget[isGBSoundboard="true"] QToolButton:checked:hover {
+    border: 1px solid #6ab0ff;
+}
+QWidget[isGBSoundboard="true"] QPushButton:pressed,
+QWidget[isGBSoundboard="true"] QToolButton:pressed {
+    border: 1px solid #555555;
+}
+QWidget[isGBSoundboard="true"] QToolButton {
+    border: 1px solid transparent;
+    background-color: transparent;
+}

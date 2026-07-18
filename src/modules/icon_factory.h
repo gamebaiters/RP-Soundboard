@@ -23,4 +23,21 @@ QIcon clear(const QColor &c   = QColor(0xD9, 0x53, 0x4F));   // red filled circl
 // the record label at the centre (default = the transport red family).
 QIcon vinyl(const QColor &labelColor = QColor(0xC0, 0x39, 0x2B));
 
+// Line-art action set (matches the mic-channel preset glyphs: light
+// stroke, no fill) used to replace text buttons across the channel
+// row and the sandbox dialog.
+QIcon save(const QColor &c      = QColor(0xDC, 0xDC, 0xDC));  // floppy disk
+QIcon trash(const QColor &c     = QColor(0xDC, 0xDC, 0xDC));  // delete
+QIcon copyDoc(const QColor &c   = QColor(0xDC, 0xDC, 0xDC));  // two sheets
+QIcon paste(const QColor &c     = QColor(0xDC, 0xDC, 0xDC));  // clipboard
+QIcon folderOpen(const QColor &c= QColor(0xDC, 0xDC, 0xDC));  // load
+QIcon download(const QColor &c  = QColor(0xFF, 0xFF, 0xFF));  // arrow into tray
+QIcon exportAudio(const QColor &c = QColor(0xDC, 0xDC, 0xDC));// arrow out of tray + wave
+QIcon record(const QColor &c    = QColor(0xD9, 0x53, 0x4F));  // red dot
+
+// Soundboard identity glyph: a 2x2 pad grid (launchpad style) with
+// colored pads - used for the button injected into the TS3 client
+// toolbar, where it must read as "soundboard" at 20-24 px.
+QIcon soundboard();
+
 }

@@ -35,6 +35,9 @@
 #define NAME_IS_PLAYLIST "isPlaylist"
 #define NAME_STREAM_TITLE "streamTitle"
 #define NAME_STREAM_DURATION "streamDurationSec"
+#define NAME_TEMP_CHANNEL "tempChannel"
+#define NAME_SANDBOX_REMEMBER "sandboxRemember"
+#define NAME_SANDBOX_STATE "sandboxState"
 
 #define DEFAULT_PATH ""
 #define DEFAULT_CUSTOM_TEXT ""
@@ -124,6 +127,9 @@ void SoundInfo::readFromConfig( const QSettings &settings )
 	isPlaylist        = settings.value(NAME_IS_PLAYLIST, false).toBool();
 	streamTitle       = settings.value(NAME_STREAM_TITLE, QString()).toString();
 	streamDurationSec = settings.value(NAME_STREAM_DURATION, -1.0).toDouble();
+	tempChannel       = settings.value(NAME_TEMP_CHANNEL, false).toBool();
+	sandboxRemember   = settings.value(NAME_SANDBOX_REMEMBER, false).toBool();
+	sandboxState      = settings.value(NAME_SANDBOX_STATE, QByteArray()).toByteArray();
 }
 
 
@@ -157,6 +163,9 @@ void SoundInfo::saveToConfig( QSettings &settings ) const
 	settings.setValue(NAME_IS_PLAYLIST, isPlaylist);
 	settings.setValue(NAME_STREAM_TITLE, streamTitle);
 	settings.setValue(NAME_STREAM_DURATION, streamDurationSec);
+	settings.setValue(NAME_TEMP_CHANNEL, tempChannel);
+	settings.setValue(NAME_SANDBOX_REMEMBER, sandboxRemember);
+	settings.setValue(NAME_SANDBOX_STATE, sandboxState);
 }
 
 

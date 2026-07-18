@@ -15,6 +15,7 @@
 #include "ts3log.h"
 #include "HighResClock.h"
 #include "AudioUtils.h"
+#include "ThreadQoS.h"
 #include "dsp/SlotDsp.h"
 #include "dsp/SandboxState.h"
 
@@ -237,6 +238,7 @@ void Sampler::setSlotReverse(int slot, bool on)
 	s.reverseWorker = std::thread(
 		[this, slot, epoch, on, lastSound, resumeSec,
 		 pitchBase, speedFactor, reverbMix, newCancel, done]{
+			sbPromoteThreadQoS();
 			reverseWorkerProc(slot, epoch, on, lastSound, resumeSec,
 			                  pitchBase, speedFactor, reverbMix, newCancel);
 			done->store(true, std::memory_order_release);
@@ -692,6 +694,7 @@ void Sampler::playSoundInSlotAsync(int slot, const SoundInfo &sound,
 	std::thread th([this, slot, sound, volLocal, volRemote,
 	                pitchFactor, speedFactor, reverbMix, applyFx, autoPlay,
 	                done]{
+		sbPromoteThreadQoS();   // macOS: the network open() runs on this thread
 		if (!m_shuttingDown.load(std::memory_order_acquire)) {
 			// The heavy network open() happens here, OFF the GUI thread.
 			if (playSoundInSlot(slot, sound, false) &&
@@ -1820,7 +1823,12 @@ void Sampler::setSlotSpeedFactor(int slot, float factor)
 {
 	std::lock_guard<std::mutex> Lock(m_mutex);
 	extremeLog("Sampler::setSlotSpeedFactor slot=%d factor=%.4f", slot, factor);
-	if (slot >= 0 && slot < MAX_SLOTS && m_slots[slot].inputFile)
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	// Remember it even while the slot is idle: playSoundInSlot reads
+	// this BEFORE opening the next file, so the very first decoded
+	// block already carries the right rate.
+	m_slots[slot].lastSlotSpeedFactor = factor;
+	if (m_slots[slot].inputFile)
 		m_slots[slot].inputFile->setSpeedFactor(factor);
 }
 
@@ -2150,10 +2158,15 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 		}
 
 		chanReverse = s.channelReverse;
-		prePitch = (s.lastSlotPitchFactor > 0.01f
-		          && std::fabs(s.lastSlotPitchFactor - 1.0f) > 1e-4f)
-		          ? s.lastSlotPitchFactor : m_pitchFactor;
-		speedFactor = m_speedFactor;
+		// PER-SLOT factors win, always. The old rule fell back to the
+		// legacy GLOBAL m_pitchFactor whenever the slot value happened
+		// to be exactly 1.0, so a stale global made every fresh sound
+		// open pitched/sped up and only snap back once the prebuffer
+		// (a couple of seconds of audio) had played out.
+		prePitch    = (s.lastSlotPitchFactor > 0.01f)
+		            ? s.lastSlotPitchFactor : m_pitchFactor;
+		speedFactor = (s.lastSlotSpeedFactor > 0.01f)
+		            ? s.lastSlotSpeedFactor : m_speedFactor;
 		reverbMix   = m_reverbMix;
 	}
 
@@ -2782,6 +2795,7 @@ struct BackfillCollector : public SampleProducer {
 
 void Sampler::backfillWorkerProc()
 {
+	sbPromoteThreadQoS();   // macOS: inherited low QoS throttles network reads
 	// Chunk size (output seconds) fetched per decode. Small enough that
 	// even a fast (12x) backward scratch is fed within a couple of ring
 	// blocks, large enough to amortise the FFmpeg seek.
@@ -3189,6 +3203,7 @@ void Sampler::startSeekWorker()
 //---------------------------------------------------------------
 void Sampler::seekWorkerProc()
 {
+	sbPromoteThreadQoS();   // macOS: seek scans do network I/O on this thread
 	while (!m_seekStop.load(std::memory_order_acquire))
 	{
 		// Wait for pending work. We snapshot the per-slot atomics in

@@ -85,11 +85,11 @@ public:
 	// Animated theme-aware gradient on the played-portion tint (all
 	// playback, default ON — follows the custom theme's colours when set).
 	void setStreamGradientEnabled(bool on);
-	// Animation style from Settings. Invalid colors = auto (theme
-	// accent/waveform pair, or the default azure→violet). speed and
-	// intensity are the 0..100 slider values (50 / 30 = defaults).
-	void setStreamGradientStyle(const QColor &colA, const QColor &colB,
-	                            int speed, int intensity);
+	// Animation motion from Settings. Colours are always theme-driven
+	// (accent/waveform pair, or the default azure→violet when the custom
+	// theme is off). speed and intensity are the 0..100 slider values
+	// (50 / 30 = defaults).
+	void setStreamGradientStyle(int speed, int intensity);
 
 signals:
 	void seekRequested(double fraction);
@@ -181,8 +181,6 @@ private:
 	QElapsedTimer  m_gradClock;
 	// User style overrides (Settings › Streaming › Appearance). Invalid
 	// color = auto (theme-driven).
-	QColor         m_gradColA;
-	QColor         m_gradColB;
 	int            m_gradSpeed = 50;      // 0..100, 50 = 1x
 	int            m_gradIntensity = 30;  // 0..100 -> tint alpha
 

@@ -5,6 +5,14 @@
 #include <QPointer>
 #include <QVector>
 #include <QStyle>
+#include <QSlider>
+#include <QPainter>
+#include <QPen>
+#include <QEvent>
+#include <QChildEvent>
+#include <QTimer>
+#include <QFont>
+#include <QScreen>
 
 namespace Theme {
 
@@ -42,6 +50,172 @@ QColor textOn(const QColor &bg) {
     return bg.lightnessF() < 0.5 ? QColor(0xec, 0xec, 0xec)
                                  : QColor(0x10, 0x10, 0x10);
 }
+
+// ---- bipolar-slider tagging -------------------------------------------
+// Qt paints QSlider::sub-page from the groove's left edge up to the
+// CENTRE of the handle. On a slider whose range straddles zero (pitch,
+// speed, mic gain) the neutral position is the middle, so the accent
+// fill covered half the groove while the value was 0 - it read as "set"
+// when it was not. Tagging those sliders lets the stylesheet drop the
+// fill (see dark_style.qss, sliderPolarity="bipolar").
+// Paints a bipolar slider ENTIRELY by itself, by consuming the widget's
+// paint event. Two earlier attempts went through QSlider::paintEvent
+// overrides + stylesheet rules and both were defeated by the stylesheet
+// style (empty sub-control rects, sub-page repainted by the host theme),
+// so the fill kept starting at the left edge. Owning the whole paint is
+// the only way that cannot be overridden: no QSS involvement, no style
+// sub-control queries, no dependency on which QSlider subclass is used.
+class BipolarPainter : public QObject {
+public:
+    static BipolarPainter *instance() {
+        static BipolarPainter *p = new BipolarPainter();
+        return p;
+    }
+protected:
+    bool eventFilter(QObject *obj, QEvent *ev) override {
+        if (ev->type() != QEvent::Paint) return false;
+        auto *s = qobject_cast<QSlider *>(obj);
+        if (!s || !s->isVisible()) return false;
+        const QString polarity = s->property("sliderPolarity").toString();
+        if (polarity.isEmpty()) return false;      // not one of ours
+        const bool bipolar = (polarity == QLatin1String("bipolar"));
+
+        const Derived &d = derivedCached();
+        const bool horiz = (s->orientation() == Qt::Horizontal);
+        const int  hw    = 14;                 // handle box (stylesheet)
+        const int  track = 6;                  // groove thickness
+
+        QPainter p(s);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setPen(Qt::NoPen);
+
+        const int span = qMax(1, (horiz ? s->width() : s->height()) - hw);
+        const int pos  = QStyle::sliderPositionFromValue(
+                             s->minimum(), s->maximum(), s->value(), span,
+                             horiz ? s->invertedAppearance()
+                                   : !s->invertedAppearance()) + hw / 2;
+
+        QRect trackRect, fillRect;
+        // Bipolar: the bar grows out of the CENTRE. Unipolar (volume,
+        // reverb, ...): from the start of the groove, like a normal
+        // slider. Same geometry + same colours for both, so a channel
+        // row never mixes two visual styles - which is what happened
+        // while the unipolar ones were still painted by the host theme.
+        const int origin = bipolar ? (horiz ? s->width() : s->height()) / 2
+                                   : (horiz ? 0 : s->height());
+        const int a = qMin(origin, pos), b = qMax(origin, pos);
+        if (horiz) {
+            const int y = (s->height() - track) / 2;
+            trackRect = QRect(0, y, s->width(), track);
+            fillRect  = QRect(a, y, b - a, track);
+        } else {
+            const int x = (s->width() - track) / 2;
+            trackRect = QRect(x, 0, track, s->height());
+            fillRect  = QRect(x, a, track, b - a);
+        }
+
+        const qreal r = track / 2.0;
+        p.setBrush(s->isEnabled() ? d.surfaceAlt : d.disabledSurface);
+        p.drawRoundedRect(trackRect, r, r);
+        if ((horiz ? fillRect.width() : fillRect.height()) >= 2) {
+            p.setBrush(s->isEnabled() ? d.accent : d.accentDisabled);
+            p.drawRoundedRect(fillRect, r, r);
+        }
+
+        // Handle drawn by hand too - asking the style for it would drag
+        // the stylesheet back into the picture. Metrics copied verbatim
+        // from dark_style.qss (handle: 14 px across, margin -5 px over a
+        // 6 px groove => 16 px along the groove, radius 7, slider grey
+        // with a border, accent on hover) so a bipolar slider is visually
+        // indistinguishable from every other slider in the soundboard.
+        const int hLong  = track + 10;          // 16 px, matches margin -5
+        const int hShort = hw;                  // 14 px
+        QRect h = horiz
+            ? QRect(pos - hShort / 2, (s->height() - hLong) / 2, hShort, hLong)
+            : QRect((s->width() - hLong) / 2, pos - hShort / 2, hLong, hShort);
+        p.setPen(QPen(s->isEnabled() ? d.border : d.disabledBorder, 1));
+        p.setBrush(s->isEnabled()
+                       ? (s->underMouse() ? d.accent : d.slider)
+                       : QBrush(d.disabledSurface));
+        p.drawRoundedRect(QRectF(h).adjusted(0.5, 0.5, -0.5, -0.5), 7.0, 7.0);
+        return true;                            // paint fully handled
+    }
+};
+
+void tagOneSlider(QSlider *s) {
+    if (!s) return;
+    const bool bipolar = (s->minimum() < 0 && s->maximum() > 0)
+                      || s->property("bipolarFill").toBool();
+    const QString want = bipolar ? QStringLiteral("bipolar")
+                                 : QStringLiteral("unipolar");
+    if (s->property("sliderPolarity").toString() != want) {
+        s->setProperty("sliderPolarity", want);
+        if (s->style()) {
+            s->style()->unpolish(s);
+            s->style()->polish(s);
+        }
+    }
+    // Every soundboard slider is painted by us - not just the bipolar
+    // ones. Leaving the unipolar sliders to the stylesheet meant the
+    // host theme could style them (bigger, lighter handle) while the
+    // bipolar ones used our metrics, so a single row showed two
+    // different slider designs.
+    s->removeEventFilter(BipolarPainter::instance());
+    s->installEventFilter(BipolarPainter::instance());
+    s->setAttribute(Qt::WA_Hover, true);        // hover highlight works
+    s->update();
+}
+
+void tagSlidersIn(QWidget *root) {
+    if (!root) return;
+    if (auto *s = qobject_cast<QSlider *>(root)) tagOneSlider(s);
+    const auto sliders = root->findChildren<QSlider *>();
+    for (QSlider *s : sliders) tagOneSlider(s);
+}
+
+// Keeps the tagging correct for sliders created (or re-ranged) after
+// the window was built: runtime channels, lazily-built dialogs, the
+// sandbox editor. Installed on every tracked top-level window.
+class SliderTagger : public QObject {
+public:
+    static SliderTagger *instance() {
+        static SliderTagger *t = new SliderTagger();
+        return t;
+    }
+    void cover(QWidget *w) {
+        if (!w) return;
+        tagSlidersIn(w);
+        w->removeEventFilter(this);
+        w->installEventFilter(this);
+        const auto kids = w->findChildren<QWidget *>();
+        for (QWidget *c : kids) {
+            c->removeEventFilter(this);
+            c->installEventFilter(this);
+        }
+    }
+protected:
+    bool eventFilter(QObject *obj, QEvent *ev) override {
+        switch (ev->type()) {
+        case QEvent::ChildAdded: {
+            QObject *child = static_cast<QChildEvent *>(ev)->child();
+            if (child && child->isWidgetType()) {
+                // The child is mid-construction: tag on the next tick,
+                // when its range is set.
+                QPointer<QWidget> w = static_cast<QWidget *>(child);
+                QTimer::singleShot(0, w, [this, w]{ if (w) cover(w); });
+            }
+            break;
+        }
+        case QEvent::Show:
+        case QEvent::Polish:
+            if (obj->isWidgetType())
+                tagSlidersIn(static_cast<QWidget *>(obj));
+            break;
+        default: break;
+        }
+        return QObject::eventFilter(obj, ev);
+    }
+};
 }
 
 Colors defaultColors() {
@@ -147,6 +321,16 @@ void trackThemedWidget(QWidget *w) {
     auto &list = trackedWidgets();
     for (auto &p : list) if (p.data() == w) return;
     list.append(QPointer<QWidget>(w));
+    // Tag bipolar sliders now + keep tagging the ones built later.
+    SliderTagger::instance()->cover(w);
+    // HOST-THEME ISOLATION: the TS3 client applies its theme on qApp,
+    // and those unscoped rules (switch checkboxes, 9pt fonts, slider
+    // sub-page fills, ...) cascade into OUR windows and visually break
+    // them. A WIDGET-level stylesheet always beats the app stylesheet
+    // on conflicts, so every soundboard top-level window carries the
+    // full composite sheet itself.
+    if (w->isWindow())
+        w->setStyleSheet(compositeStyleSheet());
 }
 
 // Bracket sentinels so we can replace ONLY the soundboard's contribution
@@ -193,6 +377,11 @@ void refreshAllThemedWidgets() {
     for (auto it = list.begin(); it != list.end();) {
         if (!it->data()) { it = list.erase(it); continue; }
         QWidget *w = it->data();
+        // Re-arm the per-window isolation sheet with the fresh palette
+        // (see trackThemedWidget): widget sheet > host app sheet.
+        if (w->isWindow())
+            w->setStyleSheet(compositeStyleSheet());
+        tagSlidersIn(w);
         QList<QWidget*> subtree = w->findChildren<QWidget*>();
         subtree.prepend(w);
         for (auto *c : subtree) {
@@ -206,8 +395,53 @@ void refreshAllThemedWidgets() {
     }
 }
 
+namespace {
+int &uiFontPtOverride() { static int pt = 0; return pt; }
+}
+
+void setUiFontPointSize(int pt) {
+    if (pt < 0) pt = 0;
+    if (pt > 0) pt = qBound(6, pt, 24);
+    if (uiFontPtOverride() == pt) return;
+    uiFontPtOverride() = pt;
+    refreshAllThemedWidgets();
+}
+
+int uiFontPointSize() { return uiFontPtOverride(); }
+
+QString fontStyleSheet() {
+    // Base on the SYSTEM UI font: it already carries the desktop's DPI
+    // scaling, so the soundboard reads exactly like every other app.
+    // A hardcoded pixel size (the previous approach) turned microscopic
+    // on scaled displays; a host theme's own font rule would otherwise
+    // resize our carefully laid-out rows.
+    const QFont sys = QApplication::font();
+    QString family = sys.family();
+    if (family.isEmpty()) family = QStringLiteral("Segoe UI");
+    qreal pt = uiFontPtOverride() > 0 ? qreal(uiFontPtOverride())
+                                      : sys.pointSizeF();
+    if (pt <= 0.0) {
+        // Font defined in pixels: convert with the screen's DPI.
+        const int px = sys.pixelSize() > 0 ? sys.pixelSize() : 12;
+        const qreal dpi = qApp->primaryScreen()
+            ? qApp->primaryScreen()->logicalDotsPerInch() : 96.0;
+        pt = px * 72.0 / (dpi > 0 ? dpi : 96.0);
+    }
+    if (pt < 6.0)  pt = 6.0;
+    if (pt > 24.0) pt = 24.0;
+    return QString(
+        "QWidget[isGBSoundboard=\"true\"],\n"
+        "QWidget[isGBSoundboard=\"true\"] QWidget {\n"
+        "    font-family: \"%1\";\n"
+        "    font-size: %2pt;\n"
+        "    font-weight: normal;\n"
+        "    font-style: normal;\n"
+        "}\n").arg(family).arg(pt, 0, 'f', 1);
+}
+
 QString compositeStyleSheet() {
-    return StyleHelper::loadDarkStyle() + "\n" + variantStyleSheet();
+    return StyleHelper::loadDarkStyle() + "\n" + fontStyleSheet()
+         + "\n" + variantStyleSheet();
 }
 
 static const char *kMarker = "/*RPSB-VARIANT-MARKER*/";

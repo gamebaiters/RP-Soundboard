@@ -7,6 +7,9 @@
 #include "../soundview_qt.h"
 #include "../samples.h"
 #include "../main.h"
+#include "channel_sandbox_dialog.h"
+
+#include <QJsonDocument>
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -78,7 +81,8 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     m_cropStopMode->addItems({tr("after"), tr("at")});
 
     // File group: path + browse on top, waveform preview below + Preview button
-    auto *fileBox = new QGroupBox(tr("Sound file"), this);
+    m_fileBox = new QGroupBox(tr("Sound file"), this);
+    auto *fileBox = m_fileBox;
     auto *fileLay = new QVBoxLayout(fileBox);
     auto *pathRow = new QHBoxLayout;
     pathRow->addWidget(m_filePath, 1);
@@ -87,6 +91,13 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     m_soundView->setMinimumHeight(60);
     m_soundView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     fileLay->addWidget(m_soundView);
+    // Stream/playlist explainer — replaces waveform + preview when the cell
+    // holds a link instead of a local file. Hidden by default.
+    m_streamInfo = new QLabel(fileBox);
+    m_streamInfo->setWordWrap(true);
+    m_streamInfo->setTextFormat(Qt::RichText);
+    m_streamInfo->setVisible(false);
+    fileLay->addWidget(m_streamInfo);
     auto *previewRow = new QHBoxLayout;
     m_preview->setIcon(QIcon(":/icon/img/playarrow_32.png"));
     m_preview->setIconSize(QSize(16, 16));
@@ -122,7 +133,8 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     imgRow->addWidget(m_imageClear);
     dispForm->addRow(tr("Image"), imgRow);
 
-    auto *volBox = new QGroupBox(tr("Volume modifier"), this);
+    m_volBox = new QGroupBox(tr("Volume modifier"), this);
+    auto *volBox = m_volBox;
     auto *volLay = new QHBoxLayout(volBox);
     volLay->addWidget(m_volume, 1);
     volLay->addWidget(m_volumeLabel);
@@ -166,6 +178,67 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
         "drown quiet ones."));
     fxLay->addWidget(m_normalizeChk);
 
+    // Channel behaviour: temporary-channel flag + per-button sandbox.
+    m_chanBox = new QGroupBox(tr("Channel"), this);
+    auto *chanLay = new QVBoxLayout(m_chanBox);
+    m_tempChannelChk = new QCheckBox(
+        tr("Always play in a temporary channel"), m_chanBox);
+    m_tempChannelChk->setToolTip(tr(
+        "Every click spawns a fresh throw-away channel (glowing border)\n"
+        "just for this playback - click as many times as you want, the\n"
+        "instances overlap. Each temporary channel removes itself the\n"
+        "moment its sound finishes or is stopped."));
+    chanLay->addWidget(m_tempChannelChk);
+    auto *sbxRow = new QHBoxLayout;
+    m_sandboxRememberChk = new QCheckBox(
+        tr("Apply a saved Audio Sandbox"), m_chanBox);
+    m_sandboxRememberChk->setToolTip(tr(
+        "Push a full Audio Sandbox setup (EQ, spatial, all 21 DSP\n"
+        "stages) onto whatever channel this button plays into -\n"
+        "like the FX override, but for the whole sandbox."));
+    sbxRow->addWidget(m_sandboxRememberChk);
+    m_sandboxEditBtn = new QPushButton(tr("Edit sandbox…"), m_chanBox);
+    m_sandboxEditBtn->setToolTip(tr(
+        "Open the Audio Sandbox editor for this button's saved setup."));
+    sbxRow->addWidget(m_sandboxEditBtn);
+    sbxRow->addStretch(1);
+    chanLay->addLayout(sbxRow);
+    connect(m_sandboxEditBtn, &QPushButton::clicked, this, [this]{
+        if (!m_sandboxDlg) {
+            m_sandboxDlg = new ChannelSandboxDialog(0, this);
+            m_sandboxDlg->setProperty("isGBSoundboard", true);
+            m_sandboxDlg->setChannelTitle(tr("Button sandbox"));
+            connect(m_sandboxDlg, &ChannelSandboxDialog::stateChanged,
+                    this, [this](const SandboxState &s){
+                SandboxState keep = s;
+                keep.enabled = true;
+                m_sandboxData = QJsonDocument(keep.toJson())
+                                    .toJson(QJsonDocument::Compact);
+                // Editing implies wanting it applied.
+                m_sandboxRememberChk->setChecked(true);
+            });
+            connect(m_sandboxDlg, &ChannelSandboxDialog::resetRequested,
+                    this, [this](int){
+                SandboxState fresh;
+                fresh.enabled = true;
+                m_sandboxData = QJsonDocument(fresh.toJson())
+                                    .toJson(QJsonDocument::Compact);
+                m_sandboxDlg->setState(fresh);
+            });
+        }
+        SandboxState st;
+        st.enabled = true;
+        if (!m_sandboxData.isEmpty()) {
+            QJsonDocument doc = QJsonDocument::fromJson(m_sandboxData);
+            if (doc.isObject()) st = SandboxState::fromJson(doc.object());
+            st.enabled = true;
+        }
+        m_sandboxDlg->setState(st);
+        m_sandboxDlg->show();
+        m_sandboxDlg->raise();
+        m_sandboxDlg->activateWindow();
+    });
+
     auto *hotkeyBox = new QGroupBox(tr("Hotkey"), this);
     auto *hotkeyLay = new QHBoxLayout(hotkeyBox);
     hotkeyLay->addWidget(m_hotkeyBtn);
@@ -183,6 +256,7 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     root->addWidget(volBox);
     root->addWidget(m_cropGroup);
     root->addWidget(m_fxGroup);
+    root->addWidget(m_chanBox);
     root->addWidget(hotkeyBox);
     root->addLayout(btnRow);
 
@@ -267,7 +341,58 @@ void ButtonAdvancedPanel::setSoundInfo(const SoundInfo &info) {
     m_fx->setSync(info.fxSyncPitchSpeed);
     if (m_reverseChk)   m_reverseChk->setChecked(info.reverse);
     if (m_normalizeChk) m_normalizeChk->setChecked(info.autoNormalize);
+    if (m_tempChannelChk)     m_tempChannelChk->setChecked(info.tempChannel);
+    if (m_sandboxRememberChk) m_sandboxRememberChk->setChecked(info.sandboxRemember);
+    m_sandboxData = info.sandboxState;
+    applyStreamMode();
     refreshSoundView();
+}
+
+void ButtonAdvancedPanel::applyStreamMode() {
+    const bool stream   = m_info.isStreamUrl;
+    const bool playlist = stream && m_info.isPlaylist;
+
+    m_fileBox->setTitle(playlist ? tr("Playlist link")
+                       : stream  ? tr("Stream link")
+                                 : tr("Sound file"));
+    // The link is edited through the save-link flows, not by hand — a local
+    // path typed into a cell still flagged isStreamUrl would break playback.
+    m_filePath->setReadOnly(stream);
+    m_browse->setVisible(!stream);
+    // No local decode for a link: the URL resolves through the streaming
+    // engine at play time, so the offline waveform and the preview slot
+    // (which opens the raw page URL) cannot work — hide, don't break.
+    m_soundView->setVisible(!stream);
+    m_preview->setVisible(!stream);
+    m_previewTimeLabel->setVisible(!stream);
+    m_streamInfo->setVisible(stream);
+    if (stream) {
+        const QString title = m_info.streamTitle.toHtmlEscaped();
+        QString text;
+        if (playlist) {
+            text = tr("This button opens the whole playlist in a channel. "
+                      "Each track plays with the channel's own volume, crop "
+                      "and FX, so those settings are hidden here.");
+        } else {
+            text = tr("The link is resolved and streamed when the button is "
+                      "triggered — no local preview. Volume, crop and FX "
+                      "below are applied to the stream (crop and reverse "
+                      "only make sense for a non-live video).");
+        }
+        if (!title.isEmpty())
+            text = QStringLiteral("<b>%1</b><br>%2").arg(title, text);
+        m_streamInfo->setText(text);
+    }
+
+    // Playlist cells: per-button playback settings never reach the
+    // per-track loads (the playlist panel drives the channel), so showing
+    // them would be a lie. Display + Hotkey stay.
+    m_volBox->setVisible(!playlist);
+    m_cropGroup->setVisible(!playlist);
+    // Playlist cells never drive startPlayback, so the channel-behaviour
+    // block (temp channel + per-button sandbox) is meaningless there.
+    if (m_chanBox) m_chanBox->setVisible(!playlist);
+    m_fxGroup->setVisible(m_globalFxOn && !playlist);
 }
 
 SoundInfo ButtonAdvancedPanel::soundInfo() const {
@@ -292,6 +417,9 @@ SoundInfo ButtonAdvancedPanel::soundInfo() const {
     s.imagePath        = m_imagePath->text();
     s.reverse          = m_reverseChk   && m_reverseChk->isChecked();
     s.autoNormalize    = m_normalizeChk && m_normalizeChk->isChecked();
+    s.tempChannel      = m_tempChannelChk && m_tempChannelChk->isChecked();
+    s.sandboxRemember  = m_sandboxRememberChk && m_sandboxRememberChk->isChecked();
+    s.sandboxState     = m_sandboxData;
     return s;
 }
 
@@ -300,7 +428,8 @@ void ButtonAdvancedPanel::setHotkeyText(const QString &shortcut) {
 }
 
 void ButtonAdvancedPanel::setGlobalFxEnabled(bool on) {
-    m_fxGroup->setVisible(on);
+    m_globalFxOn = on;
+    m_fxGroup->setVisible(on && !(m_info.isStreamUrl && m_info.isPlaylist));
     if (!on) {
         // Force the per-button FX off so onAccepted writes fxRemember=false
         // - matching the master switch's intent (no FX applied anywhere).
@@ -385,6 +514,9 @@ void ButtonAdvancedPanel::onPreview() {
     }
     SoundInfo s = soundInfo();
     if (s.filename.isEmpty()) return;
+    // Stream cells have no preview (the button is hidden in stream mode;
+    // this guards the hotkey/keyboard path too).
+    if (s.isStreamUrl) return;
     // Reserve the LAST sampler slot for previews so they never collide
     // with channel slots [0..MAX_SLOTS-2]. Stop anything in that slot
     // first so a stale preview can't outlive the dialog.
@@ -470,6 +602,10 @@ void ButtonAdvancedPanel::pushLiveFxToPreview() {
 }
 
 void ButtonAdvancedPanel::refreshSoundView() {
+    // A stream cell has no local file to decode: the visualizer thread
+    // would try to open the page URL and fail. The view is hidden in
+    // stream mode anyway (applyStreamMode) — skip the decode entirely.
+    if (m_info.isStreamUrl) return;
     SoundInfo s = soundInfo();
     m_soundView->setSound(s);
     m_soundView->update();

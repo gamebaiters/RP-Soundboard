@@ -15,10 +15,12 @@
 #include "help_bubble.h"
 #include "theme.h"
 #include "../ConfigModel.h"   // flushPendingWrite() on window close/hide
+#include "../PlatformStyle.h" // macOS: Fusion base style for QSS fidelity
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QScrollArea>
+#include <QSplitter>
 #include <algorithm>
 #include <QToolButton>
 #include <QPushButton>
@@ -62,7 +64,9 @@ MainPage::MainPage(QWidget *parent)
     resize(1400, 900);
     // Allow the user to shrink the window down to a compact dock-style
     // strip without Qt blocking it on internal sub-widget min sizes.
-    setMinimumSize(480, 320);
+    // applyResponsiveLayout() progressively hides secondary UI as the
+    // window shrinks, so even this small only the grid remains.
+    setMinimumSize(380, 240);
 
     m_grid->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     // Smaller min lets the user shrink the soundboard window down to a
@@ -193,7 +197,10 @@ MainPage::MainPage(QWidget *parent)
         if (m_micChannel) m_micChannel->setVisible(vis && m_micFeatureOn);
     }
 
-    auto *bottom = new QHBoxLayout;
+    // The whole bottom bar lives in a host widget so the responsive
+    // collapse can hide it in one call when the window gets too short.
+    m_bottomBar = new QWidget(this);
+    auto *bottom = new QHBoxLayout(m_bottomBar);
     bottom->setContentsMargins(10,6,10,6);
     bottom->setSpacing(8);
     bottom->addWidget(m_addChannelBtn);
@@ -289,17 +296,37 @@ MainPage::MainPage(QWidget *parent)
     bottom->addSpacing(8);
     bottom->addWidget(m_reset);
 
-    auto *separator = new QFrame(this);
-    separator->setFrameShape(QFrame::HLine);
+    // Grid | channels divider: a real QSplitter, so the bar between
+    // the sound buttons and the channels area is DRAGGABLE - the user
+    // decides how much height each pane gets. Position persists.
+    m_splitter = new QSplitter(Qt::Vertical, this);
+    m_splitter->setObjectName(QStringLiteral("gridChannelsSplitter"));
+    m_splitter->setChildrenCollapsible(false);
+    m_splitter->setHandleWidth(5);
+    m_splitter->addWidget(m_grid);
+    m_splitter->addWidget(m_channelsScroll);
+    m_splitter->setStretchFactor(0, 1);   // extra space goes to the grid
+    m_splitter->setStretchFactor(1, 0);
+    connect(m_splitter, &QSplitter::splitterMoved, this,
+            [this](int, int){ saveSplitterState(); });
+    {
+        // Restore the user's saved pane split (whole-state restore also
+        // brings back the exact handle position across resizes).
+        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        QByteArray state = st.value(
+            QStringLiteral("mainpage/splitter_state")).toByteArray();
+        if (!state.isEmpty())
+            m_splitter->restoreState(state);
+        else
+            m_splitter->setSizes({ 640, 220 });
+    }
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(8, 6, 8, 6);
     root->setSpacing(6);
     root->addWidget(m_search);
-    root->addWidget(m_grid, 1);
-    root->addWidget(separator);
-    root->addWidget(m_channelsScroll, 0);
-    root->addLayout(bottom);
+    root->addWidget(m_splitter, 1);
+    root->addWidget(m_bottomBar);
 
     // Disconnected overlay covers the whole window when no TS3 server.
     m_disconnectedOverlay = new QFrame(this);
@@ -323,14 +350,89 @@ MainPage::MainPage(QWidget *parent)
     // First-run welcome overlay. Self-dismisses (and self-deletes) if it
     // has already been shown once before.
     (new OnboardingOverlay(this))->showIfFirstRun();
+
+    // macOS: Fusion base style on the whole tree (and every widget
+    // added later) so dark_style.qss renders with sane metrics. No-op
+    // on Windows/Linux; the TS3 host style is never touched.
+    PlatformStyle::apply(this);
 }
 
 void MainPage::resizeEvent(QResizeEvent *e) {
     QWidget::resizeEvent(e);
+    applyResponsiveLayout();
     if (m_disconnectedOverlay) {
         m_disconnectedOverlay->setGeometry(rect());
         m_disconnectedOverlay->raise();
     }
+}
+
+void MainPage::saveSplitterState() {
+    if (!m_splitter) return;
+    QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+    st.setValue(QStringLiteral("mainpage/splitter_state"),
+                m_splitter->saveState());
+}
+
+void MainPage::applyResponsiveLayout() {
+    if (!m_bottomBar || !m_splitter) return;
+    const int w = width();
+    const int h = height();
+
+    // ---- horizontal: drop optional bottom-bar groups when squeezed ----
+    // Measured, not guessed. Fixed pixel breakpoints stopped working the
+    // moment the UI font changed size (bigger labels => wider buttons =>
+    // the bar overflowed its own minimum and Settings ended up drawn on
+    // top of Reset). The layout itself knows how much room it needs:
+    // drop one optional group at a time and re-ask until the minimum
+    // fits the available width.
+    auto applyGroups = [this](bool mute, bool prof, bool grid) {
+        if (m_muteLocally) m_muteLocally->setVisible(mute);
+        if (m_muteMyself)  m_muteMyself->setVisible(mute);
+        if (m_previewOnly) m_previewOnly->setVisible(mute);
+        for (int i = 0; i < 4; ++i)
+            if (m_profileButtons[i]) m_profileButtons[i]->setVisible(prof);
+        if (m_profilesHelp) m_profilesHelp->setVisible(prof);
+        if (m_rowsLbl)  m_rowsLbl->setVisible(grid);
+        if (m_rowsSpin) m_rowsSpin->setVisible(grid);
+        if (m_colsLbl)  m_colsLbl->setVisible(grid);
+        if (m_colsSpin) m_colsSpin->setVisible(grid);
+        if (QLayout *l = m_bottomBar->layout()) {
+            l->invalidate();
+            l->activate();
+        }
+    };
+    auto barFits = [this, w]() {
+        QLayout *l = m_bottomBar->layout();
+        // A little slack for the window margins so the last group is not
+        // kept at the exact pixel where it would clip.
+        return !l || l->minimumSize().width() <= w - 16;
+    };
+
+    const bool wantMute = m_wantMuteChecks;
+    const bool wantProf = m_wantProfiles;
+    const bool wantGrid = m_wantGridSize;
+    applyGroups(wantMute, wantProf, wantGrid);
+    if (!barFits() && wantMute) applyGroups(false, wantProf, wantGrid);
+    if (!barFits() && wantProf) applyGroups(false, false, wantGrid);
+    if (!barFits() && wantGrid) applyGroups(false, false, false);
+
+    // ---- vertical: channels area -> bottom bar -> search bar ----
+    // The grid never hides: sound buttons are the whole point.
+    const int gridMin = 130;   // grid min height + layout spacing
+    const int searchH  = m_search ? m_search->sizeHint().height() : 0;
+    const int bottomH  = m_bottomBar->sizeHint().height();
+    const int chanH    = m_channelsScroll->minimumHeight();
+
+    bool showSearch   = h >= gridMin + searchH + 18;
+    bool showBottom   = h >= gridMin + (showSearch ? searchH : 0) + bottomH + 24;
+    bool showChannels = showBottom &&
+        h >= gridMin + (showSearch ? searchH : 0) + bottomH + chanH + 30;
+
+    if (m_search) m_search->setVisible(showSearch);
+    m_bottomBar->setVisible(showBottom);
+    // Hiding the channels pane collapses its splitter slot; the grid
+    // takes the whole splitter automatically.
+    m_channelsScroll->setVisible(showChannels);
 }
 
 void MainPage::closeEvent(QCloseEvent *e) {
@@ -386,26 +488,38 @@ void MainPage::refreshTheme() {
     Theme::Derived d = Theme::derive(Theme::colors());
     m_channelsHost->setStyleSheet(QString(
         "#channelsHost { background-color: %1; }").arg(d.bg.name()));
+    // Visible grab bar between grid and channels: themed strip that
+    // lights up with the accent on hover so it reads as draggable.
+    if (m_splitter) {
+        // A HAIRLINE, not a bar: the handle keeps a comfortable grab
+        // area but paints only a 1px rule in the middle (transparent
+        // background + a single top border), so the divider looks like
+        // the thin separator it replaced. Accent on hover.
+        m_splitter->setStyleSheet(QString(
+            "QSplitter#gridChannelsSplitter::handle {"
+            " background-color: transparent;"
+            " border-top: 1px solid %1;"
+            " margin: 2px 0px; }"
+            "QSplitter#gridChannelsSplitter::handle:hover {"
+            " border-top: 1px solid %2; }")
+            .arg(d.border.name(), d.accent.name()));
+    }
     if (m_micChannel) m_micChannel->refreshTheme();
 }
 
 void MainPage::setMuteChecksVisible(bool on) {
-    if (m_muteLocally) m_muteLocally->setVisible(on);
-    if (m_muteMyself)  m_muteMyself->setVisible(on);
-    if (m_previewOnly) m_previewOnly->setVisible(on);
+    m_wantMuteChecks = on;
+    applyResponsiveLayout();
 }
 
 void MainPage::setProfileButtonsVisible(bool on) {
-    for (int i = 0; i < 4; ++i)
-        if (m_profileButtons[i]) m_profileButtons[i]->setVisible(on);
-    if (m_profilesHelp) m_profilesHelp->setVisible(on);
+    m_wantProfiles = on;
+    applyResponsiveLayout();
 }
 
 void MainPage::setGridSizeVisible(bool on) {
-    if (m_rowsLbl)  m_rowsLbl->setVisible(on);
-    if (m_rowsSpin) m_rowsSpin->setVisible(on);
-    if (m_colsLbl)  m_colsLbl->setVisible(on);
-    if (m_colsSpin) m_colsSpin->setVisible(on);
+    m_wantGridSize = on;
+    applyResponsiveLayout();
 }
 
 void MainPage::setMicFxFeatureVisible(bool on) {
@@ -416,22 +530,16 @@ void MainPage::setMicFxFeatureVisible(bool on) {
 }
 
 void MainPage::updateChannelsAreaHeight(bool waveformVisible) {
-    // Fixed-height channels area: the user explicitly asked to stop
-    // the interface from growing every time a channel is added.
-    // Previous behaviour computed sizeHint per N channels (up to a
-    // hard cap of 600 / 340) so adding the 2nd / 3rd channel
-    // visibly enlarged the panel and pushed the grid downward.
-    //
-    // Now: target = ONE channel's height (with the waveform-visible
-    // toggle). Every additional channel rolls into the scroll area
-    // without changing the panel size. Floor / cap stay in place so
-    // the area remains a usable single-channel preview.
-    const int perChannelFallback = waveformVisible ? 195 : 110;
-    int target = perChannelFallback;
+    // The channels-area HEIGHT is user-controlled now: the splitter
+    // between the grid and the channels pane is draggable and its
+    // position persists. This function only maintains a sensible
+    // FLOOR so the pane can never be squeezed into an unusable strip;
+    // the old fixed min==max cap is gone (it would fight the splitter).
     const int floor = waveformVisible ? 150 : 90;
-    if (target < floor) target = floor;
-    m_channelsScroll->setMinimumHeight(target);
-    m_channelsScroll->setMaximumHeight(target);
+    m_channelsScroll->setMinimumHeight(floor);
+    m_channelsScroll->setMaximumHeight(QWIDGETSIZE_MAX);
+    // The channels-area floor feeds the vertical collapse thresholds.
+    applyResponsiveLayout();
 }
 
 void MainPage::setConnected(bool connected) {

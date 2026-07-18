@@ -26,6 +26,7 @@
 #include "buildinfo.h"
 #include "plugin.h"
 #include "style_helper.h"
+#include "PlatformStyle.h"
 #include "ExpandableSection.h"
 #include "samples.h"
 #include "SoundButton.h"
@@ -62,6 +63,9 @@ ConfigQt::ConfigQt( ConfigModel *model, QWidget *parent /*= 0*/ ) :
 
     ui->setupUi(this);
     this->setStyleSheet(StyleHelper::loadDarkStyle());
+    // macOS: Fusion base style so the QSS renders with sane metrics
+    // (no-op on Windows/Linux, never touches the TS3 host style).
+    PlatformStyle::apply(this);
     //setAttribute(Qt::WA_DeleteOnClose);
 
 	createConfigButtons();

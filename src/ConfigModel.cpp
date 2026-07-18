@@ -142,8 +142,6 @@ ConfigModel::ConfigModel()
 	m_channelNameLinkDetect = true;
 	m_streamAutoplay = false;
 	m_streamFxGradient = true;
-	m_waveAnimColorA.clear();
-	m_waveAnimColorB.clear();
 	m_waveAnimSpeed = 50;
 	m_waveAnimIntensity = 30;
 	m_formatBadgeMode = 3;
@@ -240,12 +238,12 @@ void ConfigModel::readConfig(const QString &file)
 	m_spectrogramView     = settings.value("spectrogram_view",      false).toBool();
 	m_showVinylButton     = settings.value("show_vinyl_button",     true).toBool();
 	m_micFxFeatureEnabled = settings.value("micfx_feature_enabled", true).toBool();
+	m_tsToolbarButton = settings.value("ts_toolbar_button", true).toBool();
+	m_uiFontPt = settings.value("ui_font_pt", 0).toInt();
 	m_streamingEnabled      = settings.value("streaming_enabled",         true).toBool();
 	m_channelNameLinkDetect = settings.value("channel_name_link_detect",  true).toBool();
 	m_streamAutoplay        = settings.value("stream_autoplay",           false).toBool();
 	m_streamFxGradient      = settings.value("stream_fx_gradient",        true).toBool();
-	m_waveAnimColorA        = settings.value("wave_anim_color_a",         QString()).toString();
-	m_waveAnimColorB        = settings.value("wave_anim_color_b",         QString()).toString();
 	m_waveAnimSpeed         = qBound(0, settings.value("wave_anim_speed",     50).toInt(), 100);
 	m_waveAnimIntensity     = qBound(0, settings.value("wave_anim_intensity", 30).toInt(), 100);
 	// Badge complexity (0 none / 1 format / 2 quality / 3 both). Migrates
@@ -368,14 +366,14 @@ void ConfigModel::writeConfigImmediate(const QString &file)
 	settings.setValue("spectrogram_view",      m_spectrogramView);
 	settings.setValue("show_vinyl_button",     m_showVinylButton);
 	settings.setValue("micfx_feature_enabled", m_micFxFeatureEnabled);
+	settings.setValue("ts_toolbar_button", m_tsToolbarButton);
+	settings.setValue("ui_font_pt", m_uiFontPt);
 	settings.setValue("streaming_enabled",         m_streamingEnabled);
 	settings.setValue("channel_name_link_detect",  m_channelNameLinkDetect);
 	settings.setValue("stream_autoplay",           m_streamAutoplay);
 	settings.setValue("stream_fx_gradient",        m_streamFxGradient);
 	settings.setValue("format_badge_mode",         m_formatBadgeMode);
 	settings.setValue("show_stream_badge",         m_showStreamBadge);
-	settings.setValue("wave_anim_color_a",         m_waveAnimColorA);
-	settings.setValue("wave_anim_color_b",         m_waveAnimColorB);
 	settings.setValue("wave_anim_speed",           m_waveAnimSpeed);
 	settings.setValue("wave_anim_intensity",       m_waveAnimIntensity);
 	settings.setValue("vad_while_playing",         m_vadWhilePlaying);
@@ -982,14 +980,14 @@ void ConfigModel::setShowSkipButtons(bool on)      { m_showSkipButtons      = on
 void ConfigModel::setSpectrogramView(bool on)      { m_spectrogramView      = on; writeConfig(); }
 void ConfigModel::setShowVinylButton(bool on)      { m_showVinylButton      = on; writeConfig(); }
 void ConfigModel::setMicFxFeatureEnabled(bool on)  { m_micFxFeatureEnabled  = on; writeConfig(); }
+void ConfigModel::setTsToolbarButton(bool on)      { m_tsToolbarButton      = on; writeConfig(); }
+void ConfigModel::setUiFontPt(int pt)              { m_uiFontPt             = pt; writeConfig(); }
 void ConfigModel::setStreamingEnabled(bool on)        { m_streamingEnabled       = on; writeConfig(); }
 void ConfigModel::setChannelNameLinkDetect(bool on)   { m_channelNameLinkDetect  = on; writeConfig(); }
 void ConfigModel::setStreamAutoplay(bool on)          { m_streamAutoplay         = on; writeConfig(); }
 void ConfigModel::setStreamFxGradient(bool on)        { m_streamFxGradient       = on; writeConfig(); }
 void ConfigModel::setFormatBadgeMode(int mode)        { m_formatBadgeMode = (mode < 0 || mode > 3) ? 3 : mode; writeConfig(); }
 void ConfigModel::setShowStreamBadge(bool on)         { m_showStreamBadge        = on; writeConfig(); }
-void ConfigModel::setWaveAnimColorA(const QString &c) { m_waveAnimColorA         = c;  writeConfig(); }
-void ConfigModel::setWaveAnimColorB(const QString &c) { m_waveAnimColorB         = c;  writeConfig(); }
 void ConfigModel::setWaveAnimSpeed(int v)             { m_waveAnimSpeed     = qBound(0, v, 100); writeConfig(); }
 void ConfigModel::setWaveAnimIntensity(int v)         { m_waveAnimIntensity = qBound(0, v, 100); writeConfig(); }
 void ConfigModel::setVadWhilePlaying(bool on)         { m_vadWhilePlaying        = on; writeConfig(); }

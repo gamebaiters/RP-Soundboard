@@ -122,6 +122,8 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     , m_cols(new QSpinBox(this))
     , m_export(new QPushButton(tr("Export configuration..."), this))
     , m_import(new QPushButton(tr("Import configuration..."), this))
+    , m_fullBackup(new QPushButton(tr("Full backup..."), this))
+    , m_fullRestore(new QPushButton(tr("Restore backup..."), this))
     , m_resetHotkeys(new QPushButton(tr("Reset all hotkeys"), this))
     , m_close(new QPushButton(tr("Close"), this))
     , m_adaptWaveform(new QCheckBox(tr("Adapt waveform display to audio effects"), this))
@@ -134,6 +136,8 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     , m_spectrogramView     (new QCheckBox(tr("Render channel waveform as a spectrogram-style heatmap"), this))
     , m_showVinylButton     (new QCheckBox(tr("Show vinyl (tape stop) button on channels"), this))
     , m_micFxFeature        (new QCheckBox(tr("Enable Mic FX (real-time voice changer)"), this))
+    , m_tsToolbarButton     (new QCheckBox(tr("Show soundboard button in the TeamSpeak toolbar"), this))
+    , m_uiFontPt            (new QSpinBox(this))
     , m_loudnessNormalize   (new QCheckBox(tr("Normalize loudness of every sound (EBU R128, -16 LUFS)"), this))
     , m_streamingEnabled    (new QCheckBox(tr("Enable URL / YouTube live streaming"), this))
     , m_channelLinkDetect   (new QCheckBox(tr("Load a link pasted as a channel name"), this))
@@ -184,6 +188,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     m_multiChannelInfinity->setChecked(false);
     m_showVinylButton   ->setChecked(true);
     m_micFxFeature      ->setChecked(true);
+    m_tsToolbarButton   ->setChecked(true);
     m_loudnessNormalize ->setChecked(false);
     m_streamingEnabled  ->setChecked(true);
     m_channelLinkDetect ->setChecked(true);
@@ -256,6 +261,24 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         "Master switch for the Mic FX voice changer. When OFF, the\n"
         "microphone panel, its toolbar button and all mic processing\n"
         "disappear completely."), this)));
+    {
+        // Text size of the whole soundboard UI. 0 = follow the system
+        // font (correct on any DPI); raise it if the client theme makes
+        // the text uncomfortable to read.
+        m_uiFontPt->setRange(0, 24);
+        m_uiFontPt->setSpecialValueText(tr("System"));
+        m_uiFontPt->setSuffix(tr(" pt"));
+        m_uiFontPt->setMaximumWidth(110);
+        auto *row = new QHBoxLayout;
+        row->addWidget(new QLabel(tr("Interface text size:"), this));
+        row->addWidget(m_uiFontPt);
+        row->addStretch(1);
+        generalLay->addLayout(indented(row));
+    }
+    generalLay->addLayout(indented(checkRow(m_tsToolbarButton, tr(
+        "Adds a native-looking toggle button next to TeamSpeak's own\n"
+        "toolbar buttons that shows / hides the soundboard. Uncheck to\n"
+        "remove it from the client toolbar."), this)));
     // URL / YouTube streaming toggles moved to their own "Streaming" section.
     generalLay->addWidget(m_multi);
 
@@ -590,6 +613,24 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         row->addStretch(1);
         profileLay->addLayout(row);
     }
+    {
+        // Native FULL backup: every INI + every QSettings key in one
+        // .gbsb file - restore brings the soundboard back EXACTLY.
+        auto *row = new QHBoxLayout;
+        row->addWidget(new QLabel(tr("Full native backup:")));
+        m_fullBackup->setToolTip(tr(
+            "Save EVERYTHING the soundboard persists (buttons, channels,\n"
+            "presets, Mic FX, theme, UI layout, every setting) into one\n"
+            "backup file."));
+        m_fullRestore->setToolTip(tr(
+            "Restore a full backup file. The soundboard comes back exactly\n"
+            "as it was when the backup was made (restart TeamSpeak to\n"
+            "apply everything)."));
+        row->addWidget(m_fullBackup);
+        row->addWidget(m_fullRestore);
+        row->addStretch(1);
+        profileLay->addLayout(row);
+    }
 
     // ============== Custom theme section ==============
     // Theme remains a QGroupBox (checkable) wrapped inside an ExpandableSection.
@@ -642,6 +683,53 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     themeOuter->addLayout(themeBtnRow);
     auto *themeWrapLay = new QVBoxLayout;
     themeWrapLay->addWidget(m_themeGroup);
+
+    // ---- Waveform animation ----
+    // Colours are deliberately NOT configurable here: the animation always
+    // follows the theme (accent -> waveform colour) when a custom theme is
+    // enabled, or the built-in default palette otherwise — the same rule as
+    // every other themed element. Only motion (speed / intensity) is
+    // adjustable.
+    themeWrapLay->addWidget(subHeader(tr("Waveform animation"), this));
+    m_streamFxGradient = new QCheckBox(tr("Animated gradient on the played waveform"), this);
+    themeWrapLay->addLayout(indented(checkRow(m_streamFxGradient, tr(
+        "The already-played part of the waveform gets a slow colour flow\n"
+        "(any playback, not just streams). Colours follow the custom theme\n"
+        "when one is enabled, the default palette otherwise."), this)));
+    {
+        m_waveAnimSpeed = new QSlider(Qt::Horizontal, this);
+        m_waveAnimSpeed->setRange(0, 100);
+        m_waveAnimSpeed->setValue(50);
+        m_waveAnimSpeedLabel = new QLabel(QStringLiteral("50%"), this);
+        m_waveAnimSpeedLabel->setMinimumWidth(40);
+        m_waveAnimSpeedLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        auto *sr = new QHBoxLayout;
+        sr->addWidget(new QLabel(tr("Animation speed:"), this));
+        sr->addWidget(m_waveAnimSpeed, 1);
+        sr->addWidget(m_waveAnimSpeedLabel);
+        themeWrapLay->addLayout(indented(sr));
+
+        m_waveAnimIntensity = new QSlider(Qt::Horizontal, this);
+        m_waveAnimIntensity->setRange(0, 100);
+        m_waveAnimIntensity->setValue(30);
+        m_waveAnimIntensityLabel = new QLabel(QStringLiteral("30%"), this);
+        m_waveAnimIntensityLabel->setMinimumWidth(40);
+        m_waveAnimIntensityLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        auto *ir = new QHBoxLayout;
+        ir->addWidget(new QLabel(tr("Animation intensity:"), this));
+        ir->addWidget(m_waveAnimIntensity, 1);
+        ir->addWidget(m_waveAnimIntensityLabel);
+        themeWrapLay->addLayout(indented(ir));
+
+        auto sliderChanged = [this](){
+            m_waveAnimSpeedLabel->setText(QString::number(m_waveAnimSpeed->value()) + "%");
+            m_waveAnimIntensityLabel->setText(QString::number(m_waveAnimIntensity->value()) + "%");
+            emit waveAnimStyleChanged(m_waveAnimSpeed->value(),
+                                      m_waveAnimIntensity->value());
+        };
+        connect(m_waveAnimSpeed,     &QSlider::valueChanged, this, [sliderChanged](int){ auto fn = sliderChanged; fn(); });
+        connect(m_waveAnimIntensity, &QSlider::valueChanged, this, [sliderChanged](int){ auto fn = sliderChanged; fn(); });
+    }
 
     // Theme signal connections
     connect(m_themeContrastSlider, &QSlider::valueChanged, this, [this](int v){
@@ -753,100 +841,6 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     streamLay->addLayout(indented(checkRow(m_streamAutoplay, tr(
         "When ON, a file loaded from a link starts playing immediately.\n"
         "OFF = it loads paused, ready for you to press play."), this)));
-    // ---- Appearance: the animated played-waveform gradient ----
-    streamLay->addWidget(subHeader(tr("Appearance"), this));
-    m_streamFxGradient = new QCheckBox(tr("Animated gradient on the played waveform"), this);
-    streamLay->addLayout(indented(checkRow(m_streamFxGradient, tr(
-        "The already-played part of the waveform gets a slow colour flow\n"
-        "(any playback, not just streams). Follows your custom theme's\n"
-        "colours when a theme is set."), this)));
-    // Full animation customization: color pair (Auto = theme), speed,
-    // intensity. All persisted; Auto keeps the theme-driven behaviour.
-    {
-        auto paintSwatch = [](QPushButton *btn, const QColor &c, bool autoMode){
-            btn->setStyleSheet(QString(
-                "QPushButton { background-color: %1; border: 1px solid #555; %2 }")
-                .arg(c.isValid() ? c.name() : QStringLiteral("#444a52"))
-                .arg(autoMode ? "color: #cccccc; font-size: 9px;" : ""));
-            btn->setText(autoMode ? QStringLiteral("A") : QString());
-        };
-        m_waveAnimABtn = new QPushButton(this);
-        m_waveAnimBBtn = new QPushButton(this);
-        m_waveAnimABtn->setFixedSize(28, 22);
-        m_waveAnimBBtn->setFixedSize(28, 22);
-        m_waveAnimABtn->setToolTip(tr("First animation color. \"A\" = automatic (theme accent)."));
-        m_waveAnimBBtn->setToolTip(tr("Second animation color. \"A\" = automatic (theme waveform color)."));
-        auto *autoBtn = new QPushButton(tr("Auto"), this);
-        autoBtn->setMaximumWidth(56);
-        autoBtn->setFixedHeight(22);
-        autoBtn->setToolTip(tr("Back to automatic colors (follow the theme)."));
-        paintSwatch(m_waveAnimABtn, m_waveAnimA, true);
-        paintSwatch(m_waveAnimBBtn, m_waveAnimB, true);
-        auto *cr = new QHBoxLayout;
-        cr->addWidget(new QLabel(tr("Animation colors:"), this));
-        cr->addWidget(m_waveAnimABtn);
-        cr->addWidget(m_waveAnimBBtn);
-        cr->addWidget(autoBtn);
-        cr->addStretch(1);
-        streamLay->addLayout(indented(cr));
-        auto pick = [this, paintSwatch](QColor &target, QPushButton *btn){
-            QColor seed = target.isValid() ? target : QColor("#3fa7ff");
-            QColor c = QColorDialog::getColor(seed, this, tr("Pick a color"));
-            if (!c.isValid()) return;
-            target = c;
-            paintSwatch(btn, c, false);
-            emit waveAnimStyleChanged(m_waveAnimA, m_waveAnimB,
-                                      m_waveAnimSpeed->value(),
-                                      m_waveAnimIntensity->value());
-        };
-        connect(m_waveAnimABtn, &QPushButton::clicked, this,
-                [this, pick]{ auto fn = pick; fn(m_waveAnimA, m_waveAnimABtn); });
-        connect(m_waveAnimBBtn, &QPushButton::clicked, this,
-                [this, pick]{ auto fn = pick; fn(m_waveAnimB, m_waveAnimBBtn); });
-        connect(autoBtn, &QPushButton::clicked, this, [this, paintSwatch]{
-            m_waveAnimA = QColor();
-            m_waveAnimB = QColor();
-            paintSwatch(m_waveAnimABtn, QColor(), true);
-            paintSwatch(m_waveAnimBBtn, QColor(), true);
-            emit waveAnimStyleChanged(m_waveAnimA, m_waveAnimB,
-                                      m_waveAnimSpeed->value(),
-                                      m_waveAnimIntensity->value());
-        });
-
-        m_waveAnimSpeed = new QSlider(Qt::Horizontal, this);
-        m_waveAnimSpeed->setRange(0, 100);
-        m_waveAnimSpeed->setValue(50);
-        m_waveAnimSpeedLabel = new QLabel(QStringLiteral("50%"), this);
-        m_waveAnimSpeedLabel->setMinimumWidth(40);
-        m_waveAnimSpeedLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        auto *sr = new QHBoxLayout;
-        sr->addWidget(new QLabel(tr("Animation speed:"), this));
-        sr->addWidget(m_waveAnimSpeed, 1);
-        sr->addWidget(m_waveAnimSpeedLabel);
-        streamLay->addLayout(indented(sr));
-
-        m_waveAnimIntensity = new QSlider(Qt::Horizontal, this);
-        m_waveAnimIntensity->setRange(0, 100);
-        m_waveAnimIntensity->setValue(30);
-        m_waveAnimIntensityLabel = new QLabel(QStringLiteral("30%"), this);
-        m_waveAnimIntensityLabel->setMinimumWidth(40);
-        m_waveAnimIntensityLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        auto *ir = new QHBoxLayout;
-        ir->addWidget(new QLabel(tr("Animation intensity:"), this));
-        ir->addWidget(m_waveAnimIntensity, 1);
-        ir->addWidget(m_waveAnimIntensityLabel);
-        streamLay->addLayout(indented(ir));
-
-        auto sliderChanged = [this](){
-            m_waveAnimSpeedLabel->setText(QString::number(m_waveAnimSpeed->value()) + "%");
-            m_waveAnimIntensityLabel->setText(QString::number(m_waveAnimIntensity->value()) + "%");
-            emit waveAnimStyleChanged(m_waveAnimA, m_waveAnimB,
-                                      m_waveAnimSpeed->value(),
-                                      m_waveAnimIntensity->value());
-        };
-        connect(m_waveAnimSpeed,     &QSlider::valueChanged, this, [sliderChanged](int){ auto fn = sliderChanged; fn(); });
-        connect(m_waveAnimIntensity, &QSlider::valueChanged, this, [sliderChanged](int){ auto fn = sliderChanged; fn(); });
-    }
     streamLay->addWidget(subHeader(tr("Engine (yt-dlp)"), this));
     {
         auto *qr = new QHBoxLayout;
@@ -949,6 +943,8 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_cols, QOverload<int>::of(&QSpinBox::valueChanged), this, &SettingsWindow::colsChanged);
     connect(m_export, &QPushButton::clicked, this, &SettingsWindow::exportRequested);
     connect(m_import, &QPushButton::clicked, this, &SettingsWindow::importRequested);
+    connect(m_fullBackup,  &QPushButton::clicked, this, &SettingsWindow::fullBackupRequested);
+    connect(m_fullRestore, &QPushButton::clicked, this, &SettingsWindow::fullRestoreRequested);
     connect(m_resetHotkeys, &QPushButton::clicked, this, &SettingsWindow::resetAllHotkeysRequested);
     connect(m_close,  &QPushButton::clicked, this, &QDialog::accept);
     connect(m_adaptWaveform, &QCheckBox::toggled, this, &SettingsWindow::adaptWaveformToFxChanged);
@@ -965,6 +961,8 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_spectrogramView,      &QCheckBox::toggled, this, &SettingsWindow::spectrogramViewChanged);
     connect(m_showVinylButton,      &QCheckBox::toggled, this, &SettingsWindow::showVinylButtonChanged);
     connect(m_micFxFeature,         &QCheckBox::toggled, this, &SettingsWindow::micFxFeatureEnabledChanged);
+    connect(m_tsToolbarButton,      &QCheckBox::toggled, this, &SettingsWindow::tsToolbarButtonChanged);
+    connect(m_uiFontPt, QOverload<int>::of(&QSpinBox::valueChanged), this, &SettingsWindow::uiFontPtChanged);
     connect(m_loudnessNormalize,    &QCheckBox::toggled, this, &SettingsWindow::loudnessNormalizeChanged);
     connect(m_streamingEnabled,     &QCheckBox::toggled, this, &SettingsWindow::streamingEnabledChanged);
     connect(m_channelLinkDetect,    &QCheckBox::toggled, this, &SettingsWindow::channelNameLinkDetectChanged);
@@ -1026,6 +1024,8 @@ bool SettingsWindow::showSkipButtons()        const { return m_showSkipButtons->
 bool SettingsWindow::spectrogramView()        const { return m_spectrogramView->isChecked();      }
 bool SettingsWindow::showVinylButton()        const { return m_showVinylButton->isChecked();      }
 bool SettingsWindow::micFxFeatureEnabled()    const { return m_micFxFeature->isChecked();         }
+bool SettingsWindow::tsToolbarButton()        const { return m_tsToolbarButton->isChecked();      }
+int  SettingsWindow::uiFontPt()               const { return m_uiFontPt->value();                 }
 bool SettingsWindow::loudnessNormalize()      const { return m_loudnessNormalize->isChecked();    }
 bool SettingsWindow::streamingEnabled()       const { return m_streamingEnabled->isChecked();     }
 bool SettingsWindow::channelNameLinkDetect()  const { return m_channelLinkDetect->isChecked();    }
@@ -1076,6 +1076,8 @@ void SettingsWindow::setShowSkipButtons(bool on)       { QSignalBlocker b(m_show
 void SettingsWindow::setSpectrogramView(bool on)       { QSignalBlocker b(m_spectrogramView);      m_spectrogramView->setChecked(on);      }
 void SettingsWindow::setShowVinylButton(bool on)       { QSignalBlocker b(m_showVinylButton);      m_showVinylButton->setChecked(on);      }
 void SettingsWindow::setMicFxFeatureEnabled(bool on)   { QSignalBlocker b(m_micFxFeature);         m_micFxFeature->setChecked(on);         }
+void SettingsWindow::setTsToolbarButton(bool on)       { QSignalBlocker b(m_tsToolbarButton);      m_tsToolbarButton->setChecked(on);      }
+void SettingsWindow::setUiFontPt(int pt)               { QSignalBlocker b(m_uiFontPt);             m_uiFontPt->setValue(pt);               }
 void SettingsWindow::setLoudnessNormalize(bool on)     { QSignalBlocker b(m_loudnessNormalize);    m_loudnessNormalize->setChecked(on);    }
 void SettingsWindow::setStreamingEnabled(bool on)      { QSignalBlocker b(m_streamingEnabled);     m_streamingEnabled->setChecked(on);     }
 void SettingsWindow::setChannelNameLinkDetect(bool on) { QSignalBlocker b(m_channelLinkDetect);    m_channelLinkDetect->setChecked(on);    }
@@ -1092,19 +1094,8 @@ void SettingsWindow::setFormatBadgeMode(int mode)
     int idx = m_formatBadgeMode->findData(mode);
     m_formatBadgeMode->setCurrentIndex(idx >= 0 ? idx : 3);
 }
-void SettingsWindow::setWaveAnimStyle(const QColor &a, const QColor &b, int speed, int intensity)
+void SettingsWindow::setWaveAnimStyle(int speed, int intensity)
 {
-    m_waveAnimA = a;
-    m_waveAnimB = b;
-    auto paintSwatch = [](QPushButton *btn, const QColor &c, bool autoMode){
-        btn->setStyleSheet(QString(
-            "QPushButton { background-color: %1; border: 1px solid #555; %2 }")
-            .arg(c.isValid() ? c.name() : QStringLiteral("#444a52"))
-            .arg(autoMode ? "color: #cccccc; font-size: 9px;" : ""));
-        btn->setText(autoMode ? QStringLiteral("A") : QString());
-    };
-    paintSwatch(m_waveAnimABtn, m_waveAnimA, !m_waveAnimA.isValid());
-    paintSwatch(m_waveAnimBBtn, m_waveAnimB, !m_waveAnimB.isValid());
     QSignalBlocker s1(m_waveAnimSpeed);
     QSignalBlocker s2(m_waveAnimIntensity);
     m_waveAnimSpeed->setValue(qBound(0, speed, 100));

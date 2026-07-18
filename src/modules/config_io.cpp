@@ -9,6 +9,7 @@
 #include <QDir>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QDataStream>
 #include <QUuid>
 #include <QCoreApplication>
 
@@ -191,6 +192,105 @@ ImportResult importProfileIni(const QString &path, ConfigModel &model, int confi
 
     model.readConfig(tmp);
     QFile::remove(tmp);
+    return ImportResult::Ok;
+}
+
+// ---- FULL native backup / restore --------------------------------------
+
+namespace {
+const char *kFullMagic = "GBSB-FULL";
+constexpr int kFullVersion = 1;
+
+// The three INIs the soundboard writes into the TS3 config dir.
+QStringList fullBackupFiles() {
+    return { QStringLiteral("rp_soundboard.ini"),
+             QStringLiteral("rp_soundboard_channels.ini"),
+             QStringLiteral("rp_soundboard_presets.ini") };
+}
+}
+
+bool fullBackupToFile(const QString &path, ConfigModel &model)
+{
+    // Flush every pending write so the files on disk are current.
+    model.writeConfigImmediate();
+    QSettings live(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+    live.sync();
+
+    QJsonObject root;
+    root["magic"]   = QLatin1String(kFullMagic);
+    root["version"] = kFullVersion;
+
+    QJsonObject files;
+    const QString cfgDir = ConfigModel::GetConfigPath();
+    for (const QString &name : fullBackupFiles()) {
+        QFile f(cfgDir + name);
+        if (!f.exists()) continue;              // channels/presets may not exist yet
+        if (!f.open(QFile::ReadOnly)) return false;
+        files[name] = QString::fromLatin1(f.readAll().toBase64());
+    }
+    root["files"] = files;
+
+    // Every QSettings key, each value serialized through QDataStream so
+    // ANY QVariant type (QByteArray states, floats, bools...) round-
+    // trips exactly.
+    QJsonObject qs;
+    const QStringList keys = live.allKeys();
+    for (const QString &k : keys) {
+        QByteArray blob;
+        QDataStream out(&blob, QIODevice::WriteOnly);
+        out.setVersion(QDataStream::Qt_5_12);
+        out << live.value(k);
+        qs[k] = QString::fromLatin1(blob.toBase64());
+    }
+    root["qsettings"] = qs;
+
+    QFile out(path);
+    if (!out.open(QFile::WriteOnly | QFile::Truncate)) return false;
+    out.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    return true;
+}
+
+ImportResult fullRestoreFromFile(const QString &path)
+{
+    QFile f(path);
+    if (!f.open(QFile::ReadOnly)) return ImportResult::FileError;
+    QJsonParseError perr;
+    QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &perr);
+    if (perr.error != QJsonParseError::NoError || !doc.isObject())
+        return ImportResult::ParseError;
+    QJsonObject root = doc.object();
+    if (root.value("magic").toString() != QLatin1String(kFullMagic))
+        return ImportResult::SchemaError;
+    if (root.value("version").toInt() != kFullVersion)
+        return ImportResult::VersionMismatch;
+
+    // 1. Files back into the TS3 config dir, byte-identical.
+    const QString cfgDir = ConfigModel::GetConfigPath();
+    const QJsonObject files = root.value("files").toObject();
+    for (auto it = files.begin(); it != files.end(); ++it) {
+        // Never let a crafted backup escape the config dir.
+        const QString name = QFileInfo(it.key()).fileName();
+        if (name.isEmpty() || !name.startsWith(QLatin1String("rp_soundboard")))
+            continue;
+        QFile out(cfgDir + name);
+        if (!out.open(QFile::WriteOnly | QFile::Truncate))
+            return ImportResult::FileError;
+        out.write(QByteArray::fromBase64(it.value().toString().toLatin1()));
+    }
+
+    // 2. QSettings store: wipe + rewrite so stale keys can't linger.
+    QSettings live(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+    live.clear();
+    const QJsonObject qs = root.value("qsettings").toObject();
+    for (auto it = qs.begin(); it != qs.end(); ++it) {
+        QByteArray blob = QByteArray::fromBase64(it.value().toString().toLatin1());
+        QDataStream in(&blob, QIODevice::ReadOnly);
+        in.setVersion(QDataStream::Qt_5_12);
+        QVariant v;
+        in >> v;
+        live.setValue(it.key(), v);
+    }
+    live.sync();
     return ImportResult::Ok;
 }
 

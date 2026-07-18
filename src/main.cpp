@@ -36,6 +36,19 @@
 #include <QLocale>
 #include <QSettings>
 #include <QTimer>
+#include <QElapsedTimer>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 #include "main.h"
 #include "plugin.h"
@@ -52,6 +65,8 @@
 #include "TalkStateManager.h"
 #include "SpeechBubble.h"
 #include "MicFx.h"
+#include "PlatformStyle.h"
+#include "TsToolbarButton.h"
 #include "modules/main_page.h"
 #include "modules/main_page_wiring.h"
 #include "modules/theme.h"
@@ -129,6 +144,22 @@ ModelObserver_Prog *modelObserver = NULL;
 UpdateChecker *updateChecker = NULL;
 std::map<uint64, int> connectionStatusMap;
 typedef std::lock_guard<std::mutex> Lock;
+
+// Owns every DEFERRED (QTimer::singleShot / queued) callback the plugin posts
+// to the shared qApp event loop. TS3 hosts the plugin inside its own Qt app, so
+// a context-less singleShot creates a Qt5Core-owned timer that holds a functor
+// compiled into THIS DLL. On quit TS3 can call ts3plugin_shutdown + FreeLibrary
+// before that timer fires; Qt then dispatches it into freed DLL code and the
+// client crashes on exit (Qt5Core event-dispatch frame, no plugin frame on the
+// stack — the vtable/functor is already gone). Routing every deferred call
+// through this plugin-owned context makes Qt CANCEL the pending call the moment
+// the context is destroyed. sb_kill deletes it first thing, so no plugin
+// callback can survive the DLL. NEVER post a context-less singleShot with a
+// plugin lambda — always pass g_deferCtx (or another plugin QObject) as context.
+static QObject *g_deferCtx = NULL;
+// Set at the very top of sb_kill so late TS3 callbacks (a disconnect racing the
+// unload) stop posting NEW deferred work into the dying event loop.
+static std::atomic<bool> g_pluginShuttingDown{false};
 
 
 void ModelObserver_Prog::notify(ConfigModel &model, ConfigModel::notifications_e what, int data)
@@ -417,11 +448,21 @@ CAPI void sb_init()
 	// instantly and streaming would be silently dead until a client restart.
 	InputFileNet::setShutdownAbort(false);
 
+	// Re-enable deferred callbacks (a prior disable + re-enable in the same
+	// process left this set) and create the context that owns every deferred
+	// plugin callback — must exist BEFORE the bootstrap singleShot below uses
+	// it. Parentless + qApp-thread: destroyed explicitly in sb_kill.
+	g_pluginShuttingDown.store(false, std::memory_order_release);
+	if (!g_deferCtx) g_deferCtx = new QObject();
+
 	// Wipe any leftover stream scratch files from a previous session BEFORE
 	// anything runs — a 10-hour video must never accumulate on disk.
 	StreamResolver::cleanTempDir();
 
-	QTimer::singleShot(10, []{
+	// Context-bound: if the plugin is disabled during these 10 ms, sb_kill
+	// deletes g_deferCtx and Qt cancels this bootstrap instead of half-
+	// initialising into a DLL that is about to unload.
+	QTimer::singleShot(10, g_deferCtx, []{
 		configModel = new ConfigModel();
 		configModel->readConfig();
 		// Install the UI translation before any soundboard window is
@@ -486,6 +527,14 @@ CAPI void sb_init()
 		// every single startup, which on macOS could leave `-U` rewriting the
 		// engine binary at the exact moment a resolve tried to spawn it).
 		StreamResolver::instance().warmUp();
+
+		// Native host-toolbar button (unofficial, defensive): a checkable
+		// soundboard toggle next to the client's own mute/away buttons.
+		// No-ops silently if the client toolbar cannot be found.
+		// Settings-gated ("Show soundboard button in the TeamSpeak
+		// toolbar").
+		if (configModel->getTsToolbarButton())
+			TsToolbarButton::install();
 	});
 }
 
@@ -500,6 +549,27 @@ CAPI void sb_saveConfig()
 
 CAPI void sb_kill()
 {
+	// Mark teardown so any late TS3 callback (a disconnect racing the unload)
+	// stops posting NEW deferred work into the event loop we are draining.
+	g_pluginShuttingDown.store(true, std::memory_order_release);
+
+	// Pull our button OUT of the host toolbar first: it is a plugin-owned
+	// widget parented into the client's UI - it must not survive the DLL.
+	TsToolbarButton::remove();
+
+	// Cancel EVERY pending deferred plugin callback FIRST. Destroying the
+	// context QObject makes Qt drop the single-shot timers bound to it (the
+	// disconnect flush, the init bootstrap, …) so none of them can fire into
+	// this DLL after it unloads — the definitive fix for the "TeamSpeak
+	// crashed on close" dialog (a Qt5Core-owned timer holding a functor
+	// compiled into the plugin, dispatched after FreeLibrary). The state those
+	// callbacks would have written is still saved by the flush just below.
+	if (g_deferCtx)
+	{
+		delete g_deferCtx;
+		g_deferCtx = NULL;
+	}
+
 	// Arm the global FFmpeg network-I/O abort FIRST: any producer / seek /
 	// export worker blocked inside a network open/read (rw_timeout is 15 s)
 	// returns within milliseconds, so every bounded thread join below
@@ -574,7 +644,24 @@ CAPI void sb_kill()
 		// be mid-deref while sampler->shutdown() ran below and the
 		// teardown joined producer threads from under its feet —
 		// crash on close + zombie TS3.exe in task manager.
-		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		//
+		// PUMP while draining instead of a dead sleep: sb_kill runs on
+		// the client's GUI/STA thread, and TS3's DirectSound worker
+		// makes COM calls that marshal through this thread during audio
+		// teardown. A blocked STA here starved those calls and produced
+		// the directsound_win64.dll+0xD527 NULL-deref half of the
+		// crash-on-close dumps (same mechanism as the ghost-user bug,
+		// this time inside our own shutdown). processEvents runs the
+		// Windows message pump, so the COM proxies keep completing.
+		{
+			QElapsedTimer drain;
+			drain.start();
+			while (drain.elapsed() < 50) {
+				QCoreApplication::processEvents(
+					QEventLoop::ExcludeUserInputEvents, 10);
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			}
+		}
 		sampler->shutdown();
 		delete sampler;
 		sampler = NULL;
@@ -646,6 +733,41 @@ CAPI void sb_kill()
 		updateChecker = NULL;
 	}
 
+	// ---- Font-cache purge (crash-on-close fix, dump-proven) ----
+	// Qt keeps a GLOBAL per-thread QFontCache keyed by QFontDef, whose
+	// family QStrings can share data owned by THIS DLL (any font the
+	// soundboard widgets requested). The host clears that cache only in
+	// ~QGuiApplication - AFTER FreeLibrary - so a surviving entry means
+	// a QString destructor reading freed plugin memory: exactly the
+	// Qt5Core+0x15D3 / QFontCache::clear signature in the client crash
+	// dumps. QFontCache is private API but its symbols are EXPORTED by
+	// Qt5Gui; resolve them dynamically and empty the cache now, while
+	// our strings can still be destructed safely. Fully defensive: if
+	// the symbols are missing, we simply skip.
+	{
+		typedef void *(*FcInstanceFn)();
+		typedef void  (*FcClearFn)(void *);
+		FcInstanceFn fcInstance = nullptr;
+		FcClearFn    fcClear    = nullptr;
+#ifdef _WIN32
+		if (HMODULE qtgui = GetModuleHandleW(L"Qt5Gui.dll")) {
+			fcInstance = reinterpret_cast<FcInstanceFn>(
+				GetProcAddress(qtgui, "?instance@QFontCache@@SAPEAV1@XZ"));
+			fcClear = reinterpret_cast<FcClearFn>(
+				GetProcAddress(qtgui, "?clear@QFontCache@@QEAAXXZ"));
+		}
+#else
+		fcInstance = reinterpret_cast<FcInstanceFn>(
+			dlsym(RTLD_DEFAULT, "_ZN10QFontCache8instanceEv"));
+		fcClear = reinterpret_cast<FcClearFn>(
+			dlsym(RTLD_DEFAULT, "_ZN10QFontCache5clearEv"));
+#endif
+		if (fcInstance && fcClear) {
+			if (void *fc = fcInstance())
+				fcClear(fc);
+		}
+	}
+
 	// Drain pending deferred deletes scheduled by Qt during the teardown
 	// (QNetworkReply, QTimer one-shots, etc.). Without this, slots may run
 	// into already-unloaded DLL code when TS3 calls FreeLibrary.
@@ -687,6 +809,7 @@ CAPI void sb_openDialog()
 	if (useLegacy) {
 		if (!configDialog)
 			configDialog = new ConfigQt(configModel);
+		TsToolbarButton::watchWindow(configDialog);
 		configDialog->showNormal();
 		configDialog->raise();
 		configDialog->activateWindow();
@@ -696,6 +819,7 @@ CAPI void sb_openDialog()
 			mainPage = new MainPage();
 			MainPageWiring::wire(mainPage, configModel, sampler);
 		}
+		TsToolbarButton::watchWindow(mainPage);
 		mainPage->showNormal();
 		mainPage->raise();
 		mainPage->activateWindow();
@@ -807,8 +931,10 @@ CAPI void sb_setConfig(int cfg)
 
 CAPI void sb_openAbout()
 {
-	if(!aboutDialog)
+	if(!aboutDialog) {
 		aboutDialog = new AboutQt();
+		PlatformStyle::apply(aboutDialog);
+	}
 	aboutDialog->show();
 	aboutDialog->raise();
 	aboutDialog->activateWindow();
@@ -816,8 +942,10 @@ CAPI void sb_openAbout()
 
 CAPI void sb_openHowTo()
 {
-	if(!howToDialog)
+	if(!howToDialog) {
 		howToDialog = new HowToDialog();
+		PlatformStyle::apply(howToDialog);
+	}
 	howToDialog->show();
 	howToDialog->raise();
 	howToDialog->activateWindow();
@@ -881,7 +1009,16 @@ CAPI void sb_onConnectStatusChange(uint64 serverConnectionHandlerID, int newStat
 			// Deferring one event-loop turn runs the write after TS3's
 			// callback returns; a client quit is still covered by the
 			// sb_kill top-of-function flush.
-			QTimer::singleShot(0, []() { ConfigModel::flushPendingWrite(); });
+			//
+			// Context-bound to g_deferCtx: on a QUIT (disconnect immediately
+			// followed by ts3plugin_shutdown) sb_kill deletes g_deferCtx, so
+			// Qt CANCELS this pending call instead of firing the plugin lambda
+			// after the DLL has unloaded — the "TeamSpeak crashed on close"
+			// dialog (Qt5Core event-dispatch crash, no directsound involved).
+			// State is still saved: sb_kill flushes at its top. If we are
+			// already tearing down, don't post at all.
+			if (g_deferCtx && !g_pluginShuttingDown.load(std::memory_order_acquire))
+				QTimer::singleShot(0, g_deferCtx, []() { ConfigModel::flushPendingWrite(); });
 		}
 		sb_enableInterface(newStatus == STATUS_CONNECTION_ESTABLISHED);
 	}

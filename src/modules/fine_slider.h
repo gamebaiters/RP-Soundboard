@@ -17,4 +17,11 @@ protected:
     // Left-click on the track jumps the slider directly to the clicked
     // position (default Qt behavior is page-step, which feels sticky).
     void mousePressEvent(class QMouseEvent *event) override;
+    // BIPOLAR rendering: on a slider whose range straddles zero (pitch,
+    // speed, mic gain) Qt's sub-page fill runs from the LEFT edge, so a
+    // neutral slider looked half-full. Here the accent fill is drawn
+    // from the CENTRE towards the handle instead - left for negative
+    // values, right for positive, nothing at zero. Unipolar sliders are
+    // untouched (plain QSlider painting).
+    void paintEvent(class QPaintEvent *event) override;
 };

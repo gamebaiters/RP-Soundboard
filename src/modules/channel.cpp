@@ -27,6 +27,7 @@ extern const QString &getButtonMime();
 #include <QPainterPath>
 #include <QPixmap>
 #include <QIcon>
+#include <QGraphicsDropShadowEffect>
 
 // Indeterminate "loading" bar painted by hand. A QProgressBar in marquee mode
 // draws an opaque groove using the native style's palette, which reads as a
@@ -204,10 +205,14 @@ Channel::Channel(int channelId, QWidget *parent)
     // Per-channel DSP entry point. Compact icon button (mixer-faders
     // glyph) - the "Audio Sandbox" name is carried by the enable
     // checkbox right next to it, so the row stays short.
+    // Title-row action height: 22 px on Windows, but font-metric-aware
+    // so bigger system fonts (macOS) never clip the button text.
+    const int actionH = qMax(22, fontMetrics().height() + 6);
+
     m_sandboxBtn = new QPushButton(this);
     m_sandboxBtn->setIcon(IconFactory::sandbox());
     m_sandboxBtn->setIconSize(QSize(18, 18));
-    m_sandboxBtn->setFixedSize(30, 22);
+    m_sandboxBtn->setFixedSize(30, actionH);
     m_sandboxBtn->setStyleSheet(
         "QPushButton { padding: 2px; }");
     m_sandboxBtn->setToolTip(tr(
@@ -218,15 +223,15 @@ Channel::Channel(int channelId, QWidget *parent)
         "    drag-to-reorder pipeline\n"
         "Settings persist per channel and are bundled into macros."));
 
-    // Text-only button (the previous stoparrow icon was the wrong art and
-    // forced the channel row taller). Same fixed height as the sandbox
-    // button so the title row stays compact.
-    m_exportBtn = new QPushButton(tr("Export audio"), this);
-    m_exportBtn->setFixedHeight(22);
-    m_exportBtn->setMinimumWidth(96);
-    m_exportBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    m_exportBtn->setStyleSheet("QPushButton { padding: 2px 10px; }");
-    m_exportBtn->setToolTip(tr("Export this channel's audio with all DSP effects applied to a WAV file"));
+    // Icon-only (arrow-out-of-tray glyph, same painted set as the mic
+    // preset buttons) - the tooltip carries the words. Keeps the title
+    // row compact.
+    m_exportBtn = new QPushButton(this);
+    m_exportBtn->setIcon(IconFactory::exportAudio());
+    m_exportBtn->setIconSize(QSize(18, 18));
+    m_exportBtn->setFixedSize(30, actionH);
+    m_exportBtn->setStyleSheet("QPushButton { padding: 2px; }");
+    m_exportBtn->setToolTip(tr("Export this channel's audio with all DSP effects applied (any format)"));
     m_exportBtn->setVisible(false);
     connect(m_exportBtn, &QPushButton::clicked, this, [this]{ emit exportRequested(m_id); });
 
@@ -234,24 +239,24 @@ Channel::Channel(int channelId, QWidget *parent)
     // pill). Separate from "Export audio": saving the source audio of a
     // stream and baking a local file's DSP are different actions, and the
     // DSP export does not apply to streams at all.
-    m_downloadBtn = new QPushButton(
-        QString::fromUtf8("\xE2\xAC\x87") + QStringLiteral("  ") + tr("Save audio"), this);
-    m_downloadBtn->setFixedHeight(22);
-    m_downloadBtn->setMinimumWidth(104);
-    m_downloadBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    // Green pill kept (it signals "downloadable stream" at a glance)
+    // but icon-only now: white arrow-into-tray glyph.
+    m_downloadBtn = new QPushButton(this);
+    m_downloadBtn->setIcon(IconFactory::download(Qt::white));
+    m_downloadBtn->setIconSize(QSize(18, 18));
+    m_downloadBtn->setFixedSize(36, actionH);
     m_downloadBtn->setToolTip(tr("Download this video's audio to a file"));
     m_downloadBtn->setCursor(Qt::PointingHandCursor);
     m_downloadBtn->setStyleSheet(
         "QPushButton {"
-        "  padding: 3px 14px; color: #ffffff; border: none; border-radius: 11px;"
-        "  font-weight: bold; letter-spacing: 0.3px;"
+        "  padding: 2px; border: none; border-radius: 11px;"
         "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
         "               stop:0 #35c169, stop:1 #1f9a4d);"
         "}"
         "QPushButton:hover {"
         "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
         "               stop:0 #43d179, stop:1 #23ab56); }"
-        "QPushButton:pressed { background: #178a41; padding-top: 4px; }");
+        "QPushButton:pressed { background: #178a41; padding-top: 3px; }");
     m_downloadBtn->setVisible(false);
     connect(m_downloadBtn, &QPushButton::clicked, this, [this]{ emit downloadRequested(m_id); });
 
@@ -384,6 +389,10 @@ void Channel::openSandboxDialog() {
     if (!m_sandboxDialog) {
         m_sandboxDialog = new ChannelSandboxDialog(m_id, this);
         m_sandboxDialog->setProperty("isGBSoundboard", true);
+        // Own top-level window: register it so it carries the
+        // soundboard stylesheet itself (host-theme isolation) and gets
+        // its bipolar sliders tagged.
+        Theme::trackThemedWidget(m_sandboxDialog);
         connect(m_sandboxDialog, &ChannelSandboxDialog::stateChanged,
                 this, [this](const SandboxState &s){
             m_sandbox = s;
@@ -410,7 +419,8 @@ void Channel::setMeterPeak(float l, float r) {
 }
 
 void Channel::setMeterVisible(bool on) {
-    if (m_meter) m_meter->setVisible(on);
+    m_meterWanted = on;
+    applyCompact();
 }
 
 void Channel::setMeterVertical(bool on) {
@@ -443,7 +453,35 @@ void Channel::setSkipButtonsVisible(bool on) {
 void Channel::resizeEvent(QResizeEvent *e)
 {
     QWidget::resizeEvent(e);
+    applyCompact();
     updateMeterWidth();
+}
+
+void Channel::applyCompact()
+{
+    // Width breakpoints for the progressive collapse. Order of
+    // sacrifice as the row narrows: meter -> FX panel -> title-row
+    // action buttons. Volume sliders, transport and the title always
+    // stay. Each element still honours its Settings switch: collapse
+    // can only hide, never force-show.
+    const int w = width();
+    const bool hideMeter  = w < 700;
+    const bool hideFx     = w < 560;
+    const bool hideExtras = w < 470;
+
+    if (m_meter) m_meter->setVisible(m_meterWanted && !hideMeter);
+    const bool fxOn = m_fxWanted && !hideFx;
+    if (m_fx)          m_fx->setVisible(fxOn);
+    if (m_fxSeparator) m_fxSeparator->setVisible(fxOn);
+    if (m_exportBtn)
+        m_exportBtn->setVisible(m_exportVisibleSetting && !hideExtras);
+    if (m_downloadBtn)
+        m_downloadBtn->setVisible(m_exportIsDownload && !hideExtras);
+    if (m_playlistBtn)
+        m_playlistBtn->setVisible(m_playlistAvailable && !hideExtras);
+    const bool sandboxOn = m_sandboxFeatureEnabled && !hideExtras;
+    if (m_sandboxBtn)         m_sandboxBtn->setVisible(sandboxOn);
+    if (m_sandboxEnableCheck) m_sandboxEnableCheck->setVisible(sandboxOn);
 }
 
 void Channel::updateMeterWidth()
@@ -476,15 +514,14 @@ void Channel::setSandboxFeatureEnabled(bool on) {
     // sandbox button so the entire sandbox UI disappears from the row.
     // The persisted m_sandbox value is left untouched so a later
     // re-enable restores whatever each channel had before.
-    if (m_sandboxBtn) m_sandboxBtn->setVisible(on);
-    if (m_sandboxEnableCheck) m_sandboxEnableCheck->setVisible(on);
+    applyCompact();
     if (!on && m_sandboxDialog && m_sandboxDialog->isVisible())
         m_sandboxDialog->close();
 }
 
 void Channel::setExportVisible(bool on) {
     m_exportVisibleSetting = on;
-    if (m_exportBtn) m_exportBtn->setVisible(on);
+    applyCompact();
 }
 
 void Channel::setExportIsDownload(bool on) {
@@ -493,8 +530,7 @@ void Channel::setExportIsDownload(bool on) {
     // A VOD stream shows BOTH actions: the green "Save audio" (plain source
     // download) AND "Export audio" (true DSP bake via a temp copy) — they do
     // different things. Export keeps following its global visibility setting.
-    m_downloadBtn->setVisible(on);
-    m_exportBtn->setVisible(m_exportVisibleSetting);
+    applyCompact();
 }
 
 void Channel::pushTitleToSandboxDialog() {
@@ -520,12 +556,43 @@ void Channel::setRemovable(bool on) {
     m_removeBtn->setVisible(on);
 }
 
+void Channel::setTempGlow(bool on) {
+    if (m_tempGlow == on) return;
+    m_tempGlow = on;
+    if (!m_frame) return;
+    if (on) {
+        // Soft accent halo around the frame + a brighter border (set in
+        // refreshTheme). QSS has no box-shadow; the drop-shadow effect
+        // with zero offset is the Qt way to get an even glow.
+        auto *glow = new QGraphicsDropShadowEffect(m_frame);
+        glow->setBlurRadius(22.0);
+        glow->setOffset(0.0, 0.0);
+        glow->setColor(Theme::derivedCached().accent);
+        m_frame->setGraphicsEffect(glow);
+    } else {
+        m_frame->setGraphicsEffect(nullptr);   // deletes the old effect
+    }
+    refreshTheme();
+}
+
 void Channel::refreshTheme() {
     Theme::Derived d = Theme::derive(Theme::colors());
     if (m_frame) {
-        m_frame->setStyleSheet(QString(
-            "#channelFrame { border: 1px solid %1; border-radius: 6px;"
-            " background-color: %2; }").arg(d.border.name(), d.surface.name()));
+        if (m_tempGlow) {
+            // Temporary channel: accent border + glow (colour synced
+            // here so theme switches recolour the halo too).
+            if (auto *glow = qobject_cast<QGraphicsDropShadowEffect *>(
+                    m_frame->graphicsEffect()))
+                glow->setColor(d.accent);
+            m_frame->setStyleSheet(QString(
+                "#channelFrame { border: 2px solid %1; border-radius: 6px;"
+                " background-color: %2; }")
+                .arg(d.accent.name(), d.surface.name()));
+        } else {
+            m_frame->setStyleSheet(QString(
+                "#channelFrame { border: 1px solid %1; border-radius: 6px;"
+                " background-color: %2; }").arg(d.border.name(), d.surface.name()));
+        }
     }
     if (m_removeBtn) {
         m_removeBtn->setStyleSheet(QString(
@@ -554,8 +621,8 @@ void Channel::refreshTheme() {
 }
 
 void Channel::setFxVisible(bool on) {
-    m_fx->setVisible(on);
-    if (m_fxSeparator) m_fxSeparator->setVisible(on);
+    m_fxWanted = on;
+    applyCompact();
     if (auto *p = parentWidget()) p->updateGeometry();
     updateGeometry();
 }
@@ -622,7 +689,8 @@ void Channel::setStreamLoadingText(const QString &text) {
 
 
 void Channel::setPlaylistAvailable(bool on) {
-    if (m_playlistBtn) m_playlistBtn->setVisible(on);
+    m_playlistAvailable = on;
+    applyCompact();
 }
 
 void Channel::showDiscoveryBubble(const QString &text) {

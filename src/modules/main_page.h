@@ -143,6 +143,22 @@ private:
     class QLabel       *m_colsLbl  = nullptr;     // grid-size group
     QWidget            *m_profilesHelp = nullptr; // P1-P4 help bubble
 
+    // Responsive collapse (small windows): the bottom bar drops
+    // optional groups, then the channels area / bottom bar / search
+    // bar hide entirely — the sound-button grid is the last thing
+    // standing. Settings-driven visibility is remembered in the
+    // m_want* flags so widening the window restores exactly what the
+    // user had enabled.
+    void applyResponsiveLayout();
+    QWidget            *m_bottomBar = nullptr;
+    // Draggable divider between the sound-button grid and the channels
+    // area: the user resizes the two panes; the position persists.
+    class QSplitter    *m_splitter = nullptr;
+    void saveSplitterState();
+    bool                m_wantMuteChecks = true;
+    bool                m_wantProfiles   = true;
+    bool                m_wantGridSize   = true;
+
     // Preview-only checkbox: when checked, label fades smoothly
     // between two warning colours so the user always sees at a glance
     // that the server is NOT hearing the soundboard. Forgotten

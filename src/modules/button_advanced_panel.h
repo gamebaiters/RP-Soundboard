@@ -65,14 +65,22 @@ private:
     void refreshSoundView();
     void pushLiveFxToPreview();
     void stopPreview();
+    // Re-shape the dialog for the cell type: local file (everything),
+    // single stream link (no browse/waveform/preview — resolved at play;
+    // volume/crop/FX still apply), playlist link (only Display + Hotkey:
+    // per-track playback uses the channel's own settings).
+    void applyStreamMode();
 
     SoundInfo    m_info;
+    bool         m_globalFxOn = true;   // mirrors setGlobalFxEnabled()
 
+    QGroupBox   *m_fileBox = nullptr;
     QLineEdit   *m_filePath;
     QPushButton *m_browse;
     SoundView   *m_soundView;
     QPushButton *m_preview;
     QLabel      *m_previewTimeLabel;
+    QLabel      *m_streamInfo = nullptr; // stream/playlist explainer (hidden for files)
     QTimer      *m_previewTimer;
     int          m_previewSlot = -1;
 
@@ -85,6 +93,7 @@ private:
     QPushButton *m_imageBrowse;
     QPushButton *m_imageClear;
 
+    QGroupBox   *m_volBox = nullptr;
     QSlider     *m_volume;
     QLabel      *m_volumeLabel;
 
@@ -106,6 +115,15 @@ private:
     // Per-cell LUFS auto-normalisation. Inserts `loudnorm` filter so
     // the cell hits -16 LUFS integrated regardless of source level.
     QCheckBox   *m_normalizeChk = nullptr;
+
+    // Channel behaviour: mandatory temporary channel + full per-button
+    // Audio Sandbox package (edited via a private ChannelSandboxDialog).
+    QGroupBox   *m_chanBox = nullptr;
+    QCheckBox   *m_tempChannelChk = nullptr;
+    QCheckBox   *m_sandboxRememberChk = nullptr;
+    QPushButton *m_sandboxEditBtn = nullptr;
+    QByteArray   m_sandboxData;          // compact JSON SandboxState
+    class ChannelSandboxDialog *m_sandboxDlg = nullptr;
 
     QPushButton *m_hotkeyBtn;
     QPushButton *m_hotkeyReset;

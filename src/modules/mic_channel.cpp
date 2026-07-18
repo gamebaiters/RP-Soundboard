@@ -1,9 +1,12 @@
 #include "mic_channel.h"
 #include "channel_meter.h"
 #include "channel_sandbox_dialog.h"
+#include "theme.h"
+#include "fine_slider.h"
 #include "help_bubble.h"
 #include "preset_manager.h"
 #include "../MicFx.h"
+#include "../MicAmbience.h"
 
 #include <cmath>
 
@@ -18,6 +21,8 @@
 #include <QFrame>
 #include <QInputDialog>
 #include <QMessageBox>
+#include <QFileDialog>
+#include <QGraphicsDropShadowEffect>
 #include <QApplication>
 #include <QClipboard>
 #include <QJsonDocument>
@@ -27,6 +32,7 @@
 #include <QPainterPath>
 #include <QPixmap>
 #include <QIcon>
+#include <QResizeEvent>
 
 // Painted preset-action glyphs (floppy = save, trash = delete, share nodes,
 // clipboard = paste). Painted rather than Unicode/text so they render
@@ -129,6 +135,7 @@ MicChannel::MicChannel(QWidget *parent)
     : QWidget(parent)
 {
     auto *frame = new QFrame(this);
+    m_frame = frame;
     frame->setObjectName(QStringLiteral("micChannelFrame"));
     frame->setFrameShape(QFrame::StyledPanel);
     auto *outer = new QVBoxLayout(this);
@@ -161,6 +168,22 @@ MicChannel::MicChannel(QWidget *parent)
         "TS3 hotkey ('Toggle Mic FX')."));
     head->addWidget(m_enable);
 
+    // Effective mic volume: a +/-20 dB boost applied to the outgoing
+    // capture stream (0 = unity, centre). Sits right next to Enable.
+    m_gain = new FineSlider(Qt::Horizontal, frame);
+    m_gain->setRange(-20, 20);
+    m_gain->setValue(0);
+    m_gain->setMinimumWidth(70);
+    m_gain->setMaximumWidth(130);
+    m_gain->setProperty("bipolarFill", true);
+    m_gain->setToolTip(tr(
+        "Microphone volume boost, -20..+20 dB (0 = unchanged).\n"
+        "Applied to your outgoing voice before every effect."));
+    head->addWidget(m_gain, 1);
+    m_gainLabel = new QLabel(QStringLiteral("0 dB"), frame);
+    m_gainLabel->setMinimumWidth(44);
+    head->addWidget(m_gainLabel);
+
     m_liveBadge = new QLabel(tr("LIVE"), frame);
     m_liveBadge->setStyleSheet(
         "color: white; background-color: #c0392b; font-weight: bold;"
@@ -170,7 +193,8 @@ MicChannel::MicChannel(QWidget *parent)
 
     head->addStretch(1);
 
-    head->addWidget(new QLabel(tr("Level"), frame));
+    m_levelCaption = new QLabel(tr("Level"), frame);
+    head->addWidget(m_levelCaption);
     m_meter = new ChannelMeter(frame);
     m_meter->setMinimumWidth(90);
     m_meter->setMaximumWidth(160);
@@ -190,13 +214,14 @@ MicChannel::MicChannel(QWidget *parent)
     row->setSpacing(8);
 
     row->addWidget(new QLabel(tr("Pitch"), frame));
-    m_pitch = new QSlider(Qt::Horizontal, frame);
+    m_pitch = new FineSlider(Qt::Horizontal, frame);
     // Tenths of a semitone: fine vocal tuning needs sub-semitone
     // resolution (slider value = semitones * 10).
     m_pitch->setRange(-120, 120);
     m_pitch->setValue(0);
     m_pitch->setSingleStep(1);    // 0.1 st per arrow key / wheel notch
     m_pitch->setPageStep(10);     // 1 st per page
+    m_pitch->setProperty("bipolarFill", true);
     m_pitch->setMinimumWidth(90);
     m_pitch->setMaximumWidth(160);
     m_pitch->setToolTip(tr(
@@ -211,8 +236,9 @@ MicChannel::MicChannel(QWidget *parent)
     // reverbWet) - the mic has no decoder, so the channels' FFmpeg
     // reverb path does not exist here; the DSP-chain reverb is the
     // mic's reverb. Same 0..100 feel as the channel FxPanel slider.
-    row->addWidget(new QLabel(tr("Reverb"), frame));
-    m_reverb = new QSlider(Qt::Horizontal, frame);
+    m_reverbCaption = new QLabel(tr("Reverb"), frame);
+    row->addWidget(m_reverbCaption);
+    m_reverb = new FineSlider(Qt::Horizontal, frame);
     m_reverb->setRange(0, 100);
     m_reverb->setValue(0);
     m_reverb->setMinimumWidth(70);
@@ -261,12 +287,71 @@ MicChannel::MicChannel(QWidget *parent)
         "hearing yourself while talking is distracting."));
     row->addWidget(m_monitor);
 
+    // ---- background ambience (V3), inline on the same controls row ----
+    // An environment loop (washing machine, drill, rain, ...) mixed
+    // UNDER the processed voice while the mic transmits. Synthesized
+    // on the fly - no audio files shipped.
+    m_ambCaption = new QLabel(tr("Background"), frame);
+    row->addWidget(m_ambCaption);
+    m_ambBox = new QComboBox(frame);
+    m_ambBox->setToolTip(tr(
+        "Background environment sound mixed under your voice while you\n"
+        "talk (washing machine, drill, rain, ...). Everyone hears it as\n"
+        "if you were really there. Synthesized - no files needed."));
+    m_ambBox->addItem(tr("(none)"));
+    for (int i = 0; i < MicAmbience::count(); ++i)
+        m_ambBox->addItem(MicAmbience::name(i));
+    m_ambBox->addItem(tr("Custom file…"));   // last row = pick your own
+    row->addWidget(m_ambBox, 1);
+    m_ambVol = new FineSlider(Qt::Horizontal, frame);
+    m_ambVol->setRange(0, 100);
+    m_ambVol->setValue(35);
+    m_ambVol->setMinimumWidth(50);
+    m_ambVol->setMaximumWidth(110);
+    m_ambVol->setToolTip(tr("Background sound volume"));
+    row->addWidget(m_ambVol, 1);
+    m_ambVolLabel = new QLabel(QStringLiteral("35"), frame);
+    m_ambVolLabel->setMinimumWidth(24);
+    row->addWidget(m_ambVolLabel);
+
     m_fxBtn = new QPushButton(tr("Effects…"), frame);
     m_fxBtn->setToolTip(tr("Open the full effect chain editor for the microphone"));
     row->addWidget(m_fxBtn);
     col->addLayout(row);
 
+    connect(m_ambBox, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, [this](int idx){
+        if (m_loading) return;
+        const int customRow = MicAmbience::count() + 1;
+        if (idx == customRow) {
+            // Last row: pick a personal audio file as the background.
+            QString p = QFileDialog::getOpenFileName(this,
+                tr("Pick a background sound"), QString(),
+                tr("Audio files (*.wav *.mp3 *.ogg *.opus *.flac *.m4a *.aac *.wma);;All files (*.*)"));
+            bool ok = !p.isEmpty() && MicFx::instance().setAmbienceFile(p);
+            if (!ok && !p.isEmpty())
+                QMessageBox::warning(this, tr("Background sound"),
+                    tr("Could not decode this file as audio."));
+            // Sync the combo back to reality (chosen custom / previous).
+            pullFromMicFx();
+            return;
+        }
+        MicFx::instance().setAmbience(idx - 1);   // row 0 = none
+    });
+    connect(m_ambVol, &QSlider::valueChanged, this, [this](int v){
+        m_ambVolLabel->setText(QString::number(v));
+        if (m_loading) return;
+        MicFx::instance().setAmbienceVolume(v / 100.0f);
+    });
+
     connect(m_enable, &QCheckBox::toggled, this, &MicChannel::onEnableToggled);
+    connect(m_gain, &QSlider::valueChanged, this, [this](int v){
+        m_gainLabel->setText(QStringLiteral("%1%2 dB")
+                                 .arg(v > 0 ? QStringLiteral("+") : QString())
+                                 .arg(v));
+        if (m_loading) return;
+        MicFx::instance().setGainDb(float(v));
+    });
     connect(m_pitch, &QSlider::valueChanged, this, [this](int v){
         m_pitchLabel->setText(QString::number(v / 10.0, 'f', 1) + " st");
         if (m_loading) return;
@@ -329,13 +414,88 @@ void MicChannel::pullFromMicFx()
     m_reverb->setValue(qBound(0, rv, 100));
     m_reverbLabel->setText(QString::number(m_reverb->value()));
     m_monitor->setChecked(fx.monitor());
+    if (m_gain) {
+        int gv = qBound(-20, int(std::lround(fx.gainDb())), 20);
+        m_gain->setValue(gv);
+        m_gainLabel->setText(QStringLiteral("%1%2 dB")
+                                 .arg(gv > 0 ? QStringLiteral("+") : QString())
+                                 .arg(gv));
+    }
+    if (m_ambBox) {
+        int idx;
+        if (fx.ambienceId() == MicFx::kAmbienceCustom) {
+            idx = MicAmbience::count() + 1;          // the Custom row
+            m_ambBox->setToolTip(tr("Custom background: %1")
+                                     .arg(fx.ambienceFile()));
+        } else {
+            idx = fx.ambienceId() + 1;               // -1 (none) -> row 0
+        }
+        if (idx < 0 || idx >= m_ambBox->count()) idx = 0;
+        QSignalBlocker bl(m_ambBox);
+        m_ambBox->setCurrentIndex(idx);
+    }
+    if (m_ambVol) {
+        int av = static_cast<int>(std::lround(fx.ambienceVolume() * 100.0f));
+        m_ambVol->setValue(qBound(0, av, 100));
+        m_ambVolLabel->setText(QString::number(m_ambVol->value()));
+    }
     m_loading = false;
     updateLiveBadge();
 }
 
+void MicChannel::resizeEvent(QResizeEvent *e)
+{
+    QWidget::resizeEvent(e);
+    applyCompact();
+}
+
+void MicChannel::applyCompact()
+{
+    // Progressive collapse when the soundboard window is squeezed:
+    // secondary controls disappear instead of overlapping. Order of
+    // sacrifice: preset action buttons -> reverb -> ambience volume ->
+    // level meter. Enable toggle, pitch, preset combo and Effects stay.
+    const int w = width();
+    const bool tiny   = w < 430;
+    const bool narrow = w < 540;
+    const bool mid    = w < 660;
+    for (QPushButton *b : { m_presetSave, m_presetDelete,
+                            m_presetShare, m_presetPaste })
+        if (b) b->setVisible(!mid);
+    if (m_reverbCaption) m_reverbCaption->setVisible(!narrow);
+    if (m_reverb)        m_reverb->setVisible(!narrow);
+    if (m_reverbLabel)   m_reverbLabel->setVisible(!narrow);
+    if (m_ambCaption)    m_ambCaption->setVisible(!narrow);
+    if (m_ambVol)        m_ambVol->setVisible(!narrow);
+    if (m_ambVolLabel)   m_ambVolLabel->setVisible(!narrow);
+    if (m_monitor)       m_monitor->setVisible(!narrow);
+    if (m_levelCaption)  m_levelCaption->setVisible(!tiny);
+    if (m_meter)         m_meter->setVisible(!tiny);
+    if (m_gainLabel)     m_gainLabel->setVisible(!tiny);
+    if (m_gain)          m_gain->setVisible(!tiny);
+}
+
 void MicChannel::updateLiveBadge()
 {
-    m_liveBadge->setVisible(MicFx::instance().enabled());
+    const bool on = MicFx::instance().enabled();
+    m_liveBadge->setVisible(on);
+    // Red glow on the whole panel while the voice changer is live -
+    // unmissable "the mic is being processed" affordance.
+    if (m_frame) {
+        if (on) {
+            auto *glow = new QGraphicsDropShadowEffect(m_frame);
+            glow->setBlurRadius(22.0);
+            glow->setOffset(0.0, 0.0);
+            glow->setColor(QColor(0xe0, 0x31, 0x31));
+            m_frame->setGraphicsEffect(glow);
+            m_frame->setStyleSheet(QStringLiteral(
+                "#micChannelFrame { border: 2px solid #e03131;"
+                " border-radius: 4px; }"));
+        } else {
+            m_frame->setGraphicsEffect(nullptr);
+            m_frame->setStyleSheet(QString());
+        }
+    }
 }
 
 void MicChannel::onEnableToggled(bool on)
@@ -470,6 +630,8 @@ void MicChannel::onOpenEffects()
 {
     if (!m_dialog) {
         m_dialog = new ChannelSandboxDialog(0, this, /*micMode=*/true);
+        m_dialog->setProperty("isGBSoundboard", true);
+        Theme::trackThemedWidget(m_dialog);
         m_dialog->setState(MicFx::instance().sandboxState());
         connect(m_dialog, &ChannelSandboxDialog::stateChanged, this,
                 [this](const SandboxState &s){

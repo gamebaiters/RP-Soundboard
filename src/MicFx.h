@@ -9,7 +9,9 @@
 #include "dsp/PitchShiftGrain.h"
 
 #include <atomic>
+#include <memory>
 #include <mutex>
+#include <vector>
 
 // Real-time microphone FX (V1/V2).
 //
@@ -46,6 +48,12 @@ public:
     void  setPitchSemitones(float st);
     float pitchSemitones() const { return m_pitchSemitones; }
 
+    // Mic input gain boost in dB (-20..+20, 0 = unity). Applied to the
+    // outgoing capture buffer BEFORE the pitch shifter and DSP chain,
+    // so it is the effective microphone volume.
+    void  setGainDb(float db);
+    float gainDb() const { return m_gainDb; }
+
     // Hear my own processed voice (mixed into local playback).
     void setMonitor(bool on) { m_monitor.store(on, std::memory_order_relaxed); saveSettings(); }
     bool monitor() const { return m_monitor.load(std::memory_order_relaxed); }
@@ -53,6 +61,24 @@ public:
     // Full sandbox state for the mic chain (sanitized internally).
     void setSandboxState(const SandboxState &s);
     const SandboxState &sandboxState() const { return m_state; }
+
+    // ---- Background ambience (V3) ----
+    // A procedurally generated environment loop (washing machine,
+    // drill, rain, ...) mixed into the outgoing mic stream while the
+    // master toggle is on - "you are talking from inside the scene".
+    // id < 0 = none. Ids/names come from MicAmbience. id == -2 means a
+    // user-picked custom file (see setAmbienceFile).
+    void  setAmbience(int id);
+    int   ambienceId() const { return m_ambienceId; }
+    // Custom user file as the ambience loop (any format FFmpeg opens).
+    // Returns false when the file could not be decoded (state untouched).
+    bool  setAmbienceFile(const QString &path);
+    QString ambienceFile() const { return m_ambCustomPath; }
+    static constexpr int kAmbienceCustom = -2;
+    // Ambience mix volume, 0..1 (applied post-DSP so voice effects
+    // never distort the scene bed).
+    void  setAmbienceVolume(float v);
+    float ambienceVolume() const { return m_ambGain.load(std::memory_order_relaxed); }
 
     // Feature kill switch (Settings). When off the whole feature is
     // inert AND every related UI element hides.
@@ -110,6 +136,8 @@ private:
     std::atomic<bool> m_monitor{false};
     float m_pitchSemitones = 0.0f;
     std::atomic<float> m_pitchRatio{1.0f};
+    float m_gainDb = 0.0f;
+    std::atomic<float> m_gainLin{1.0f};
     SandboxState m_state;
 
     // DSP core - guarded by m_dspMutex (GUI holds on state push,
@@ -120,6 +148,15 @@ private:
 
     std::atomic<float> m_levelIn{0.0f};
     std::atomic<float> m_levelOut{0.0f};
+
+    // Ambience loop: generated on the GUI thread, swapped in under
+    // m_dspMutex; the capture thread (which already holds the try-lock
+    // while processing) only reads it. m_ambPos is audio-thread-only.
+    std::shared_ptr<const std::vector<float>> m_ambLoop;
+    size_t m_ambPos = 0;
+    int    m_ambienceId = -1;
+    QString m_ambCustomPath;
+    std::atomic<float> m_ambGain{0.35f};
 
     // Monitor ring: SPSC (capture thread produces, playback thread
     // consumes), interleaved stereo shorts.

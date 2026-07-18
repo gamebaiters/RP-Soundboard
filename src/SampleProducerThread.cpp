@@ -22,6 +22,7 @@
 #include "SampleBuffer.h"
 #include "SampleSource.h"
 #include "SampleProducerThread.h"
+#include "ThreadQoS.h"
 
 
 
@@ -206,6 +207,7 @@ void SampleProducerThread::run()
 //---------------------------------------------------------------
 void SampleProducerThread::threadFunc()
 {
+	sbPromoteThreadQoS();   // macOS: inherited low QoS throttles network reads
 	run();
 	m_running.store(false);
 }

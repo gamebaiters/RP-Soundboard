@@ -20,6 +20,24 @@
   <qresource prefix="leia">
     <file alias="default.sofa">leia/default.sofa</file>
   </qresource>
+  <qresource prefix="ambience">
+    <file alias="amb00.wav">ambience/amb00.wav</file>
+    <file alias="amb01.wav">ambience/amb01.wav</file>
+    <file alias="amb02.wav">ambience/amb02.wav</file>
+    <file alias="amb03.wav">ambience/amb03.wav</file>
+    <file alias="amb04.wav">ambience/amb04.wav</file>
+    <file alias="amb05.wav">ambience/amb05.wav</file>
+    <file alias="amb06.wav">ambience/amb06.wav</file>
+    <file alias="amb07.wav">ambience/amb07.wav</file>
+    <file alias="amb08.wav">ambience/amb08.wav</file>
+    <file alias="amb09.wav">ambience/amb09.wav</file>
+    <file alias="amb10.wav">ambience/amb10.wav</file>
+    <file alias="amb11.wav">ambience/amb11.wav</file>
+    <file alias="amb12.wav">ambience/amb12.wav</file>
+    <file alias="amb13.wav">ambience/amb13.wav</file>
+    <file alias="amb14.wav">ambience/amb14.wav</file>
+    <file alias="amb15.wav">ambience/amb15.wav</file>
+  </qresource>
   <qresource prefix="/">
     <file alias="release-notes.txt">../release-notes.txt</file>
   </qresource>

@@ -252,6 +252,12 @@ public:
 	void setShowVinylButton(bool on);
 	inline bool getMicFxFeatureEnabled() const { return m_micFxFeatureEnabled; }
 	void setMicFxFeatureEnabled(bool on);
+	// Soundboard toggle button injected into the TS3 client toolbar.
+	inline bool getTsToolbarButton() const { return m_tsToolbarButton; }
+	void setTsToolbarButton(bool on);
+	// Soundboard UI text size in points; 0 = follow the system font.
+	inline int getUiFontPt() const { return m_uiFontPt; }
+	void setUiFontPt(int pt);
 	inline bool getLoudnessNormalize() const { return m_loudnessNormalize; }
 	void setLoudnessNormalize(bool on);
 	// Master switch for URL / YouTube live streaming. OFF disables ALL of it:
@@ -284,12 +290,8 @@ public:
 	// Waveform played-portion animation style. Colors are "#rrggbb"
 	// strings, EMPTY = auto (follow the theme accent/waveform pair).
 	// Speed / intensity are 0..100 sliders (50 / 30 = defaults).
-	inline QString getWaveAnimColorA()   const { return m_waveAnimColorA; }
-	inline QString getWaveAnimColorB()   const { return m_waveAnimColorB; }
 	inline int     getWaveAnimSpeed()    const { return m_waveAnimSpeed; }
 	inline int     getWaveAnimIntensity() const { return m_waveAnimIntensity; }
-	void setWaveAnimColorA(const QString &c);
-	void setWaveAnimColorB(const QString &c);
 	void setWaveAnimSpeed(int v);
 	void setWaveAnimIntensity(int v);
 
@@ -403,6 +405,8 @@ private:
 	bool m_spectrogramView      = false;
 	bool m_showVinylButton      = true;
 	bool m_micFxFeatureEnabled  = true;
+	bool m_tsToolbarButton      = true;
+	int  m_uiFontPt             = 0;
 	bool m_loudnessNormalize    = false;
 	bool m_streamingEnabled       = true;
 	bool m_channelNameLinkDetect  = true;
@@ -410,8 +414,6 @@ private:
 	bool m_streamFxGradient       = true;
 	int  m_formatBadgeMode        = 3;
 	bool m_showStreamBadge        = true;
-	QString m_waveAnimColorA;          // empty = auto (theme)
-	QString m_waveAnimColorB;          // empty = auto (theme)
 	int  m_waveAnimSpeed          = 50;
 	int  m_waveAnimIntensity      = 30;
 	bool m_vadWhilePlaying        = false;

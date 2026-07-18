@@ -87,7 +87,9 @@ void ButtonGrid::rebuildLayout() {
     for (int i = 0; i < total; ++i) {
         auto *b = new SoundButton(this);
         b->setContextMenuPolicy(Qt::CustomContextMenu);
-        b->setMinimumSize(60, 28);
+        // Small floor so many-column grids keep shrinking with the
+        // window instead of overflowing it; text elides via SoundButton.
+        b->setMinimumSize(34, 20);
         b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         // Tag each button with its grid index so external drop targets
         // (e.g. Channel widgets) can identify the source button via the

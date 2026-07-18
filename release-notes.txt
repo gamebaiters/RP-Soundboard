@@ -1,3 +1,103 @@
+GameBaiters Soundboard v2.3.5
+=============================
+
+The creativity release. Your microphone can now sound like it is in a
+laundromat, a construction site or a thunderstorm; buttons can spawn
+their own throw-away channels with their own effect chain; the whole
+soundboard fits in one backup file; and a native button sits right in
+TeamSpeak's own toolbar.
+
+Microphone FX
+-------------
+
+* NEW - Background ambience. Pick an environment (washing machine,
+  microwave, drill, hair dryer, vacuum, rain, wind, city traffic, bar
+  chatter, frying pan, TV static, jackhammer, angle grinder, hammering,
+  screaming crowd, running engine) and it is mixed under your voice
+  while you talk. Everyone hears it as if you were really there. Real
+  recordings, bundled with the plugin - nothing to download.
+* NEW - Use your OWN file as the background instead: pick any audio
+  file and it becomes your ambience, remembered between sessions.
+* NEW - Microphone volume boost slider, -20 to +20 dB, right next to
+  the Enable toggle. Applied to your outgoing voice before every
+  effect.
+* NEW - The microphone panel glows red while the voice changer is
+  live, so you can never forget it is on.
+
+Buttons and channels
+--------------------
+
+* NEW - Per-button temporary channels. Tick "Always play in a
+  temporary channel" and every click spawns a fresh channel with a
+  glowing border; click as many times as you like and the instances
+  overlap. Each one removes itself the moment its sound ends or is
+  stopped.
+* NEW - Per-button Audio Sandbox. A button can carry a complete
+  sandbox setup (EQ, spatial, all 21 DSP stages) and push it onto
+  whatever channel it plays into - the FX override, scaled up to the
+  entire chain.
+* NEW - The divider between the sound buttons and the channels is now
+  draggable: decide how much room each half gets. The position is
+  remembered.
+
+TeamSpeak integration
+---------------------
+
+* NEW - A soundboard button in TeamSpeak's own toolbar, next to the
+  client's buttons, that shows and hides the soundboard. It sizes
+  itself like its neighbours, follows your theme and steps aside when
+  the window gets narrow. Switch it off in Settings if you prefer the
+  Plugins menu.
+
+Backup
+------
+
+* NEW - Full native backup. One file (.gbsb) holds EVERYTHING the
+  soundboard stores: buttons, channels, presets, Mic FX, theme and
+  every setting. Restore brings it all back exactly as it was.
+
+Interface
+---------
+
+* NEW - Interface text size setting: follow the system font (default)
+  or pick your own size. Applies instantly.
+* FIX - The soundboard no longer breaks under custom TeamSpeak themes.
+  Every window now carries its own styling, so host themes can no
+  longer turn checkboxes into switches, resize the text or restyle the
+  sliders.
+* FIX - Pitch, speed and microphone gain sliders show their fill
+  growing from the CENTRE. At their neutral value they are empty
+  instead of looking half-set.
+* FIX - Every slider in the soundboard now shares one identical style,
+  size and handle.
+* FIX - The window survives being made small: toolbar groups and panels
+  disappear in order instead of overlapping, and the sound buttons are
+  always the last thing standing.
+* FIX - The Settings button no longer overlaps Reset channels on a
+  narrow window.
+* FIX - Text buttons across the channel row and the Audio Sandbox were
+  replaced by purpose-drawn icons (export, save, copy, paste, record,
+  play, load, reset).
+
+Audio
+-----
+
+* FIX - Sounds no longer start pitched and sped up for the first
+  couple of seconds. The decoder was opening each file with leftover
+  factors and only correcting them after the buffer had been filled.
+
+Stability
+---------
+
+* FIX - TeamSpeak no longer shows a crash dialog when you close it.
+  The client was destroying a font entry that belonged to the plugin
+  after the plugin had been unloaded.
+* FIX - Temporary channels no longer break pause and stop on the other
+  channels.
+* FIX - macOS interface fixes: the soundboard renders with correct
+  metrics instead of the broken native styling.
+
+
 GameBaiters Soundboard v2.3.4
 =============================
 

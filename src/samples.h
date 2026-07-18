@@ -319,6 +319,11 @@ private:
 		// channel's intended pitch instead of clobbering it with
 		// the global m_pitchFactor (which defaults to identity).
 		float  lastSlotPitchFactor = 1.0f;
+		// Speed was the odd one out: setSlotSpeedFactor only reached the
+		// decoder and stored nothing, so a new sound opened with the
+		// LEGACY GLOBAL m_speedFactor and played its whole prebuffer at
+		// the wrong rate before the per-slot value was re-applied.
+		float  lastSlotSpeedFactor = 1.0f;
 		double stretchBaseTime = 0.0;
 		// Trim start (seconds) of the currently loaded sound. A looping
 		// slot must restart from here, not from the file start, otherwise

@@ -53,6 +53,8 @@ public:
     bool spectrogramView() const;
     bool showVinylButton() const;
     bool micFxFeatureEnabled() const;
+    bool tsToolbarButton() const;
+    int  uiFontPt() const;
     bool loudnessNormalize() const;
     bool streamingEnabled() const;
     bool channelNameLinkDetect() const;
@@ -105,6 +107,8 @@ public slots:
     void setSpectrogramView(bool on);
     void setShowVinylButton(bool on);
     void setMicFxFeatureEnabled(bool on);
+    void setTsToolbarButton(bool on);
+    void setUiFontPt(int pt);
     void setLoudnessNormalize(bool on);
     void setStreamingEnabled(bool on);
     void setChannelNameLinkDetect(bool on);
@@ -113,8 +117,8 @@ public slots:
     void setStreamFxGradient(bool on);
     void setFormatBadgeMode(int mode);
     void setShowStreamBadge(bool on);
-    // Waveform animation style. Invalid colors = auto (theme-driven).
-    void setWaveAnimStyle(const QColor &a, const QColor &b, int speed, int intensity);
+    // Waveform animation motion. Colours are always theme-driven.
+    void setWaveAnimStyle(int speed, int intensity);
     void setShowAddChannelButton(bool on);
     void setShowMuteChecks(bool on);
     void setShowProfileButtons(bool on);
@@ -181,8 +185,8 @@ signals:
     void streamFxGradientChanged(bool);
     void formatBadgeModeChanged(int);
     void showStreamBadgeChanged(bool);
-    // Waveform animation style edit (invalid colors = auto/theme).
-    void waveAnimStyleChanged(const QColor &a, const QColor &b, int speed, int intensity);
+    // Waveform animation motion edit (colours are theme-driven).
+    void waveAnimStyleChanged(int speed, int intensity);
     void showAddChannelButtonChanged(bool);
     void showMuteChecksChanged(bool);
     void showProfileButtonsChanged(bool);
@@ -195,6 +199,10 @@ signals:
     void spectrogramViewChanged(bool);
     void showVinylButtonChanged(bool);
     void micFxFeatureEnabledChanged(bool);
+    void tsToolbarButtonChanged(bool);
+    void uiFontPtChanged(int);
+    void fullBackupRequested();
+    void fullRestoreRequested();
     void loudnessNormalizeChanged(bool);
     void streamingEnabledChanged(bool);
     void channelNameLinkDetectChanged(bool);
@@ -267,6 +275,8 @@ private:
     QSpinBox    *m_cols;
     QPushButton *m_export;
     QPushButton *m_import;
+    QPushButton *m_fullBackup;
+    QPushButton *m_fullRestore;
     QPushButton *m_resetHotkeys;
     QPushButton *m_close;
     QCheckBox   *m_adaptWaveform = nullptr;
@@ -279,6 +289,8 @@ private:
     QCheckBox   *m_spectrogramView      = nullptr;
     QCheckBox   *m_showVinylButton      = nullptr;
     QCheckBox   *m_micFxFeature         = nullptr;
+    QCheckBox   *m_tsToolbarButton      = nullptr;
+    QSpinBox    *m_uiFontPt             = nullptr;
     QCheckBox   *m_loudnessNormalize    = nullptr;
     QCheckBox   *m_streamingEnabled     = nullptr;
     QCheckBox   *m_channelLinkDetect    = nullptr;
@@ -288,10 +300,6 @@ private:
     class QComboBox *m_formatBadgeMode  = nullptr;
     QCheckBox   *m_showStreamBadge      = nullptr;
     // Waveform animation style controls (Streaming › Appearance).
-    QColor       m_waveAnimA;           // invalid = auto (theme)
-    QColor       m_waveAnimB;           // invalid = auto (theme)
-    QPushButton *m_waveAnimABtn         = nullptr;
-    QPushButton *m_waveAnimBBtn         = nullptr;
     class QSlider *m_waveAnimSpeed      = nullptr;
     class QSlider *m_waveAnimIntensity  = nullptr;
     class QLabel  *m_waveAnimSpeedLabel = nullptr;

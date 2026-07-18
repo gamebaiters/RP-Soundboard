@@ -71,7 +71,13 @@ LogViewerDialog::LogViewerDialog(QWidget *parent)
     m_text->setReadOnly(true);
     m_text->setLineWrapMode(QTextEdit::NoWrap);
     m_text->document()->setMaximumBlockCount(2000);
-    m_text->setFont(QFont(QStringLiteral("Consolas"), 9));
+    // Font family via a HEAP string, never QStringLiteral: the family
+    // QString lands in Qt's global QFontCache (keyed by QFontDef),
+    // which the host clears only inside ~QGuiApplication - AFTER this
+    // DLL has been unloaded. A literal-backed string there = read of
+    // freed .rdata = the "TeamSpeak crashed on close" dialog
+    // (Qt5Core+0x15D3 / QFontCache::clear dump signature).
+    m_text->setFont(QFont(QString::fromUtf8("Consolas"), 9));
 
     m_level->addItem(tr("All"),      -1);
     m_level->addItem(tr("Debug+"),   LogLevel_DEBUG);

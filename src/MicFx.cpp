@@ -1,4 +1,5 @@
 #include "MicFx.h"
+#include "MicAmbience.h"
 
 #include <QSettings>
 #include <QJsonDocument>
@@ -91,6 +92,59 @@ void MicFx::setPitchSemitones(float st)
     saveSettings();
 }
 
+bool MicFx::setAmbienceFile(const QString &path)
+{
+    auto buf = std::make_shared<std::vector<float>>(
+        MicAmbience::loadCustomFile(path, 48000));
+    if (buf->empty()) return false;
+    m_ambienceId = kAmbienceCustom;
+    m_ambCustomPath = path;
+    {
+        std::lock_guard<std::mutex> g(m_dspMutex);
+        m_ambLoop = buf;
+        m_ambPos = 0;
+    }
+    saveSettings();
+    return true;
+}
+
+void MicFx::setAmbience(int id)
+{
+    if (id >= MicAmbience::count()) id = -1;
+    if (id < 0) id = -1;
+    m_ambienceId = id;
+    m_ambCustomPath.clear();
+    // Generation happens OUTSIDE the mutex (GUI thread, a few ms); the
+    // capture thread keeps passing the mic through while we build.
+    std::shared_ptr<const std::vector<float>> loop;
+    if (id >= 0) {
+        auto buf = std::make_shared<std::vector<float>>(
+            MicAmbience::generate(id, 48000));
+        if (!buf->empty()) loop = buf;
+    }
+    {
+        std::lock_guard<std::mutex> g(m_dspMutex);
+        m_ambLoop = loop;
+        m_ambPos = 0;
+    }
+    saveSettings();
+}
+
+void MicFx::setAmbienceVolume(float v)
+{
+    m_ambGain.store(std::min(1.0f, std::max(0.0f, v)),
+                    std::memory_order_relaxed);
+    saveSettings();
+}
+
+void MicFx::setGainDb(float db)
+{
+    db = std::min(20.0f, std::max(-20.0f, db));
+    m_gainDb = db;
+    m_gainLin.store(std::pow(10.0f, db / 20.0f), std::memory_order_relaxed);
+    saveSettings();
+}
+
 void MicFx::setSandboxState(const SandboxState &s)
 {
     SandboxState clean = sanitize(s);
@@ -135,6 +189,18 @@ bool MicFx::processCapture(short *samples, int sampleCount, int channels)
     try {
         constexpr float kInv = 1.0f / 32768.0f;
 
+        // Mic gain boost FIRST - it is the effective microphone volume,
+        // so everything downstream (meter, pitch, chain) sees it.
+        {
+            const float g = m_gainLin.load(std::memory_order_relaxed);
+            if (std::fabs(g - 1.0f) > 0.001f) {
+                for (int i = 0; i < sampleCount * channels; ++i)
+                    samples[i] = clampShort(
+                        static_cast<int>(samples[i] * g));
+                modified = true;
+            }
+        }
+
         // Input level (pre-FX) for the meter.
         float peakIn = 0.0f;
         for (int i = 0; i < sampleCount * channels; ++i) {
@@ -176,6 +242,27 @@ bool MicFx::processCapture(short *samples, int sampleCount, int channels)
             modified = true;
         } else {
             m_levelOut.store(peakIn, std::memory_order_relaxed);
+        }
+
+        // Background ambience: mixed AFTER the chain so voice effects
+        // never distort the scene bed. Mixing marks the buffer edited,
+        // so the ambience transmits whenever the mic transmits.
+        if (m_ambLoop && !m_ambLoop->empty()) {
+            const float g = m_ambGain.load(std::memory_order_relaxed);
+            if (g > 0.001f) {
+                const std::vector<float> &loop = *m_ambLoop;
+                const size_t n = loop.size();
+                for (int i = 0; i < sampleCount; ++i) {
+                    const int a = static_cast<int>(
+                        loop[m_ambPos] * g * 32767.0f);
+                    if (++m_ambPos >= n) m_ambPos = 0;
+                    for (int c = 0; c < channels; ++c) {
+                        short *dst = &samples[i * channels + c];
+                        *dst = clampShort(int(*dst) + a);
+                    }
+                }
+                modified = true;
+            }
         }
 
         // Monitor feed: push the PROCESSED stream into the SPSC ring.
@@ -248,8 +335,41 @@ void MicFx::loadSettings()
     m_pitchSemitones = std::min(12.0f, std::max(-12.0f, pitch));
     m_pitchRatio.store(std::pow(2.0f, m_pitchSemitones / 12.0f),
                        std::memory_order_relaxed);
+    m_gainDb = std::min(20.0f, std::max(-20.0f,
+        st.value("micfx/gain_db", 0.0f).toFloat()));
+    m_gainLin.store(std::pow(10.0f, m_gainDb / 20.0f),
+                    std::memory_order_relaxed);
     m_monitor.store(st.value("micfx/monitor", false).toBool(),
                     std::memory_order_relaxed);
+    m_ambGain.store(qBound(0.0f,
+        st.value("micfx/ambience_vol", 0.35f).toFloat(), 1.0f),
+        std::memory_order_relaxed);
+    {
+        int ambId = st.value("micfx/ambience", -1).toInt();
+        if (ambId >= MicAmbience::count()) ambId = -1;
+        QString ambFile = st.value("micfx/ambience_file").toString();
+        std::shared_ptr<const std::vector<float>> loop;
+        if (ambId == kAmbienceCustom && !ambFile.isEmpty()) {
+            auto buf = std::make_shared<std::vector<float>>(
+                MicAmbience::loadCustomFile(ambFile, 48000));
+            if (!buf->empty()) {
+                loop = buf;
+                m_ambCustomPath = ambFile;
+            } else {
+                ambId = -1;   // file gone / undecodable -> none
+            }
+        } else if (ambId == kAmbienceCustom) {
+            ambId = -1;
+        } else if (ambId >= 0) {
+            auto buf = std::make_shared<std::vector<float>>(
+                MicAmbience::generate(ambId, 48000));
+            if (!buf->empty()) loop = buf;
+        }
+        m_ambienceId = ambId;
+        std::lock_guard<std::mutex> g(m_dspMutex);
+        m_ambLoop = loop;
+        m_ambPos = 0;
+    }
 
     QByteArray json = QByteArray::fromBase64(
         st.value("micfx/state").toByteArray());
@@ -287,7 +407,12 @@ void MicFx::saveSettings()
     QSettings st(kOrg, kApp);
     st.setValue("micfx/enabled", enabled());
     st.setValue("micfx/pitch", m_pitchSemitones);
+    st.setValue("micfx/gain_db", m_gainDb);
     st.setValue("micfx/monitor", monitor());
+    st.setValue("micfx/ambience", m_ambienceId);
+    st.setValue("micfx/ambience_file", m_ambCustomPath);
+    st.setValue("micfx/ambience_vol",
+                m_ambGain.load(std::memory_order_relaxed));
     QJsonDocument doc(m_state.toJson());
     st.setValue("micfx/state",
                 doc.toJson(QJsonDocument::Compact).toBase64());

@@ -40,6 +40,10 @@ FxPanel::FxPanel(QWidget *parent)
     m_pitch->setValue(0);
     m_speed->setValue(0);
     m_reverb->setValue(0);
+    // Neutral is the CENTRE for these two: the accent bar must grow out
+    // of the middle, not from the left edge (FineSlider::paintEvent).
+    m_pitch->setProperty("bipolarFill", true);
+    m_speed->setProperty("bipolarFill", true);
     for (auto *s : {m_pitch, m_speed, m_reverb})
         s->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);

@@ -47,11 +47,29 @@ bool isValid(const QXmlStreamReader &xml)
 //---------------------------------------------------------------
 UpdateChecker::UpdateChecker( QObject *parent /*= NULL*/ ) :
 	QObject(parent),
+	m_mgr(NULL),
 	m_updater(NULL),
 	m_config(NULL),
 	m_explicitCheck(false)
 {
 
+}
+
+//---------------------------------------------------------------
+// The updater window is a PARENTLESS top-level QWidget (new
+// UpdaterWindow()), so it is not reaped by Qt's parent-child
+// teardown. Left alive at plugin unload it kept a vtable into
+// freed DLL code and crashed the client on exit whenever an update
+// was in flight. Destroy it (and the network manager) explicitly.
+//---------------------------------------------------------------
+UpdateChecker::~UpdateChecker()
+{
+	if (m_updater)
+	{
+		m_updater->disconnect(this);
+		delete m_updater;
+		m_updater = NULL;
+	}
 }
 
 

@@ -9,6 +9,7 @@ set(sources
 	src/buildinfo.c
 	src/buildinfo.h
 	src/AudioUtils.h
+	src/ThreadQoS.h
 	src/ColorUtils.h
 	src/bytebuffer.h
 	src/common.h
@@ -27,6 +28,10 @@ set(sources
 	src/main.cpp
 	src/main.h
 	src/peakmeter.h
+	src/PlatformStyle.cpp
+	src/PlatformStyle.h
+	src/TsToolbarButton.cpp
+	src/TsToolbarButton.h
 	src/plugin.cpp
 	src/plugin.h
 	src/qtres.qrc
@@ -181,6 +186,8 @@ set(sources
 	src/dsp/ConvolutionReverb.cpp
 	src/MicFx.h
 	src/MicFx.cpp
+	src/MicAmbience.h
+	src/MicAmbience.cpp
 
 	# --- Sandbox per-channel UI ---
 	src/modules/channel_meter.h

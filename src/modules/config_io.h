@@ -39,6 +39,15 @@ ImportResult importIniFromFile(const QString &path, ConfigModel &model);
 bool         exportProfileIni(const QString &path, ConfigModel &model, int configIdx);
 ImportResult importProfileIni(const QString &path, ConfigModel &model, int configIdx);
 
+// FULL native backup: EVERYTHING the soundboard persists, in one
+// self-contained .gbsb file - the three INIs (buttons/settings,
+// channels, presets) as raw bytes + every key of the
+// QSettings("GameBaiters","Soundboard") store (micfx, ambience,
+// splitter, UI sections, sandbox mask, ...). Restore rewrites all of
+// it verbatim, so the soundboard comes back EXACTLY as it was.
+bool         fullBackupToFile(const QString &path, ConfigModel &model);
+ImportResult fullRestoreFromFile(const QString &path);
+
 // Lower-level helpers (also used by tests).
 QByteArray   serialize(const ConfigModel &model);
 ImportResult deserialize(const QByteArray &data, ConfigModel &model);

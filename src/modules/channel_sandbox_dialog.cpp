@@ -38,6 +38,9 @@
 #include <QTimer>
 #include <QCoreApplication>
 #include <QShowEvent>
+#include <QToolButton>
+#include <QMenu>
+#include <QAction>
 #include <cmath>
 
 namespace {
@@ -59,6 +62,57 @@ void save(int engine) {
     s.setValue(kPreferredEngineKey, engine);
 }
 } // namespace SandboxEnginePref
+
+namespace {
+constexpr const char *kModuleMaskKey   = "sandbox_modules/mask";
+constexpr const char *kModuleStagesKey = "sandbox_modules/mask_stages";
+
+void persistModuleMask() {
+    QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+    st.setValue(QLatin1String(kModuleMaskKey), SlotDsp::globalStageMask());
+    // Stamp the stage count so a future stage append can tell which bits
+    // this mask actually covers (see loadIntoDsp).
+    st.setValue(QLatin1String(kModuleStagesKey),
+                (int)SandboxState::Stage_COUNT);
+}
+} // namespace
+
+namespace SandboxModules {
+
+quint32 mask() { return SlotDsp::globalStageMask(); }
+
+void setStageEnabled(int stage, bool on) {
+    if (stage < 0 || stage >= SandboxState::Stage_COUNT) return;
+    // Paulstretch's slot is structural (pinned pipeline index 0); it can
+    // be disabled like the rest but never breaks anything.
+    SlotDsp::setGlobalStageEnabled(stage, on);
+    persistModuleMask();
+}
+
+void setAll(bool on) {
+    for (int st = 0; st < SandboxState::Stage_COUNT; ++st)
+        SlotDsp::setGlobalStageEnabled(st, on);
+    persistModuleMask();
+}
+
+void loadIntoDsp() {
+    QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+    quint32 m = st.value(QLatin1String(kModuleMaskKey), 0xFFFFFFFFu).toUInt();
+    // VERSIONED mask: a mask saved before newer DspStages were appended has
+    // ZERO bits for them, which silently hard-disabled every new module
+    // (VoiceFx/autotune, Gate, DynEq, ...) no matter what the sandbox UI
+    // said - THE "the new effects do nothing" bug. Bits for stages that did
+    // not exist when the mask was written default to ON. Legacy masks (no
+    // stamp) are assumed to predate the first append wave (14 stages).
+    int maskStages = st.value(QLatin1String(kModuleStagesKey), 14).toInt();
+    if (maskStages < 1) maskStages = 14;
+    for (int stg = maskStages; stg < SandboxState::Stage_COUNT; ++stg)
+        m |= (1u << stg);
+    for (int stg = 0; stg < SandboxState::Stage_COUNT; ++stg)
+        SlotDsp::setGlobalStageEnabled(stg, (m >> stg) & 1u);
+}
+
+} // namespace SandboxModules
 
 namespace {
 QString fmtFreq(double hz) {
@@ -206,8 +260,22 @@ void ChannelSandboxDialog::showEvent(QShowEvent *e)
     QDialog::showEvent(e);
 }
 
+void ChannelSandboxDialog::syncModulesMenu()
+{
+    const quint32 m = SandboxModules::mask();
+    m_syncingModulesMenu = true;
+    for (int st = 0; st < SandboxState::Stage_COUNT; ++st) {
+        if (!m_moduleActions[st]) continue;
+        m_moduleActions[st]->setChecked((m >> st) & 1u);
+    }
+    m_syncingModulesMenu = false;
+}
+
 void ChannelSandboxDialog::refreshModuleVisibility()
 {
+    // Keep the popup in step with whatever the Settings window (or a
+    // previous session) left in the global mask.
+    syncModulesMenu();
     // Bits SET in hidden = stage removed from the view. Combine the
     // Settings global kill switch with the micMode curated subset
     // (Spatial stays available on the mic - Leia 8D voice orbit).
@@ -909,6 +977,53 @@ void ChannelSandboxDialog::buildUi()
         "Restore the default DSP processing order. Effect parameters\n"
         "are left untouched — only the chain order is reset."));
     pipeRow->addWidget(m_resetOrderBtn);
+
+    // Module catalogue toggle, right next to the order reset. Same global
+    // kill switch as Settings > Audio sandbox > "Sandbox modules": an
+    // unchecked module is bypassed in EVERY channel and disappears from
+    // this window (pipeline block + parameter panel). Put here because
+    // that is where the user notices a module is in the way.
+    m_modulesBtn = new QToolButton(m_dspGroup);
+    m_modulesBtn->setIcon(IconFactory::checklist());
+    m_modulesBtn->setIconSize(QSize(18, 18));
+    m_modulesBtn->setFixedSize(30, 26);
+    m_modulesBtn->setPopupMode(QToolButton::InstantPopup);
+    m_modulesBtn->setToolTip(tr(
+        "Show / hide DSP modules globally.\n"
+        "An unchecked module stops processing in EVERY channel and\n"
+        "vanishes from this window. Its settings are kept and come\n"
+        "back when you re-enable it. Same switch as Settings >\n"
+        "Audio sandbox > Sandbox modules."));
+    m_modulesMenu = new QMenu(m_modulesBtn);
+    {
+        QAction *allOn = m_modulesMenu->addAction(tr("Show all modules"));
+        connect(allOn, &QAction::triggered, this, [this]{
+            SandboxModules::setAll(true);
+            syncModulesMenu();
+            refreshModuleVisibility();
+        });
+        QAction *allOff = m_modulesMenu->addAction(tr("Hide all modules"));
+        connect(allOff, &QAction::triggered, this, [this]{
+            SandboxModules::setAll(false);
+            syncModulesMenu();
+            refreshModuleVisibility();
+        });
+        m_modulesMenu->addSeparator();
+        for (int st = 0; st < SandboxState::Stage_COUNT; ++st) {
+            QAction *a = m_modulesMenu->addAction(
+                QCoreApplication::translate("DspStages",
+                                            SandboxState::stageName(st)));
+            a->setCheckable(true);
+            m_moduleActions[st] = a;
+            connect(a, &QAction::toggled, this, [this, st](bool on){
+                if (m_syncingModulesMenu) return;
+                SandboxModules::setStageEnabled(st, on);
+                refreshModuleVisibility();
+            });
+        }
+    }
+    m_modulesBtn->setMenu(m_modulesMenu);
+    pipeRow->addWidget(m_modulesBtn);
     dspGroupLay->addLayout(pipeRow);
 
     m_pipeline = new PipelineWidget(m_dspGroup);

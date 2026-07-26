@@ -144,6 +144,17 @@ protected:
 
 void tagOneSlider(QSlider *s) {
     if (!s) return;
+    // OPT-OUT: a slider that draws its own thing (EqBandWidget's segmented
+    // LED column) must be left alone. The v2.3.5 "every soundboard slider is
+    // painted by us" pass grabbed EVERY QSlider found by findChildren, and
+    // BipolarPainter consumes the paint event - which silently replaced the
+    // EQ band LEDs with a plain groove + handle. Any widget setting
+    // selfPainted=true keeps its own paintEvent; remove the filter too, in
+    // case an earlier pass already installed it.
+    if (s->property("selfPainted").toBool()) {
+        s->removeEventFilter(BipolarPainter::instance());
+        return;
+    }
     const bool bipolar = (s->minimum() < 0 && s->maximum() > 0)
                       || s->property("bipolarFill").toBool();
     const QString want = bipolar ? QStringLiteral("bipolar")

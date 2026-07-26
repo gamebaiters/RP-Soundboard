@@ -192,9 +192,14 @@ Channel::Channel(int channelId, QWidget *parent)
         "Local volume slider is set. Cyan = headroom, amber = warning,\n"
         "red = clipping. Hide via Settings > Audio sandbox."));
 
+    // Controls row: volume | meter | separator | FX. NO trailing stretch and
+    // no width caps on the two blocks - the channel must span the FULL width
+    // of the window. (A capped version was tried and rejected: it parked
+    // everything on the left and left a dead strip on the right.) The
+    // compaction that stayed is vertical only.
     auto *controls = new QHBoxLayout;
     controls->setContentsMargins(0,0,0,0);
-    controls->setSpacing(8);
+    controls->setSpacing(6);
     controls->addWidget(m_volume, 1);
     controls->addWidget(m_meter, 0, Qt::AlignVCenter);
     m_fxSeparator = new QFrame(this);
@@ -333,8 +338,8 @@ Channel::Channel(int channelId, QWidget *parent)
             [this]{ emit playlistReopenRequested(m_id); });
 
     auto *frameLayout = new QVBoxLayout(m_frame);
-    frameLayout->setContentsMargins(8,4,8,8);
-    frameLayout->setSpacing(4);
+    frameLayout->setContentsMargins(8,3,8,4);
+    frameLayout->setSpacing(2);
     frameLayout->addLayout(titleRow);
     frameLayout->addWidget(m_loadingRow);
     frameLayout->addWidget(m_wave);
@@ -495,7 +500,7 @@ void Channel::updateMeterWidth()
     int reserved = m_volume->sizeHint().width()
                  + m_fx->sizeHint().width()
                  + (m_fxSeparator ? m_fxSeparator->sizeHint().width() : 2)
-                 + 8 * 3;                 // controls layout spacing, 3 gaps
+                 + 6 * 3;                 // controls layout spacing, 3 gaps
     int row = width() - 16;               // frame left + right margins
     int w = row - reserved;               // leftover space -> the meter
     // The meter yields space FIRST and EAGERLY: a low ceiling keeps it
@@ -560,6 +565,14 @@ void Channel::setTempGlow(bool on) {
     if (m_tempGlow == on) return;
     m_tempGlow = on;
     if (!m_frame) return;
+    // The halo is painted OUTSIDE the frame's own rect, so it needs room:
+    // with the root layout at zero margins the frame filled the whole
+    // channel widget and every glow pixel was clipped away - the accent
+    // border was all that ever survived, which is why a temporary channel
+    // looked like any other one. Give it a margin while glowing, take it
+    // back when the channel goes back to normal.
+    if (QLayout *root = layout())
+        root->setContentsMargins(on ? 5 : 0, on ? 4 : 0, on ? 5 : 0, on ? 4 : 0);
     if (on) {
         // Soft accent halo around the frame + a brighter border (set in
         // refreshTheme). QSS has no box-shadow; the drop-shadow effect

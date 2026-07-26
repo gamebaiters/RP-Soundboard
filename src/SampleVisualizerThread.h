@@ -55,6 +55,24 @@ public:
 	// Get file length in seconds, might be an estimation when processing isn't finished yet
 	double fileLength() const;
 
+	// Decimated MONO copy of the decoded signal, kept alongside the bins so
+	// the GUI can re-render the waveform through the REAL DSP chain instead
+	// of guessing what an effect does to an envelope.
+	//
+	// Published PROGRESSIVELY: the cache always spans exactly the same prefix
+	// of the file as the bins do, so a partial cache maps onto the partial bin
+	// range with no x-axis skew, and the caller can re-pull as it grows. It is
+	// self-limiting (halvePreview) rather than truncating, so it stays valid
+	// even for a container that reports no duration at all. Returns false only
+	// while there is genuinely nothing decoded yet.
+	bool getPreviewAudio(std::vector<float> &out, double &sampleRate) const;
+
+	// Hard ceiling on the cached preview (floats). 1.2 M = 4.8 MB per view and
+	// ~110 s at the 11 kHz target rate; longer files decimate further rather
+	// than allocating more. The cap is also the render budget: the GUI thread
+	// walks this array once per stage on every re-render.
+	static const size_t kMaxPreviewFrames = 1200000;
+
 	// NOTE: no singleton anymore. Each SoundView owns its own instance
 	// so concurrent channels can analyse different files without
 	// overwriting each other's bins. The worker thread self-terminates
@@ -67,6 +85,11 @@ private:
 	void processSamples(size_t newSamples);
 	void finalizeBins();
 	static void getMinMax(const short *data, size_t count, int &min, int &max);
+	// Box-average `count` decoded samples down into the preview cache.
+	void accumulatePreview(const short *data, size_t count);
+	// Cache hit its ceiling: average adjacent frames in place and double the
+	// decimation, so the cache keeps covering the WHOLE decoded range.
+	void halvePreview();
 
 	typedef std::lock_guard<std::mutex> Lock;
 
@@ -92,6 +115,14 @@ private:
 	std::atomic<bool> m_running;
 	std::atomic<bool> m_newFile;
 	std::atomic<bool> m_stop;
+
+	// ---- DSP-preview cache (guarded by m_mutex like m_bins) ----
+	std::vector<float> m_preview;
+	std::atomic<bool>  m_previewReady;
+	int    m_previewDecim = 4;
+	double m_previewRate  = 0.0;
+	double m_previewAcc   = 0.0;         // running box-average accumulator
+	int    m_previewAccN  = 0;
 };
 
 

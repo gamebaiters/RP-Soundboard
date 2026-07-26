@@ -28,6 +28,19 @@ namespace SandboxEnginePref {
     void save(int engine);
 }
 
+// Global per-stage kill switch shared by Settings > Audio sandbox and the
+// "Modules" button next to the pipeline reset. ONE owner for the QSettings
+// key + the versioned mask stamp: the stamp is what stops a mask written
+// before newer DspStages existed from hard-disabling them (see
+// vault/audio/dsp-pipeline.md - the "new effects do nothing" trap), so it
+// must never be written from two places that could disagree.
+namespace SandboxModules {
+    quint32 mask();                              // SlotDsp::globalStageMask()
+    void    setStageEnabled(int stage, bool on); // apply + persist
+    void    setAll(bool on);                     // every stage at once
+    void    loadIntoDsp();                       // versioned restore at startup
+}
+
 // Per-channel "Audio Sandbox" dialog. Hosts every DSP knob the user can
 // tweak for one slot: Spatial (Off / L-R Pan / 3D HRTF / Rotate /
 // 8D preset), Paulstretch, 16-band ISO EQ. Master volume, playback
@@ -347,6 +360,15 @@ private:
     // Pipeline widget + DSP module list plumbing
     class PipelineWidget *m_pipeline = nullptr;
     QPushButton          *m_resetOrderBtn = nullptr;
+    // Global module catalogue popup (mirror of Settings > Sandbox modules)
+    class QToolButton    *m_modulesBtn  = nullptr;
+    class QMenu          *m_modulesMenu = nullptr;
+    class QAction        *m_moduleActions[SandboxState::Stage_COUNT] = {};
+    // Guard so pushing the current mask into the checkable actions does
+    // not bounce straight back through their toggled() handlers.
+    bool                  m_syncingModulesMenu = false;
+    // Re-read the global mask into the popup's checkboxes.
+    void                  syncModulesMenu();
     QLineEdit            *m_dspSearch     = nullptr;
     QScrollArea          *m_dspScrollArea = nullptr;
     QVBoxLayout          *m_dspScrollLay  = nullptr;

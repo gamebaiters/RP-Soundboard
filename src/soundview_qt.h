@@ -120,7 +120,43 @@ private slots:
 private:
 	void drawWaves(QPainter *painter);
 	void preparePaths();
-	void applyFxToBins(std::vector<float> &binsL, std::vector<float> &binsR, size_t count) const;
+	// ---- Real DSP preview (replaces the old applyFxToBins guesswork) ----
+	// The bins the analyser produces are a MIN/MAX ENVELOPE over time, not a
+	// spectrum. The previous implementation treated the bin index as a
+	// frequency and multiplied bins by EQ band gains, so moving an EQ slider
+	// deformed the waveform in a way that had nothing to do with the audio.
+	// Now the effects run for real, sample by sample, on a decimated copy of
+	// the decoded file (SampleVisualizerThread::getPreviewAudio) using the
+	// very same DSP classes the audio thread uses, and the envelope is
+	// recomputed from the processed signal.
+	//
+	// Only stages that are genuinely representable on a same-length,
+	// mono, decimated signal are applied: EQ, Compressor, Saturator,
+	// NoiseGate, TransientShaper, Reverb, Limiter, Bitcrusher, Generation
+	// Loss, plus the failsafe brickwall. Time-warping / spatial stages
+	// (Paulstretch, Delay, Chorus, Spatial, ...) are NOT faked - they leave
+	// the drawing alone instead of inventing a smear.
+	bool fxViewWouldChangeAudio() const;
+	// Pull the decimated source from the analyser once it is complete.
+	void ensureFxSource();
+	// Run the chain (in the user's pipelineOrder) over `buf` in place.
+	void renderFxChain(std::vector<float> &buf) const;
+	// Build m_path[] by applying the MEASURED per-bin effect gain (wet vs dry
+	// peak on the decimated copy) to the analyser's TRUE min/max envelope.
+	//
+	// Drawing the processed decimated signal directly was wrong: that copy is
+	// box-averaged, so its envelope is lower and smoother than the real one,
+	// and the waveform visibly jumped the moment any effect was enabled -
+	// before the effect itself had changed anything. The ratio cancels the
+	// decimation (it is present in both dry and wet), so a neutral chain
+	// reproduces the raw waveform EXACTLY and only the real gain shows.
+	void buildPathsFxRatio(const std::vector<float> &dry,
+	                       const std::vector<float> &wet, size_t bins);
+	// Build m_path[] straight from the analyser's min/max bins.
+	void buildPathsFromBins(size_t bins);
+	// Mark the render stale and coalesce: a slider drag pushes state dozens
+	// of times a second and each re-render walks the whole cached signal.
+	void scheduleFxRerender();
 	double fractionFromMouseX(int x) const;
 	double clampFractionToCrop(double fraction) const;
 	void startStretchLoadAnimation(int durationMs);
@@ -152,6 +188,18 @@ private:
 	int  m_fxSpeed  = 0;
 	int  m_fxReverb = 0;
 	DisplayMode m_displayMode = Mode_Waveform;
+
+	// ---- Real DSP preview state ----
+	std::vector<float> m_fxSrc;          // decimated mono copy of the file
+	double             m_fxSrcRate = 0.0;
+	// The analyser grows the cache while decoding; stop re-pulling only when
+	// the decode is over and the final copy has been taken.
+	bool               m_fxSrcComplete = false;
+	bool               m_fxPathsActive = false;  // last paths came from the chain
+	bool               m_fxDirty = true;         // params changed, re-render due
+	// Coalescer: dragging an EQ slider fires a state push per pixel; a full
+	// chain pass over ~2.5 M samples per push would pin the GUI thread.
+	QTimer            *m_fxRenderTimer = nullptr;
 
 	QTimer        *m_loadTimer = nullptr;
 	QElapsedTimer  m_loadElapsed;

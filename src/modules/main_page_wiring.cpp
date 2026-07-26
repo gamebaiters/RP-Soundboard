@@ -19,6 +19,7 @@
 #include "export_progress_dialog.h"
 #include "vinyl_popup.h"
 #include "stream_resolver.h"
+#include "channel_sandbox_dialog.h"   // SandboxModules (global stage mask)
 
 #include "../ConfigModel.h"
 #include "../samples.h"
@@ -136,16 +137,35 @@ static void reapTempChannelsFromTail(MainPage *page, Sampler *sampler)
         if (last < 0) break;
         Channel *ch = page->channelAt(last);
         if (!ch) break;
-        if (!ch->property("infinityAuto").toBool()) break;
+        // Two kinds of tail candidate: an auto-spawned channel that finished
+        // playing, and a channel the USER closed while siblings above it were
+        // still playing (see the removeChannelRequested handler - closing a
+        // middle channel cannot shift the ones above without killing their
+        // audio, so the widget is parked hidden until it reaches the tail).
+        const bool autoSpawn = ch->property("infinityAuto").toBool();
+        const bool deferred  = ch->property("deferredRemove").toBool();
+        if (!autoSpawn && !deferred) break;
         if (!ch->property("infinityDone").toBool()) break;
         if (sampler && sampler->getState(last) != Sampler::eSILENT) break;
         ch->setProperty("infinityAuto", false);
         ch->setProperty("infinityDone", false);
+        // Cleared BEFORE requestRemove: at the tail there is nothing above to
+        // protect, so the handler must take the normal (immediate) path.
+        ch->setProperty("deferredRemove", false);
         // Full cleanup path (stops the slot, drops bookkeeping, removes
         // the widget). Synchronous - the loop reaps the next tail.
         ch->requestRemove();
         if (page->channels().size() - 1 == last) break;   // removal failed
     }
+}
+
+// A channel parked for deferred removal is hidden and on its way out: it
+// must never be picked as the target of a new playback, or the sound would
+// land on a widget the user cannot see.
+static bool channelAcceptsPlayback(MainPage *page, int idx)
+{
+    Channel *c = page->channelAt(idx);
+    return c && !c->property("deferredRemove").toBool();
 }
 
 // --- URL / YouTube live-stream per-slot state (v2.3.1) --------------------
@@ -904,6 +924,7 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     w->setShowStopAllButton   (model->getShowStopAllButton());
     w->setShowAddChannelButton(model->getShowAddChannelButton());
     w->setShowMuteChecks      (model->getShowMuteChecks());
+    w->setShowVoiceIndicator  (model->getShowVoiceIndicator());
     w->setShowProfileButtons  (model->getShowProfileButtons());
     w->setShowGridSizeSelectors(model->getShowGridSizeSelectors());
     w->setVerticalMeter       (model->getVerticalMeter());
@@ -933,25 +954,11 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     // Sandbox module kill switch: restore the persisted mask into the
     // static SlotDsp mask (audio side) + the Settings checkboxes.
     {
-        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
-        quint32 mask = st.value(QStringLiteral("sandbox_modules/mask"),
-                                0xFFFFFFFFu).toUInt();
-        // VERSIONED mask: a mask saved before newer DspStages were appended
-        // has ZERO bits for them, which silently hard-disabled every new
-        // module (VoiceFx/autotune, Gate, DynEq, ...) no matter what the
-        // sandbox UI said — THE "the new effects do nothing" bug. Bits for
-        // stages that did not exist when the mask was written default to ON.
-        // mask_stages records the Stage_COUNT at write time; legacy masks
-        // (no key) are assumed to predate the first append wave (14 stages).
-        int maskStages = st.value(QStringLiteral("sandbox_modules/mask_stages"),
-                                  14).toInt();
-        if (maskStages < 1) maskStages = 14;
-        for (int stg = maskStages; stg < SandboxState::Stage_COUNT; ++stg)
-            mask |= (1u << stg);
-        mask |= 1u;   // Paulstretch's pipeline slot is structural - keep it on
-        for (int stg = 0; stg < SandboxState::Stage_COUNT; ++stg)
-            SlotDsp::setGlobalStageEnabled(stg, (mask >> stg) & 1u);
-        w->setSandboxModuleMask(SlotDsp::globalStageMask());
+        // Versioned restore + persistence live in SandboxModules so the
+        // Settings checkboxes and the sandbox dialog's Modules popup can
+        // never write a mask the other one would misread.
+        SandboxModules::loadIntoDsp();
+        w->setSandboxModuleMask(SandboxModules::mask());
     }
     // Push initial toolbar / channel visibility so the page reflects
     // saved settings right after wiring (no need for user to re-toggle).
@@ -960,6 +967,7 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     if (page->addChannelBtn()) page->addChannelBtn()->setVisible(
         model->getShowAddChannelButton() && !model->getMultiChannelInfinity());
     page->setMuteChecksVisible(model->getShowMuteChecks());
+    page->setVoiceIndicatorVisible(model->getShowVoiceIndicator());
     page->setProfileButtonsVisible(model->getShowProfileButtons());
     page->setGridSizeVisible(model->getShowGridSizeSelectors());
     page->setMicFxFeatureVisible(model->getMicFxFeatureEnabled());
@@ -1387,6 +1395,10 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         if (page->addChannelBtn()) page->addChannelBtn()->setVisible(
             v && !model->getMultiChannelInfinity());
     });
+    QObject::connect(w, &SettingsWindow::showVoiceIndicatorChanged, [model, page](bool v){
+        model->setShowVoiceIndicator(v);
+        page->setVoiceIndicatorVisible(v);
+    });
     QObject::connect(w, &SettingsWindow::showMuteChecksChanged, [model, page](bool v){
         model->setShowMuteChecks(v);
         page->setMuteChecksVisible(v);
@@ -1466,17 +1478,11 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         model->setDuckAmountPercent(v);
         sb_setVoiceBehaviour(model->getVadWhilePlaying(), model->getDuckWhenTalking(), v / 100.0f);
     });
+    QObject::connect(w, &SettingsWindow::resetLayoutProportionsRequested, [page]{
+        page->resetLayoutProportions();
+    });
     QObject::connect(w, &SettingsWindow::sandboxModuleToggled, [](int stage, bool on){
-        // Paulstretch's slot is structural (pinned pipeline index 0);
-        // it can be disabled like the rest but never breaks anything.
-        SlotDsp::setGlobalStageEnabled(stage, on);
-        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
-        st.setValue(QStringLiteral("sandbox_modules/mask"),
-                    SlotDsp::globalStageMask());
-        // Stamp the stage count so a future stage append can tell which
-        // bits this mask actually covers (see the versioned read at init).
-        st.setValue(QStringLiteral("sandbox_modules/mask_stages"),
-                    (int)SandboxState::Stage_COUNT);
+        SandboxModules::setStageEnabled(stage, on);
         // Open sandbox dialogs pick the change up on their next show
         // (ChannelSandboxDialog::showEvent -> refreshModuleVisibility);
         // the audio-side bypass is instant via the static mask.
@@ -1557,7 +1563,8 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 newCh->setMeterVertical(model->getVerticalMeter());
             }
         } else if (infinity) {
-            if (sampler->getState(0) == Sampler::eSILENT) {
+            if (sampler->getState(0) == Sampler::eSILENT
+                && channelAcceptsPlayback(page, 0)) {
                 slot = 0;
             } else {
                 Channel *newCh = page->addChannel();
@@ -1578,9 +1585,17 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
             static int s_rr = 0;
             for (int i = 0; i < n0; ++i) {
                 int s = i;
-                if (sampler->getState(s) == Sampler::eSILENT) { slot = s; break; }
+                if (sampler->getState(s) == Sampler::eSILENT
+                    && channelAcceptsPlayback(page, s)) { slot = s; break; }
             }
-            if (slot < 0) { slot = s_rr % n0; }
+            if (slot < 0) {
+                // Round robin, skipping anything parked for removal.
+                for (int i = 0; i < n0; ++i) {
+                    int s = (s_rr + i) % n0;
+                    if (channelAcceptsPlayback(page, s)) { slot = s; break; }
+                }
+                if (slot < 0) slot = s_rr % n0;
+            }
             s_rr = (slot + 1) % n0;
         }
         const int n = page->channels().size();
@@ -2360,6 +2375,42 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             }
             if (idx < 0) return;
             const int oldCount = page->channels().size();
+
+            // Is anything ABOVE this channel still playing? Removing a
+            // non-tail channel renumbers every widget above it while their
+            // audio stays on the old positional slot, so the shift path below
+            // has to stop those slots. For per-button temporary channels
+            // (which always spawn at the tail) that meant closing the FIRST
+            // one stopped every later one - and each forced stop fed the
+            // auto-reaper, so they ALL disappeared. That is the
+            // "chiudo quello in alto e si chiudono tutti" bug.
+            //
+            // When something above is playing we do not shift at all: stop
+            // ONLY this channel's slot, park the widget hidden, and let the
+            // tail reaper collect it once it is genuinely the last one.
+            bool playingAbove = false;
+            if (sampler) {
+                for (int s = idx + 1; s < oldCount; ++s) {
+                    if (sampler->getState(s) != Sampler::eSILENT
+                        && sampler->getState(s) != Sampler::ePLAYING_PREVIEW) {
+                        playingAbove = true;
+                        break;
+                    }
+                }
+            }
+            if (playingAbove) {
+                if (sampler) sampler->stopPlayback(idx);
+                s_slotToBtnIdx.remove(idx);
+                s_lastPlayedCtx.remove(idx);
+                Channel *dying = page->channels().at(idx);
+                dying->setProperty("deferredRemove", true);
+                dying->setProperty("infinityDone", true);
+                dying->hide();
+                QTimer::singleShot(0, page, [page, sampler]{
+                    reapTempChannelsFromTail(page, sampler);
+                });
+                return;
+            }
             // Sampler slots are POSITIONAL: removing a middle channel
             // shifts every following channel widget down by one, but
             // audio playing on slot j > idx would stay on slot j and

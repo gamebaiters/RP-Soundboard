@@ -89,6 +89,8 @@ set(sources
 	src/modules/button_grid.cpp
 	src/modules/button_advanced_panel.h
 	src/modules/button_advanced_panel.cpp
+	src/modules/section_box.h
+	src/modules/section_box.cpp
 	src/modules/settings_window.h
 	src/modules/settings_window.cpp
 	src/modules/config_io.h

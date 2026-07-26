@@ -121,6 +121,7 @@ public slots:
     void setWaveAnimStyle(int speed, int intensity);
     void setShowAddChannelButton(bool on);
     void setShowMuteChecks(bool on);
+    void setShowVoiceIndicator(bool on);
     void setShowProfileButtons(bool on);
     void setShowGridSizeSelectors(bool on);
     void setVadWhilePlaying(bool on);
@@ -189,6 +190,7 @@ signals:
     void waveAnimStyleChanged(int speed, int intensity);
     void showAddChannelButtonChanged(bool);
     void showMuteChecksChanged(bool);
+    void showVoiceIndicatorChanged(bool);
     void showProfileButtonsChanged(bool);
     void showGridSizeSelectorsChanged(bool);
     void multiChannelInfinityChanged(bool);
@@ -224,6 +226,16 @@ signals:
     void resetAllFxChanged(bool);
     void resetAllFilesChanged(bool);
     void resetAllSandboxChanged(bool);
+    // Settings > Channels > Layout: put the grid / channels divider back to
+    // the factory split. MainPage owns the splitter, so this is a request.
+    void resetLayoutProportionsRequested();
+
+protected:
+    // The sandbox dialog now carries its own module kill-switch popup, so
+    // this window's checkboxes can be stale by the time it is reopened.
+    // Re-read the global mask on every show instead of trusting the last
+    // push from the wiring.
+    void showEvent(class QShowEvent *e) override;
 
 private:
     QCheckBox   *m_earrape;
@@ -244,6 +256,7 @@ private:
     QCheckBox   *m_meterVisible   = nullptr;
     QCheckBox   *m_exportEnabled  = nullptr;
     QPushButton *m_resetAllSandboxBtn = nullptr;
+    QPushButton *m_resetProportionsBtn = nullptr;
     class QComboBox *m_profileCombo;
     QPushButton *m_profileExport;
     QPushButton *m_profileImport;
@@ -306,6 +319,7 @@ private:
     class QLabel  *m_waveAnimIntensityLabel = nullptr;
     QCheckBox   *m_showAddChannel       = nullptr;
     QCheckBox   *m_showMuteChecks       = nullptr;
+    QCheckBox   *m_showVoiceIndicator   = nullptr;
     QCheckBox   *m_showProfiles         = nullptr;
     QCheckBox   *m_showGridSize         = nullptr;
     QCheckBox   *m_vadWhilePlaying      = nullptr;

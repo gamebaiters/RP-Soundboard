@@ -8,6 +8,7 @@
 #include "../samples.h"
 #include "../main.h"
 #include "channel_sandbox_dialog.h"
+#include "section_box.h"
 
 #include <QJsonDocument>
 
@@ -28,6 +29,9 @@
 #include <QFrame>
 #include <QTimer>
 #include <QCloseEvent>
+#include <QScrollArea>
+#include <QScreen>
+#include <QGuiApplication>
 #include <cmath>
 
 ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
@@ -64,8 +68,16 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     setWindowTitle(tr("Button Options"));
     setModal(false);
     setProperty("isGBSoundboard", true);
-    resize(640, 800);
+    // NEVER taller than the screen: the dialog used to open at a fixed
+    // 800 px, which on a 1080p screen with the TS3 window decorations put
+    // the OK / Cancel row below the desktop edge - the user could not
+    // confirm his edits at all. The sections scroll instead.
+    int maxH = 800;
+    if (QScreen *scr = QGuiApplication::primaryScreen())
+        maxH = qMin(maxH, qMax(360, scr->availableGeometry().height() - 120));
+    resize(640, maxH);
     setMinimumWidth(560);
+    setMinimumHeight(320);
 
     m_volume->setRange(-30, 30);
     m_volume->setSingleStep(1);
@@ -81,9 +93,9 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     m_cropStopMode->addItems({tr("after"), tr("at")});
 
     // File group: path + browse on top, waveform preview below + Preview button
-    m_fileBox = new QGroupBox(tr("Sound file"), this);
+    m_fileBox = new SectionBox(tr("Sound file"), this);
     auto *fileBox = m_fileBox;
-    auto *fileLay = new QVBoxLayout(fileBox);
+    auto *fileLay = new QVBoxLayout;
     auto *pathRow = new QHBoxLayout;
     pathRow->addWidget(m_filePath, 1);
     pathRow->addWidget(m_browse);
@@ -93,7 +105,7 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     fileLay->addWidget(m_soundView);
     // Stream/playlist explainer — replaces waveform + preview when the cell
     // holds a link instead of a local file. Hidden by default.
-    m_streamInfo = new QLabel(fileBox);
+    m_streamInfo = new QLabel(fileBox->body());
     m_streamInfo->setWordWrap(true);
     m_streamInfo->setTextFormat(Qt::RichText);
     m_streamInfo->setVisible(false);
@@ -107,9 +119,10 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     m_previewTimeLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     previewRow->addWidget(m_previewTimeLabel);
     fileLay->addLayout(previewRow);
+    m_fileBox->setContentLayout(fileLay);
 
-    auto *displayBox = new QGroupBox(tr("Display"), this);
-    auto *dispForm = new QFormLayout(displayBox);
+    auto *displayBox = new SectionBox(tr("Display"), this);
+    auto *dispForm = new QFormLayout;
     dispForm->addRow(tr("Custom text"), m_customText);
     // Swatch sits between the checkbox and Pick button so the user always
     // sees the active color at a glance, even before reopening the dialog.
@@ -132,21 +145,23 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     imgRow->addWidget(m_imageBrowse);
     imgRow->addWidget(m_imageClear);
     dispForm->addRow(tr("Image"), imgRow);
+    displayBox->setContentLayout(dispForm);
 
-    m_volBox = new QGroupBox(tr("Volume modifier"), this);
+    m_volBox = new SectionBox(tr("Volume modifier"), this);
     auto *volBox = m_volBox;
-    auto *volLay = new QHBoxLayout(volBox);
+    auto *volLay = new QHBoxLayout;
     volLay->addWidget(m_volume, 1);
     volLay->addWidget(m_volumeLabel);
+    m_volBox->setContentLayout(volLay);
 
     // Crop group is checkable - the title bar's checkbox toggles whether
     // crop applies at playback/preview. Qt auto-disables (grays out) all
     // children when the group is unchecked, so the user gets visual
     // confirmation that moving the spin boxes won't have any effect.
-    m_cropGroup = new QGroupBox(tr("Crop"), this);
+    m_cropGroup = new SectionBox(tr("Crop"), this);
     m_cropGroup->setCheckable(true);
     m_cropGroup->setChecked(false);
-    auto *cropLay = new QFormLayout(m_cropGroup);
+    auto *cropLay = new QFormLayout;
     auto *startRow = new QHBoxLayout;
     startRow->addWidget(m_cropStart);
     startRow->addWidget(m_cropStartUnit);
@@ -156,33 +171,36 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     stopRow->addWidget(m_cropStop);
     stopRow->addWidget(m_cropStopUnit);
     cropLay->addRow(tr("Stop"), stopRow);
+    m_cropGroup->setContentLayout(cropLay);
 
     // FX group is checkable - per-button custom FX are written to disk
     // regardless (so the user's last sliders are remembered when they
     // toggle the group back on), but they are ONLY applied to playback /
     // preview when the group is checked. When unchecked, the channel's
     // current FX are used and persist between soundboards.
-    m_fxGroup = new QGroupBox(tr("Custom FX (override channel)"), this);
+    m_fxGroup = new SectionBox(tr("Custom FX (override channel)"), this);
     m_fxGroup->setCheckable(true);
     m_fxGroup->setChecked(false);
-    auto *fxLay = new QVBoxLayout(m_fxGroup);
+    auto *fxLay = new QVBoxLayout;
     fxLay->addWidget(m_fx);
-    m_reverseChk = new QCheckBox(tr("Reverse playback"), m_fxGroup);
+    m_reverseChk = new QCheckBox(tr("Reverse playback"), m_fxGroup->body());
     m_reverseChk->setToolTip(tr(
         "Play the sample back-to-front. Best on short cells; very long\n"
         "files use more memory."));
     fxLay->addWidget(m_reverseChk);
-    m_normalizeChk = new QCheckBox(tr("Auto-normalize loudness (EBU R128)"), m_fxGroup);
+    m_normalizeChk = new QCheckBox(tr("Auto-normalize loudness (EBU R128)"),
+                                   m_fxGroup->body());
     m_normalizeChk->setToolTip(tr(
         "Bring the cell to a consistent loudness so loud samples don't\n"
         "drown quiet ones."));
     fxLay->addWidget(m_normalizeChk);
+    m_fxGroup->setContentLayout(fxLay);
 
     // Channel behaviour: temporary-channel flag + per-button sandbox.
-    m_chanBox = new QGroupBox(tr("Channel"), this);
-    auto *chanLay = new QVBoxLayout(m_chanBox);
+    m_chanBox = new SectionBox(tr("Channel"), this);
+    auto *chanLay = new QVBoxLayout;
     m_tempChannelChk = new QCheckBox(
-        tr("Always play in a temporary channel"), m_chanBox);
+        tr("Always play in a temporary channel"), m_chanBox->body());
     m_tempChannelChk->setToolTip(tr(
         "Every click spawns a fresh throw-away channel (glowing border)\n"
         "just for this playback - click as many times as you want, the\n"
@@ -191,18 +209,19 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     chanLay->addWidget(m_tempChannelChk);
     auto *sbxRow = new QHBoxLayout;
     m_sandboxRememberChk = new QCheckBox(
-        tr("Apply a saved Audio Sandbox"), m_chanBox);
+        tr("Apply a saved Audio Sandbox"), m_chanBox->body());
     m_sandboxRememberChk->setToolTip(tr(
         "Push a full Audio Sandbox setup (EQ, spatial, all 21 DSP\n"
         "stages) onto whatever channel this button plays into -\n"
         "like the FX override, but for the whole sandbox."));
     sbxRow->addWidget(m_sandboxRememberChk);
-    m_sandboxEditBtn = new QPushButton(tr("Edit sandbox…"), m_chanBox);
+    m_sandboxEditBtn = new QPushButton(tr("Edit sandbox…"), m_chanBox->body());
     m_sandboxEditBtn->setToolTip(tr(
         "Open the Audio Sandbox editor for this button's saved setup."));
     sbxRow->addWidget(m_sandboxEditBtn);
     sbxRow->addStretch(1);
     chanLay->addLayout(sbxRow);
+    m_chanBox->setContentLayout(chanLay);
     connect(m_sandboxEditBtn, &QPushButton::clicked, this, [this]{
         if (!m_sandboxDlg) {
             m_sandboxDlg = new ChannelSandboxDialog(0, this);
@@ -239,26 +258,56 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
         m_sandboxDlg->activateWindow();
     });
 
-    auto *hotkeyBox = new QGroupBox(tr("Hotkey"), this);
-    auto *hotkeyLay = new QHBoxLayout(hotkeyBox);
+    auto *hotkeyBox = new SectionBox(tr("Hotkey"), this);
+    auto *hotkeyLay = new QHBoxLayout;
     hotkeyLay->addWidget(m_hotkeyBtn);
     hotkeyLay->addWidget(m_hotkeyReset);
     hotkeyLay->addStretch(1);
+    hotkeyBox->setContentLayout(hotkeyLay);
 
     auto *btnRow = new QHBoxLayout;
     btnRow->addStretch(1);
     btnRow->addWidget(m_ok);
     btnRow->addWidget(m_cancel);
 
+    // Everything above OK / Cancel scrolls. The button row is OUTSIDE the
+    // scroll area on purpose: it must stay reachable no matter how many
+    // sections are open or how short the window is - that was the whole
+    // complaint ("the dialog is so big I cannot click OK").
+    auto *sectionsHost = new QWidget(this);
+    auto *sections = new QVBoxLayout(sectionsHost);
+    sections->setContentsMargins(0, 0, 0, 0);
+    sections->setSpacing(6);
+    sections->addWidget(fileBox);
+    sections->addWidget(displayBox);
+    sections->addWidget(volBox);
+    sections->addWidget(m_cropGroup);
+    sections->addWidget(m_fxGroup);
+    sections->addWidget(m_chanBox);
+    sections->addWidget(hotkeyBox);
+    sections->addStretch(1);
+
+    auto *scroll = new QScrollArea(this);
+    scroll->setWidget(sectionsHost);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+
     auto *root = new QVBoxLayout(this);
-    root->addWidget(fileBox);
-    root->addWidget(displayBox);
-    root->addWidget(volBox);
-    root->addWidget(m_cropGroup);
-    root->addWidget(m_fxGroup);
-    root->addWidget(m_chanBox);
-    root->addWidget(hotkeyBox);
+    root->addWidget(scroll, 1);
     root->addLayout(btnRow);
+
+    // Fold state is remembered per section, so the layout the user settled
+    // on survives closing the dialog. Sound file + Display start open (the
+    // two you always touch), the rest follow whatever was saved.
+    fileBox    ->setPersistenceKey(QStringLiteral("btnopt_file"));
+    displayBox ->setPersistenceKey(QStringLiteral("btnopt_display"));
+    volBox     ->setPersistenceKey(QStringLiteral("btnopt_volume"));
+    m_cropGroup->setPersistenceKey(QStringLiteral("btnopt_crop"));
+    m_fxGroup  ->setPersistenceKey(QStringLiteral("btnopt_fx"));
+    m_chanBox  ->setPersistenceKey(QStringLiteral("btnopt_channel"));
+    hotkeyBox  ->setPersistenceKey(QStringLiteral("btnopt_hotkey"));
 
     connect(m_browse,    &QPushButton::clicked, this, &ButtonAdvancedPanel::onBrowse);
     connect(m_pickColor, &QPushButton::clicked, this, &ButtonAdvancedPanel::onPickColor);
@@ -295,7 +344,7 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
         sampler->seek(target, m_previewSlot);
     });
     connect(m_filePath,  &QLineEdit::textChanged, this, [this](const QString &){ refreshSoundView(); });
-    connect(m_cropGroup,      &QGroupBox::toggled, this, [this](bool){ refreshSoundView(); });
+    connect(m_cropGroup,      &SectionBox::toggled, this, [this](bool){ refreshSoundView(); });
     connect(m_cropStart,      QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int){ refreshSoundView(); });
     connect(m_cropStop,       QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int){ refreshSoundView(); });
     connect(m_cropStartUnit,  QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int){ refreshSoundView(); });
@@ -315,8 +364,8 @@ ButtonAdvancedPanel::ButtonAdvancedPanel(QWidget *parent)
     // Toggling the Custom FX group during preview is ambiguous (slot
     // already opened with the previous flag) - safest is to stop the
     // preview so the user can restart it under the new FX semantics.
-    connect(m_fxGroup,  &QGroupBox::toggled, this, [this](bool){ stopPreview(); });
-    connect(m_cropGroup, &QGroupBox::toggled, this, [this](bool){ stopPreview(); });
+    connect(m_fxGroup,  &SectionBox::toggled, this, [this](bool){ stopPreview(); });
+    connect(m_cropGroup, &SectionBox::toggled, this, [this](bool){ stopPreview(); });
 }
 
 void ButtonAdvancedPanel::setSoundInfo(const SoundInfo &info) {

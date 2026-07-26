@@ -238,6 +238,8 @@ public:
 	void setShowAddChannelButton(bool on);
 	inline bool getShowMuteChecks() const { return m_showMuteChecks; }
 	void setShowMuteChecks(bool on);
+	inline bool getShowVoiceIndicator() const { return m_showVoiceIndicator; }
+	void setShowVoiceIndicator(bool on);
 	inline bool getShowProfileButtons() const { return m_showProfileButtons; }
 	void setShowProfileButtons(bool on);
 	inline bool getShowGridSizeSelectors() const { return m_showGridSizeSelectors; }
@@ -398,6 +400,7 @@ private:
 	bool m_showStopAllButton    = true;
 	bool m_showAddChannelButton = true;
 	bool m_showMuteChecks       = true;
+	bool m_showVoiceIndicator   = true;
 	bool m_showProfileButtons   = true;
 	bool m_showGridSizeSelectors= true;
 	bool m_verticalMeter        = false;

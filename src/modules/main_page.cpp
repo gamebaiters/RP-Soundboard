@@ -16,11 +16,13 @@
 #include "theme.h"
 #include "../ConfigModel.h"   // flushPendingWrite() on window close/hide
 #include "../PlatformStyle.h" // macOS: Fusion base style for QSS fidelity
+#include "../main.h"          // sb_isSelfTalking() for the talk indicator
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QScrollArea>
 #include <QSplitter>
+#include <QSplitterHandle>
 #include <algorithm>
 #include <QToolButton>
 #include <QPushButton>
@@ -37,7 +39,152 @@
 #include <QElapsedTimer>
 #include <QShowEvent>
 #include <QSettings>
+#include <QPainter>
 #include <cmath>
+
+// Own-voice indicator for the bottom bar: LED + "Voice" caption.
+//
+// It answers ONE question - is my own voice reaching the server right now -
+// and it is deliberately NOT TS3's raw talk status: while the soundboard
+// plays, the plugin forces continuous transmission, so that status is lit
+// even in dead silence. The audio side runs a real VAD on the captured mic
+// block (sb_isMicVoiceDetected) and separately reports whether that voice
+// survives the mute checkboxes and TS3's own gate (sb_isMicVoicePassing).
+//
+// Three states:
+//   idle   - grey  : no voice detected on the microphone
+//   held   - amber : voice detected but BLOCKED (mute-myself during
+//                    playback, or TS3 is not transmitting: PTT up / below
+//                    the client's VAD threshold)
+//   live   - green : voice detected AND leaving for the server
+//
+// Painted, never QSS, so it follows Theme::colors() and cannot inherit the
+// TS3 host palette.
+class TalkStateDot : public QWidget {
+public:
+    explicit TalkStateDot(QWidget *parent = nullptr) : QWidget(parent) {
+        setFixedHeight(22);
+        m_caption = MainPage::tr("Voice");
+        setMinimumWidth(sizeHint().width());
+        refreshTooltip();
+    }
+    QSize sizeHint() const override {
+        return QSize(kDotBox + 4 + fontMetrics().horizontalAdvance(m_caption), 22);
+    }
+    void setVoiceState(bool detected, bool passing) {
+        if (m_detected == detected && m_passing == passing) return;
+        m_detected = detected;
+        m_passing  = passing;
+        refreshTooltip();
+        update();
+    }
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        const Theme::Derived &d = Theme::derivedCached();
+        // Green / amber are semantic (go / held), same language as the link
+        // and warning controls elsewhere in the bar.
+        const QColor live(0x3f, 0xb9, 0x50);
+        const QColor held(0xe6, 0xa8, 0x3c);
+        QColor fill, text;
+        if (m_detected && m_passing)  { fill = live; text = live; }
+        else if (m_detected)          { fill = held; text = held; }
+        else                          { fill = d.disabledSurface; text = d.textMuted; }
+
+        // The box is exactly as wide as the halo, and the halo is centred in
+        // it: no dead padding on either side, so the LED sits at the normal
+        // layout spacing from its neighbours like every other widget on the
+        // bar. (Two earlier versions got this wrong in both directions: a
+        // halo painted at x=-1 that the mic-FX button clipped, then a box
+        // with 4 px of slack that opened a visible hole.)
+        const qreal cy = height() / 2.0;
+        const qreal r  = 6.0;
+        const qreal cx = kDotBox / 2.0;
+        // Halo while live so the state reads from the corner of the eye
+        // without any animation.
+        if (m_detected) {
+            QColor halo = fill;
+            halo.setAlpha(70);
+            p.setPen(Qt::NoPen);
+            p.setBrush(halo);
+            p.drawEllipse(QPointF(cx, cy), kHaloR, kHaloR);
+        }
+        p.setPen(QPen(m_detected ? fill.darker(170) : d.border, 1.0));
+        p.setBrush(fill);
+        p.drawEllipse(QPointF(cx, cy), r, r);
+
+        p.setPen(text);
+        p.drawText(QRect(kDotBox + 4, 0, width() - kDotBox - 4, height()),
+                   Qt::AlignLeft | Qt::AlignVCenter, m_caption);
+    }
+private:
+    static constexpr qreal kHaloR  = 8.0;   // halo radius (dot r = 6)
+    static const int       kDotBox = 16;    // = 2 * kHaloR, no slack
+    void refreshTooltip() {
+        // MainPage context so the string sits with the rest of the bottom bar.
+        QString state = m_detected
+            ? (m_passing
+                ? MainPage::tr("Your voice is being detected AND sent to the server.")
+                : MainPage::tr("Your voice is detected but is NOT reaching the "
+                               "server (muted during playback, or TeamSpeak is "
+                               "not transmitting)."))
+            : MainPage::tr("No voice detected on your microphone.");
+        setToolTip(state + QStringLiteral("\n\n") + MainPage::tr(
+            "Green = heard by the others. Amber = you are talking but nothing "
+            "goes out. Grey = silence.\n"
+            "Based on the microphone signal itself, not on the soundboard: "
+            "playing a sound does not light it up."));
+    }
+    QString m_caption;
+    bool m_detected = false;
+    bool m_passing  = false;
+};
+
+// Divider between the sound-button grid and the channels pane.
+//
+// This used to be a QSS rule on QSplitter::handle (transparent background +
+// border-top + a margin meant to centre it). Two attempts at tuning that
+// margin still left the rule sitting against the button grid instead of in
+// the middle of the gap - the stylesheet style does not place a sub-control
+// border where the box model says it should. Painting the handle ourselves
+// removes the guesswork: the line is at height()/2, full stop.
+class CenteredSplitterHandle : public QSplitterHandle {
+public:
+    CenteredSplitterHandle(Qt::Orientation o, QSplitter *parent)
+        : QSplitterHandle(o, parent) {
+        setAttribute(Qt::WA_Hover, true);   // hover highlight without a filter
+    }
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter p(this);
+        const Theme::Derived &d = Theme::derivedCached();
+        p.setPen(QPen(underMouse() ? d.accent : d.border, 1));
+        if (orientation() == Qt::Horizontal) {
+            const int x = width() / 2;
+            p.drawLine(x, 0, x, height());
+        } else {
+            const int y = height() / 2;
+            p.drawLine(0, y, width(), y);
+        }
+    }
+};
+
+class DividerSplitter : public QSplitter {
+public:
+    DividerSplitter(Qt::Orientation o, QWidget *parent)
+        : QSplitter(o, parent) {}
+protected:
+    QSplitterHandle *createHandle() override {
+        return new CenteredSplitterHandle(orientation(), this);
+    }
+};
+
+// Factory split between the button grid and the channels pane. Retuned
+// after the channel row lost ~30 px of height: the old 640/220 left the
+// channels pane visibly padded out. Also the target of the Settings
+// "restore default proportions" button.
+static const QList<int> kDefaultSplit = { 700, 170 };
 
 MainPage::MainPage(QWidget *parent)
     : QWidget(parent)
@@ -49,10 +196,16 @@ MainPage::MainPage(QWidget *parent)
     , m_reset(new ResetChannelsBtn(this))
     , m_settingsBtn(new QToolButton(this))
     , m_settings(new SettingsWindow(this))
-    , m_muteLocally(new QCheckBox(tr("Mute on my client"), this))
-    , m_muteMyself(new QCheckBox(tr("Mute myself during playback"), this))
-    , m_previewOnly(new QCheckBox(tr("Preview only (server hears nothing)"), this))
-    , m_addChannelBtn(new QPushButton(tr("+ Add channel"), this))
+    // Bottom-bar labels are SHORT *and* say what the switch DOES, in terms
+    // of who ends up hearing the soundboard. "Mute here" / "Mute mic" were
+    // short but told you nothing. The two audience switches are deliberately
+    // symmetric - "Only for others" (not on my speakers) vs "Only for me"
+    // (server hears nothing) - and the mic one names its own action. Full
+    // sentences live in the tooltips.
+    , m_muteLocally(new QCheckBox(tr("Only for others"), this))
+    , m_muteMyself(new QCheckBox(tr("Auto-mute my mic"), this))
+    , m_previewOnly(new QCheckBox(tr("Only for me"), this))
+    , m_addChannelBtn(new QPushButton(tr("+ Channel"), this))
     , m_pauseAllBtn(new QPushButton(tr("Pause all"), this))
     , m_stopAllBtn(new QPushButton(tr("Stop all"), this))
 {
@@ -88,7 +241,7 @@ MainPage::MainPage(QWidget *parent)
     m_channelsScroll->setWidgetResizable(true);
     m_channelsScroll->setFrameShape(QFrame::NoFrame);
     m_channelsScroll->setWidget(m_channelsHost);
-    m_channelsScroll->setMinimumHeight(130);
+    m_channelsScroll->setMinimumHeight(128);
     // Max height is set dynamically by updateChannelsAreaHeight so a
     // single channel always fits without triggering the vertical
     // scrollbar (one channel + waveform + sandbox btn + meter still
@@ -118,9 +271,11 @@ MainPage::MainPage(QWidget *parent)
     m_pauseAllBtn->setToolTip(tr("Pause every channel at once. Click again to resume."));
     m_stopAllBtn->setToolTip(tr("Stop playback on every channel immediately."));
     m_muteLocally->setToolTip(tr(
+        "Mute on my client.\n"
         "Stop the soundboard from playing through your own speakers.\n"
         "Other people on the server still hear it normally."));
     m_muteMyself->setToolTip(tr(
+        "Mute myself during playback.\n"
         "Mute your microphone automatically while a sound is playing,\n"
         "so your own voice is not mixed on top of the soundboard audio."));
 
@@ -208,10 +363,16 @@ MainPage::MainPage(QWidget *parent)
     bottom->addWidget(m_pauseAllBtn);
     bottom->addWidget(m_stopAllBtn);
     bottom->addWidget(m_restoreMacroBtn);
-    bottom->addSpacing(16);
+    // Voice LED first in the "who can hear me" group, then the three mutes.
+    // NO extra spacing before it: the widget already hugs its own halo, and
+    // an addSpacing() here left a lopsided hole between the mic-FX button
+    // and the LED that made the whole bar look misaligned.
+    m_talkDot = new TalkStateDot(this);
+    bottom->addWidget(m_talkDot, 0, Qt::AlignVCenter);
     bottom->addWidget(m_muteLocally);
     bottom->addWidget(m_muteMyself);
     m_previewOnly->setToolTip(tr(
+        "Preview only — the server hears nothing.\n"
         "Mute the soundboard on the server while still hearing it locally.\n"
         "Useful to test a sound or check timing before playing it for\n"
         "everyone in voice."));
@@ -299,10 +460,12 @@ MainPage::MainPage(QWidget *parent)
     // Grid | channels divider: a real QSplitter, so the bar between
     // the sound buttons and the channels area is DRAGGABLE - the user
     // decides how much height each pane gets. Position persists.
-    m_splitter = new QSplitter(Qt::Vertical, this);
+    m_splitter = new DividerSplitter(Qt::Vertical, this);
     m_splitter->setObjectName(QStringLiteral("gridChannelsSplitter"));
     m_splitter->setChildrenCollapsible(false);
-    m_splitter->setHandleWidth(5);
+    // Odd width so the self-painted 1 px rule lands on a whole pixel with
+    // equal air above and below; also a comfortable grab area.
+    m_splitter->setHandleWidth(13);
     m_splitter->addWidget(m_grid);
     m_splitter->addWidget(m_channelsScroll);
     m_splitter->setStretchFactor(0, 1);   // extra space goes to the grid
@@ -318,14 +481,23 @@ MainPage::MainPage(QWidget *parent)
         if (!state.isEmpty())
             m_splitter->restoreState(state);
         else
-            m_splitter->setSizes({ 640, 220 });
+            m_splitter->setSizes(kDefaultSplit);
     }
+
+    // Hard rule between the whole grid+channels box and the global controls
+    // underneath, so it reads as "everything above is the soundboard, this
+    // strip drives it" instead of one continuous pile of widgets.
+    m_bottomSeparator = new QFrame(this);
+    m_bottomSeparator->setObjectName(QStringLiteral("bottomBarSeparator"));
+    m_bottomSeparator->setFixedHeight(1);
+    m_bottomSeparator->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(8, 6, 8, 6);
     root->setSpacing(6);
     root->addWidget(m_search);
     root->addWidget(m_splitter, 1);
+    root->addWidget(m_bottomSeparator);
     root->addWidget(m_bottomBar);
 
     // Disconnected overlay covers the whole window when no TS3 server.
@@ -351,6 +523,18 @@ MainPage::MainPage(QWidget *parent)
     // has already been shown once before.
     (new OnboardingOverlay(this))->showIfFirstRun();
 
+    // Voice LED poll. The capture thread writes atomics; touching widgets
+    // from there is forbidden, so the GUI samples them. 20 Hz keeps the LED
+    // in step with speech onsets, and the repaint only happens on an actual
+    // state change.
+    m_talkPollTimer = new QTimer(this);
+    m_talkPollTimer->setInterval(50);
+    connect(m_talkPollTimer, &QTimer::timeout, this, [this]{
+        if (!m_talkDot || !m_talkDot->isVisible()) return;
+        m_talkDot->setVoiceState(sb_isMicVoiceDetected(), sb_isMicVoicePassing());
+    });
+    m_talkPollTimer->start();
+
     // macOS: Fusion base style on the whole tree (and every widget
     // added later) so dark_style.qss renders with sane metrics. No-op
     // on Windows/Linux; the TS3 host style is never touched.
@@ -364,6 +548,20 @@ void MainPage::resizeEvent(QResizeEvent *e) {
         m_disconnectedOverlay->setGeometry(rect());
         m_disconnectedOverlay->raise();
     }
+}
+
+void MainPage::resetLayoutProportions() {
+    if (!m_splitter) return;
+    // Wipe the saved state FIRST so a failure between here and the save
+    // below still leaves the next start on the factory split.
+    {
+        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        st.remove(QStringLiteral("mainpage/splitter_state"));
+    }
+    m_splitter->setSizes(kDefaultSplit);
+    updateChannelsAreaHeight(m_channelsScroll
+                             && m_channelsScroll->isVisible());
+    saveSplitterState();
 }
 
 void MainPage::saveSplitterState() {
@@ -386,6 +584,9 @@ void MainPage::applyResponsiveLayout() {
     // drop one optional group at a time and re-ask until the minimum
     // fits the available width.
     auto applyGroups = [this](bool mute, bool prof, bool grid) {
+        // The LED has its OWN settings switch on top of the mute group's:
+        // it can be turned off while the checkboxes stay.
+        if (m_talkDot)     m_talkDot->setVisible(mute && m_wantVoiceDot);
         if (m_muteLocally) m_muteLocally->setVisible(mute);
         if (m_muteMyself)  m_muteMyself->setVisible(mute);
         if (m_previewOnly) m_previewOnly->setVisible(mute);
@@ -408,13 +609,17 @@ void MainPage::applyResponsiveLayout() {
         return !l || l->minimumSize().width() <= w - 16;
     };
 
+    // Order of sacrifice (user call): Rows/Cols FIRST — they are a layout
+    // convenience you set once — then the profile switcher, and the mute
+    // group LAST because those checkboxes decide who hears what and must
+    // stay reachable as long as anything on the bar does.
     const bool wantMute = m_wantMuteChecks;
     const bool wantProf = m_wantProfiles;
     const bool wantGrid = m_wantGridSize;
     applyGroups(wantMute, wantProf, wantGrid);
-    if (!barFits() && wantMute) applyGroups(false, wantProf, wantGrid);
-    if (!barFits() && wantProf) applyGroups(false, false, wantGrid);
-    if (!barFits() && wantGrid) applyGroups(false, false, false);
+    if (!barFits() && wantGrid) applyGroups(wantMute, wantProf, false);
+    if (!barFits() && wantProf) applyGroups(wantMute, false, false);
+    if (!barFits() && wantMute) applyGroups(false, false, false);
 
     // ---- vertical: channels area -> bottom bar -> search bar ----
     // The grid never hides: sound buttons are the whole point.
@@ -491,18 +696,18 @@ void MainPage::refreshTheme() {
     // Visible grab bar between grid and channels: themed strip that
     // lights up with the accent on hover so it reads as draggable.
     if (m_splitter) {
-        // A HAIRLINE, not a bar: the handle keeps a comfortable grab
-        // area but paints only a 1px rule in the middle (transparent
-        // background + a single top border), so the divider looks like
-        // the thin separator it replaced. Accent on hover.
-        m_splitter->setStyleSheet(QString(
-            "QSplitter#gridChannelsSplitter::handle {"
-            " background-color: transparent;"
-            " border-top: 1px solid %1;"
-            " margin: 2px 0px; }"
-            "QSplitter#gridChannelsSplitter::handle:hover {"
-            " border-top: 1px solid %2; }")
-            .arg(d.border.name(), d.accent.name()));
+        // The handle paints itself (CenteredSplitterHandle) and reads the
+        // theme at paint time - just make sure the QSS cascade leaves it
+        // alone and force a repaint so a theme switch is visible at once.
+        m_splitter->setStyleSheet(QStringLiteral(
+            "QSplitter#gridChannelsSplitter::handle { background: transparent; }"));
+        m_splitter->update();
+        for (int i = 1; i < m_splitter->count(); ++i)
+            if (QWidget *h = m_splitter->handle(i)) h->update();
+    }
+    if (m_bottomSeparator) {
+        m_bottomSeparator->setStyleSheet(QString(
+            "#bottomBarSeparator { background-color: %1; }").arg(d.border.name()));
     }
     if (m_micChannel) m_micChannel->refreshTheme();
 }
@@ -522,6 +727,11 @@ void MainPage::setGridSizeVisible(bool on) {
     applyResponsiveLayout();
 }
 
+void MainPage::setVoiceIndicatorVisible(bool on) {
+    m_wantVoiceDot = on;
+    applyResponsiveLayout();
+}
+
 void MainPage::setMicFxFeatureVisible(bool on) {
     m_micFeatureOn = on;
     if (m_micFxBtn) m_micFxBtn->setVisible(on);
@@ -535,7 +745,10 @@ void MainPage::updateChannelsAreaHeight(bool waveformVisible) {
     // position persists. This function only maintains a sensible
     // FLOOR so the pane can never be squeezed into an unusable strip;
     // the old fixed min==max cap is gone (it would fight the splitter).
-    const int floor = waveformVisible ? 150 : 90;
+    // Retuned with the compacted channel row (18 px sliders, tighter
+    // margins): the old 150/90 floor reserved space the channel no longer
+    // needs and kept the grid smaller than it had to be.
+    const int floor = waveformVisible ? 128 : 76;
     m_channelsScroll->setMinimumHeight(floor);
     m_channelsScroll->setMaximumHeight(QWIDGETSIZE_MAX);
     // The channels-area floor feeds the vertical collapse thresholds.

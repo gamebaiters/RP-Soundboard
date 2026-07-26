@@ -18,6 +18,11 @@ static QString fmtFactor(int v) {
 }
 static QString fmtPlain(int v)  { return QString::number(v); }
 
+// Channel-row compaction (post-2.3.5) - mirrors volume_control.cpp so the
+// Pitch/Speed/Reverb rows and the Local/Remote rows share one rhythm.
+// HEIGHT ONLY: the panel must keep filling the width it is given.
+static const int kSliderH = 18;
+
 FxPanel::FxPanel(QWidget *parent)
     : QWidget(parent)
     , m_pitch(new FineSlider(Qt::Horizontal, this))
@@ -44,8 +49,10 @@ FxPanel::FxPanel(QWidget *parent)
     // of the middle, not from the left edge (FineSlider::paintEvent).
     m_pitch->setProperty("bipolarFill", true);
     m_speed->setProperty("bipolarFill", true);
-    for (auto *s : {m_pitch, m_speed, m_reverb})
+    for (auto *s : {m_pitch, m_speed, m_reverb}) {
         s->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        s->setFixedHeight(kSliderH);
+    }
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 
     m_pitchLabel->setText(fmtFactor(0));
@@ -63,20 +70,25 @@ FxPanel::FxPanel(QWidget *parent)
 
     m_reset->setText(tr("Reset"));
     m_reset->setToolTip(tr("Reset pitch / speed / reverb to zero"));
+    // Row 2 height is driven by whatever is tallest in it - cap the button
+    // so the reverb row stays as short as the pitch / speed rows.
+    m_reset->setMaximumHeight(22);
     refreshTheme();
 
     m_capPitch  = new QLabel(tr("Pitch"),  this);
     m_capSpeed  = new QLabel(tr("Speed"),  this);
     m_capReverb = new QLabel(tr("Reverb"), this);
     for (auto *c : {m_capPitch, m_capSpeed, m_capReverb}) {
+        // 56 px clipped the Italian "Riverbero" to "Riverber(" - the cap has
+        // to clear the longest translated caption, not the English one.
         c->setMinimumWidth(48);
-        c->setMaximumWidth(60);
+        c->setMaximumWidth(84);
     }
 
     auto *grid = new QGridLayout(this);
     grid->setContentsMargins(0,0,0,0);
-    grid->setHorizontalSpacing(2);
-    grid->setVerticalSpacing(2);
+    grid->setHorizontalSpacing(4);
+    grid->setVerticalSpacing(1);
     grid->setColumnStretch(0, 0);
     grid->setColumnStretch(1, 1);
     grid->setColumnStretch(2, 0);
@@ -118,6 +130,7 @@ FxPanel::FxPanel(QWidget *parent)
             "Reverb engine settings: algorithmic (classic) or\n"
             "convolution with a preset / custom impulse response."));
         m_reverbEngineBtn->setAutoRaise(true);
+        m_reverbEngineBtn->setFixedSize(20, 20);
         rh->addWidget(m_reverbEngineBtn);
         grid->addWidget(revRow, 2, 1);
     }

@@ -65,6 +65,10 @@ public:
 	void setVolumeRemote(int vol);
 	void setLocalPlayback(bool enabled);
 	void setMuteMyself(bool enabled);
+	// Read back the "mute my mic while a sound plays" flag. The talk
+	// indicator needs it to tell "TS3 hears my voice" from "my voice is
+	// being suppressed by the soundboard right now".
+	bool   getMuteMyself() const { return m_muteMyself.load(std::memory_order_relaxed); }
 	void setEarrapeProtection(bool enabled);
 	void setPitchFactor(float factor);
 	void setSpeedFactor(float factor);

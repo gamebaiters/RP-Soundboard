@@ -19,6 +19,20 @@
 #include "modules/theme.h"
 #include "SampleVisualizerThread.h"
 
+// The waveform preview runs the SAME DSP classes as the audio thread, on a
+// decimated copy of the file. No re-implementation, no approximation of the
+// maths - only the sample rate differs.
+#include "dsp/BiquadPeaking.h"
+#include "dsp/EqRack.h"
+#include "dsp/Compressor.h"
+#include "dsp/Saturator.h"
+#include "dsp/NoiseGate.h"
+#include "dsp/TransientShaper.h"
+#include "dsp/Limiter.h"
+#include "dsp/Bitcrusher.h"
+#include "dsp/GenerationLoss.h"
+#include "dsp/Reverb.h"
+
 #include <cmath>
 #include <algorithm>
 
@@ -437,8 +451,10 @@ void SoundView::paintEvent(QPaintEvent *evt)
 		painter.setRenderHint(QPainter::Antialiasing, false);
 	}
 
-	// Draw FX adaptation badge
-	if (m_adaptToFx && m_sandbox.enabled) {
+	// Draw FX adaptation badge — only when the drawing really IS the
+	// processed signal, so the badge never claims an adaptation that the
+	// chain did not produce.
+	if (m_fxPathsActive) {
 		painter.setRenderHint(QPainter::Antialiasing, true);
 		QFont f = font();
 		f.setPixelSize(9);
@@ -607,6 +623,13 @@ void SoundView::setSound( const SoundInfo &sound )
 		// flash between setSound and setPlaying.
 		m_ghosted = false;
 		m_analysisBins = 1024;
+		// The cached DSP source belongs to the previous file.
+		m_fxSrc.clear();
+		m_fxSrc.shrink_to_fit();
+		m_fxSrcRate     = 0.0;
+		m_fxSrcComplete = false;
+		m_fxPathsActive = false;
+		m_fxDirty       = true;
 		m_vis->startAnalysis(sound.filename.toUtf8(), m_analysisBins);
 		// 50 ms poll — fast enough that the progress bar animates
 		// smoothly even on small files (a 3-min audio finishes in ~16
@@ -658,6 +681,14 @@ void SoundView::clearPlayback()
 	m_analysisReady = false;
 	m_revealActive  = false;
 	if (m_revealTimer) m_revealTimer->stop();
+	// Drop the DSP preview source with the rest of the slot state.
+	m_fxSrc.clear();
+	m_fxSrc.shrink_to_fit();
+	m_fxSrcRate     = 0.0;
+	m_fxSrcComplete = false;
+	m_fxPathsActive = false;
+	m_fxDirty       = true;
+	if (m_fxRenderTimer) m_fxRenderTimer->stop();
 	// Ghost flag belongs to the "loaded but stopped" state — a true
 	// clear wipes the slot so the next setSound starts unghosted.
 	m_ghosted = false;
@@ -912,7 +943,24 @@ void SoundView::setAdaptToFx(bool on)
 	if (m_adaptToFx == on) return;
 	m_adaptToFx = on;
 	m_drawnBins = 0;
+	m_fxDirty   = true;
 	update();
+}
+
+void SoundView::scheduleFxRerender()
+{
+	m_fxDirty = true;
+	if (!m_adaptToFx) return;
+	// Single-shot, restarted on every push: the render only runs once the
+	// user stops moving the slider for ~180 ms. Without this, dragging an EQ
+	// band would run a full chain pass over the cached signal per pixel.
+	if (!m_fxRenderTimer) {
+		m_fxRenderTimer = new QTimer(this);
+		m_fxRenderTimer->setSingleShot(true);
+		m_fxRenderTimer->setInterval(180);
+		connect(m_fxRenderTimer, &QTimer::timeout, this, [this]{ update(); });
+	}
+	m_fxRenderTimer->start();
 }
 
 void SoundView::setDisplayMode(DisplayMode m)
@@ -952,10 +1000,7 @@ void SoundView::setSandboxState(const SandboxState &s)
 	// view is on, redraw whenever ANY sandbox state lands. The bin
 	// FX pass is cheap (1024 bins) and only happens after a state
 	// arrives, so this does not spin the GUI.
-	if (m_adaptToFx) {
-		m_drawnBins = 0;
-		update();
-	}
+	scheduleFxRerender();
 }
 
 void SoundView::setLiveFx(int pitch, int speed, int reverb)
@@ -968,10 +1013,9 @@ void SoundView::setLiveFx(int pitch, int speed, int reverb)
 	m_fxPitch  = pitch;
 	m_fxSpeed  = speed;
 	m_fxReverb = reverb;
-	if (m_adaptToFx) {
-		m_drawnBins = 0;
-		update();
-	}
+	// Only the reverb reaches the drawing (pitch / speed change playback
+	// rate, not the file's own shape - see renderFxChain).
+	if (reverbChanged) scheduleFxRerender();
 	// Reverse-mode feedback overlay. Pitch/speed in reverse trigger
 	// a chunk-worker rebuild (~150 ms decode + queue refill) so the
 	// user gets ~400 ms of visible progress. Reverb is instant but
@@ -1038,228 +1082,294 @@ void SoundView::onLoadTick()
 	update();
 }
 
-void SoundView::applyFxToBins(std::vector<float> &binsL, std::vector<float> &binsR, size_t count) const
+// ---------------------------------------------------------------
+// Real DSP preview
+//
+// The analyser gives us a MIN/MAX ENVELOPE over time. The old code treated
+// the bin index as a FREQUENCY and multiplied bins by interpolated EQ band
+// gains, so moving an EQ slider deformed the drawing in a way unrelated to
+// what the audio actually does. Everything below runs the effects for real,
+// sample by sample, on a decimated mono copy of the decoded file, using the
+// exact same DSP classes as the audio thread; only the sample rate differs.
+// ---------------------------------------------------------------
+
+bool SoundView::fxViewWouldChangeAudio() const
 {
-	const auto &s = m_sandbox;
-	if (!s.enabled) return;
-
-	// EQ: approximate visual gain per bin based on band gains.
-	// Each bin maps to a frequency; we compute a weighted sum from the
-	// nearest EQ bands. This is a rough visual hint, not a real IIR.
+	// Channel FxPanel reverb applies whether or not the sandbox is on.
+	if (m_fxReverb > 0) return true;
+	const SandboxState &s = m_sandbox;
+	if (!s.enabled) return false;
 	if (s.eqEnabled) {
-		static const float kBandFreqs[16] = {
-			20, 25, 40, 63, 100, 160, 250, 400,
-			630, 1000, 1600, 2500, 4000, 6300, 10000, 16000
-		};
-		bool anyNonZero = false;
 		for (int i = 0; i < 16; ++i)
-			if (std::fabs(s.eqBandDb[i]) > 0.01f) { anyNonZero = true; break; }
-		if (anyNonZero) {
-			float sampleRate = 48000.0f;
-			for (size_t i = 0; i < count; ++i) {
-				float freq = (static_cast<float>(i) / 1024.0f) * sampleRate * 0.5f;
-				float gainDb = 0.0f;
-				float totalWeight = 0.0f;
-				for (int b = 0; b < 16; ++b) {
-					if (std::fabs(s.eqBandDb[b]) < 0.01f) continue;
-					float bFreq = kBandFreqs[b];
-					float dist = std::fabs(std::log2(std::max(freq, 1.0f) / bFreq));
-					float w = 1.0f / (1.0f + dist * dist * 4.0f);
-					gainDb += s.eqBandDb[b] * w;
-					totalWeight += w;
-				}
-				if (totalWeight > 0.0f) gainDb /= totalWeight;
-				float gain = AudioUtils::dbToLinear(gainDb);
-				binsL[i] *= gain;
-				binsR[i] *= gain;
+			if (std::fabs(s.eqBandDb[i]) > 0.01f) return true;
+	}
+	if (s.compEnabled)      return true;
+	if (s.saturatorEnabled && s.saturatorMix > 0.001f) return true;
+	if (s.gateEnabled)      return true;
+	if (s.transEnabled && (std::fabs(s.transAttackDb) > 0.01f ||
+	                       std::fabs(s.transSustainDb) > 0.01f)) return true;
+	if (s.reverbWet > 0.001f) return true;
+	if (s.limiterEnabled)   return true;
+	if (s.bitcrusherEnabled && (s.bitcrusherBitDepth < 16 ||
+	                            s.bitcrusherRate < 47999.0f)) return true;
+	if (s.genLossEnabled && s.genLossGenerations > 1) return true;
+	return false;
+}
+
+void SoundView::ensureFxSource()
+{
+	if (!m_vis) return;
+	// The analyser publishes the cache progressively and keeps appending, so
+	// stop re-pulling only once the decode is over AND we have already taken
+	// the final copy. Waiting for completion before the FIRST pull is what
+	// left the FX view dead whenever finalizeBins never ran.
+	if (m_fxSrcComplete) return;
+	std::vector<float> src;
+	double rate = 0.0;
+	if (!m_vis->getPreviewAudio(src, rate) || src.empty() || rate <= 0.0)
+		return;                        // nothing decoded yet
+	if (src.size() != m_fxSrc.size() || rate != m_fxSrcRate) {
+		m_fxSrc     = std::move(src);
+		m_fxSrcRate = rate;
+		m_fxDirty   = true;
+	}
+	// "Done" = the worker has exited and the reveal state machine has seen it.
+	if (!m_vis->isRunning() && m_analysisReady)
+		m_fxSrcComplete = true;
+}
+
+void SoundView::renderFxChain(std::vector<float> &buf) const
+{
+	const SandboxState &s = m_sandbox;
+	const double rate = m_fxSrcRate;
+	const size_t n = buf.size();
+	if (rate <= 0.0 || n == 0) return;
+
+	// Reverb wet is the SUM of the sandbox room mix and the channel FxPanel
+	// reverb - exactly how SlotDsp::refreshReverbWet combines them.
+	float reverbWet = (s.enabled ? s.reverbWet : 0.0f)
+	                + (float)m_fxReverb / 100.0f;
+	if (reverbWet < 0.0f) reverbWet = 0.0f;
+	if (reverbWet > 1.0f) reverbWet = 1.0f;
+
+	// Walk the user's pipeline order so the preview reflects the chain the
+	// way they arranged it. One full pass per stage: friendlier to the cache
+	// than a per-sample switch, and each stage keeps its own state.
+	for (int slot = 0; slot < SandboxState::Stage_COUNT; ++slot) {
+		const int stage = s.pipelineOrder[slot];
+		if (stage < 0 || stage >= SandboxState::Stage_COUNT) continue;
+
+		switch (stage) {
+		case SandboxState::Stage_EQ: {
+			if (!s.enabled || !s.eqEnabled) break;
+			// One biquad per MOVED band, cascaded - identical maths to
+			// EqRack, minus the bands the user left flat (a flat peaking
+			// section is a no-op, so skipping it changes nothing but the
+			// render time).
+			const double nyq = rate * 0.5;
+			for (int b = 0; b < EqRack::kNumBands; ++b) {
+				const double f0 = EqRack::bandFrequency(b);
+				if (std::fabs(s.eqBandDb[b]) <= 0.01f) continue;
+				// A band above the decimated Nyquist simply is not
+				// representable here. Skipping is the honest answer; the
+				// alternative (folding it in anyway) is what the old code
+				// did wrong.
+				if (f0 >= nyq * 0.9) continue;
+				BiquadPeaking bq;
+				bq.setParams(f0, EqRack::kQ, s.eqBandDb[b], rate);
+				for (size_t i = 0; i < n; ++i) buf[i] = bq.process(buf[i]);
 			}
+			break;
+		}
+		case SandboxState::Stage_Compressor: {
+			if (!s.enabled || !s.compEnabled) break;
+			Compressor c;
+			c.setSampleRate(rate);
+			c.setParams(s.compThresholdDb, s.compRatio, s.compAttackMs,
+			            s.compReleaseMs, s.compKneeDb, s.compMakeupDb);
+			for (size_t i = 0; i < n; ++i) { float l = buf[i], r = l; c.processStereo(l, r); buf[i] = l; }
+			break;
+		}
+		case SandboxState::Stage_Saturator: {
+			if (!s.enabled || !s.saturatorEnabled || s.saturatorMix <= 0.001f) break;
+			Saturator sat;
+			sat.setSampleRate(rate);
+			sat.setParams(s.saturatorDrive, s.saturatorMix, s.saturatorTone,
+			              (Saturator::Mode)s.saturatorMode);
+			for (size_t i = 0; i < n; ++i) { float l = buf[i], r = l; sat.processStereo(l, r); buf[i] = l; }
+			break;
+		}
+		case SandboxState::Stage_NoiseGate: {
+			if (!s.enabled || !s.gateEnabled) break;
+			NoiseGate g;
+			g.setSampleRate(rate);
+			g.setParams(s.gateThresholdDb, s.gateRangeDb, s.gateAttackMs,
+			            s.gateHoldMs, s.gateReleaseMs);
+			for (size_t i = 0; i < n; ++i) { float l = buf[i], r = l; g.processStereo(l, r); buf[i] = l; }
+			break;
+		}
+		case SandboxState::Stage_TransientShaper: {
+			if (!s.enabled || !s.transEnabled) break;
+			TransientShaper ts;
+			ts.setSampleRate(rate);
+			ts.setParams(s.transAttackDb, s.transSustainDb);
+			for (size_t i = 0; i < n; ++i) { float l = buf[i], r = l; ts.processStereo(l, r); buf[i] = l; }
+			break;
+		}
+		case SandboxState::Stage_Reverb: {
+			if (reverbWet <= 0.001f) break;
+			Reverb rv;
+			rv.setSampleRate(rate);
+			rv.setRoomSize(0.5f);      // same fixed recipe as SlotDsp
+			rv.setDamping(0.5f);
+			rv.setWet(reverbWet);
+			for (size_t i = 0; i < n; ++i) { float l = buf[i], r = l; rv.process(l, r); buf[i] = 0.5f * (l + r); }
+			break;
+		}
+		case SandboxState::Stage_Limiter: {
+			if (!s.enabled || !s.limiterEnabled) break;
+			Limiter lim;
+			lim.setSampleRate(rate);
+			lim.setParams(s.limiterCeiling, s.limiterLookahead, s.limiterRelease,
+			              (Limiter::Mode)s.limiterMode, s.limiterRatio,
+			              s.limiterGateThresh);
+			for (size_t i = 0; i < n; ++i) { float l = buf[i], r = l; lim.processStereo(l, r); buf[i] = l; }
+			break;
+		}
+		case SandboxState::Stage_Bitcrusher: {
+			if (!s.enabled || !s.bitcrusherEnabled) break;
+			Bitcrusher bc;
+			bc.setSampleRate(rate);
+			// The rate crush is a RATIO of the running rate; scale the target
+			// so a "8 kHz out of 48 kHz" setting looks the same here.
+			float target = s.bitcrusherRate * (float)(rate / 48000.0);
+			bc.setParams(s.bitcrusherBitDepth, target);
+			for (size_t i = 0; i < n; ++i) { float l = buf[i], r = l; bc.processStereo(l, r); buf[i] = l; }
+			break;
+		}
+		case SandboxState::Stage_GenLoss: {
+			if (!s.enabled || !s.genLossEnabled || s.genLossGenerations <= 1) break;
+			GenerationLoss gl;
+			gl.setSampleRate(rate);
+			gl.setGenerations(s.genLossGenerations);
+			gl.reset();
+			for (size_t i = 0; i < n; ++i) { float l = buf[i], r = l; gl.processStereo(l, r); buf[i] = l; }
+			break;
+		}
+		default:
+			// Paulstretch, Spatial, Delay, Chorus, Flanger, Flangus, Phaser,
+			// VoiceFx, DynEq, DeEsser, BassEnh, Binaural: either they change
+			// the LENGTH of the signal (so they cannot share this x-axis) or
+			// they live in the stereo field / a domain a mono decimated copy
+			// cannot represent. They are deliberately left OUT rather than
+			// faked - an invented smear is exactly what made the old preview
+			// meaningless.
+			break;
 		}
 	}
 
-	// Compressor: roughly reduce peaks above threshold
-	if (s.compEnabled && s.compRatio > 1.01f) {
-		float threshLin = AudioUtils::dbToLinear(s.compThresholdDb);
-		float ratio = s.compRatio;
-		for (size_t i = 0; i < count; ++i) {
-			for (float *ch : {&binsL[i], &binsR[i]}) {
-				float a = std::fabs(*ch);
-				if (a > threshLin) {
-					float over = a - threshLin;
-					float compressed = threshLin + over / ratio;
-					float makeupLin = AudioUtils::dbToLinear(s.compMakeupDb);
-					*ch = (*ch < 0 ? -compressed : compressed) * makeupLin;
-				}
-			}
+	// Failsafe brickwall, same place as in the real chain: after everything.
+	// With it on, an EQ boost visibly flattens against the ceiling instead of
+	// clipping; with it off the drawing runs past the frame, which is what the
+	// audio really does.
+	if (s.enabled && s.failsafeEnabled) {
+		const float ceil = 0.891f;             // -1 dBFS
+		for (size_t i = 0; i < n; ++i) {
+			if (buf[i] >  ceil) buf[i] =  ceil;
+			if (buf[i] < -ceil) buf[i] = -ceil;
 		}
 	}
+}
 
-	// Saturator: tanh-style soft clip visual
-	if (s.saturatorEnabled && s.saturatorMix > 0.001f) {
-		float drive = s.saturatorDrive;
-		float mix = s.saturatorMix;
-		for (size_t i = 0; i < count; ++i) {
-			float dryL = binsL[i], dryR = binsR[i];
-			float wetL = std::tanh(dryL * drive);
-			float wetR = std::tanh(dryR * drive);
-			binsL[i] = dryL * (1.0f - mix) + wetL * mix;
-			binsR[i] = dryR * (1.0f - mix) + wetR * mix;
-		}
-	}
+void SoundView::buildPathsFxRatio(const std::vector<float> &dry,
+                                  const std::vector<float> &wet, size_t bins)
+{
+	const double fhh = (double)height() * 0.5;
+	const double fw  = (double)width();
+	const double shortScale = 1.0 / ((double)std::numeric_limits<short>::max() * 1.1);
+	m_path[0] = QPainterPath(QPointF(0.0, fhh));
+	m_path[1] = QPainterPath(QPointF(0.0, fhh));
+	if (bins == 0 || dry.empty() || dry.size() != wet.size()) return;
 
-	// Bitcrusher: quantize + decimate
-	if (s.bitcrusherEnabled) {
-		if (s.bitcrusherBitDepth < 16) {
-			float levels = std::pow(2.0f, static_cast<float>(s.bitcrusherBitDepth) - 1.0f);
-			for (size_t i = 0; i < count; ++i) {
-				binsL[i] = std::round(binsL[i] * levels) / levels;
-				binsR[i] = std::round(binsR[i] * levels) / levels;
-			}
-		}
-		if (s.bitcrusherRate < 47999.0f) {
-			float step = 48000.0f / s.bitcrusherRate;
-			float holdL = 0.0f, holdR = 0.0f;
-			float phase = 0.0f;
-			for (size_t i = 0; i < count; ++i) {
-				phase += 1.0f;
-				if (phase >= step) {
-					phase -= step;
-					holdL = binsL[i];
-					holdR = binsR[i];
-				}
-				binsL[i] = holdL;
-				binsR[i] = holdR;
-			}
-		}
-	}
+	const size_t n = dry.size();
+	volatile const int *raw = m_vis ? m_vis->getBins() : nullptr;
+	if (!raw) return;
 
-	// Mono
-	if (s.monoEnabled) {
-		for (size_t i = 0; i < count; ++i) {
-			float m = (binsL[i] + binsR[i]) * 0.5f;
-			binsL[i] = m;
-			binsR[i] = m;
-		}
-	}
+	// Ceiling on the gain the drawing may show. A near-silent bin divides by a
+	// tiny number; without a cap a single denormal would spike the path to the
+	// moon. 16x = +24 dB, more than any single stage can add.
+	const double kMaxRatio = 16.0;
+	// Below this, the dry bin is silence: a ratio is meaningless, so anything
+	// the chain produced there (reverb tail, delay, gate release) is drawn on
+	// its own instead.
+	const double kSilence  = 1.0e-5;
 
-	// Generation loss: cascaded LPF + quantization + saturation
-	if (s.genLossEnabled && s.genLossGenerations > 1) {
-		float g = static_cast<float>(s.genLossGenerations);
-		float bits = 16.f * std::pow(0.997f, g);
-		if (bits < 1.5f) bits = 1.5f;
-		float quantLevels = std::pow(2.f, bits);
-		float drive = 1.f + g * 0.004f;
-		if (drive > 6.f) drive = 6.f;
-		float driveNorm = 1.f / std::tanh(drive);
-		int decimFactor = 1 + static_cast<int>(g / 80.f);
-		if (decimFactor > 48) decimFactor = 48;
-		for (size_t i = 0; i < count; ++i) {
-			if (decimFactor > 1 && (i % decimFactor) != 0) {
-				size_t prev = (i / decimFactor) * decimFactor;
-				binsL[i] = binsL[prev];
-				binsR[i] = binsR[prev];
-			}
-			if (quantLevels < 32768.f) {
-				binsL[i] = std::round(binsL[i] * quantLevels) / quantLevels;
-				binsR[i] = std::round(binsR[i] * quantLevels) / quantLevels;
-			}
-			if (drive > 1.001f) {
-				binsL[i] = std::tanh(binsL[i] * drive) * driveNorm;
-				binsR[i] = std::tanh(binsR[i] * drive) * driveNorm;
-			}
+	for (size_t i = 0; i < bins; ++i) {
+		size_t a = (size_t)((double)i       / (double)bins * (double)n);
+		size_t b = (size_t)((double)(i + 1) / (double)bins * (double)n);
+		if (b <= a) b = a + 1;
+		if (b > n)  b = n;
+		double dpk = 0.0, wpk = 0.0;
+		for (size_t k = a; k < b && k < n; ++k) {
+			const double da = std::fabs((double)dry[k]);
+			const double wa = std::fabs((double)wet[k]);
+			if (da > dpk) dpk = da;
+			if (wa > wpk) wpk = wa;
 		}
-	}
 
-	// Paulstretch smoothing: moving average to simulate the frequency smearing
-	if (s.stretchEnabled && s.stretchFactor > 1.01f) {
-		int smoothW = static_cast<int>(s.stretchFactor * 2.0f);
-		if (smoothW < 2) smoothW = 2;
-		if (smoothW > static_cast<int>(count / 2)) smoothW = static_cast<int>(count / 2);
-		if (smoothW > 1) {
-			std::vector<float> tmpL(count), tmpR(count);
-			int half = smoothW / 2;
-			for (size_t i = 0; i < count; ++i) {
-				float sumL = 0.0f, sumR = 0.0f;
-				int n = 0;
-				for (int j = -half; j <= half; ++j) {
-					int idx = static_cast<int>(i) + j;
-					if (idx < 0 || idx >= static_cast<int>(count)) continue;
-					sumL += binsL[idx];
-					sumR += binsR[idx];
-					++n;
-				}
-				tmpL[i] = sumL / n;
-				tmpR[i] = sumR / n;
-			}
-			binsL = tmpL;
-			binsR = tmpR;
-		}
-	}
+		// TRUE envelope for this bin, straight from the full-rate analysis.
+		double vmin = (double)raw[i * 2]     * shortScale;
+		double vmax = (double)raw[i * 2 + 1] * shortScale;
 
-	// Chorus/Flanger/Flangus/Phaser/Delay/Reverb: add subtle visual
-	// thickening proportional to the combined wet mix. These time-domain
-	// effects are hard to visualise precisely so we just broaden the
-	// waveform slightly.
-	float wetSum = 0.0f;
-	if (s.chorusEnabled) wetSum += s.chorusMix;
-	if (s.flangerEnabled) wetSum += s.flangerMix;
-	if (s.flangusEnabled) wetSum += s.flangusMix;
-	if (s.phaserEnabled) wetSum += s.phaserMix;
-	if (s.delayEnabled) wetSum += s.delayMix * 0.5f;
-	wetSum += s.reverbWet * 0.3f;
-	if (wetSum > 0.01f) {
-		float spread = 1.0f + wetSum * 0.15f;
-		for (size_t i = 0; i < count; ++i) {
-			binsL[i] *= spread;
-			binsR[i] *= spread;
+		if (dpk > kSilence) {
+			double ratio = wpk / dpk;
+			if (ratio > kMaxRatio) ratio = kMaxRatio;
+			vmin *= ratio;
+			vmax *= ratio;
+		} else {
+			// Pure wet content over silence.
+			const double v = qMin(wpk, 1.0) / 1.1;
+			vmin = -v;
+			vmax =  v;
 		}
-	}
 
-	// Limiter: clamp peaks
-	if (s.limiterEnabled) {
-		float ceil = AudioUtils::dbToLinear(s.limiterCeiling);
-		for (size_t i = 0; i < count; ++i) {
-			if (binsL[i] >  ceil) binsL[i] =  ceil;
-			if (binsL[i] < -ceil) binsL[i] = -ceil;
-			if (binsR[i] >  ceil) binsR[i] =  ceil;
-			if (binsR[i] < -ceil) binsR[i] = -ceil;
-		}
+		const double x = (double)i * (1.0 / 1024.0) * fw;
+		m_path[0].lineTo(x, (1.0 + vmin) * fhh);
+		m_path[1].lineTo(x, (1.0 + vmax) * fhh);
 	}
+	const double endx = fw * (double)bins * (1.0 / 1024.0);
+	m_path[0].lineTo(endx, fhh);
+	m_path[1].lineTo(endx, fhh);
+	m_path[0].closeSubpath();
+	m_path[1].closeSubpath();
+}
 
-	// FxPanel pitch / speed do not actually transform the waveform
-	// (the file content does not change - only playback rate). Earlier
-	// builds resampled the bins on the x-axis to "visualise" speed,
-	// but that squashed the wave toward x=0 and left the cursor
-	// floating over empty pixels in the right half. Pitch gain biasing
-	// was also misleading because the file amplitude does not depend
-	// on pitch slider. Both are removed. Only reverb is hinted at via
-	// a tail since reverb truly adds extra wet on top of the dry.
-	if (m_fxReverb > 0) {
-		float wet = m_fxReverb / 100.0f;
-		int tailLen = 64;
-		std::vector<float> tailL(count, 0.0f), tailR(count, 0.0f);
-		float decay = 0.93f;
-		for (size_t i = 0; i < count; ++i) {
-			float al = binsL[i], ar = binsR[i];
-			float g = wet * 0.5f;
-			for (int k = 1; k < tailLen && i + k < count; ++k) {
-				tailL[i + k] += al * g;
-				tailR[i + k] += ar * g;
-				g *= decay;
-			}
-		}
-		for (size_t i = 0; i < count; ++i) {
-			binsL[i] += tailL[i];
-			binsR[i] += tailR[i];
-		}
+void SoundView::buildPathsFromBins(size_t bins)
+{
+	const double fhh = (double)height() * 0.5;
+	const double fw  = (double)width();
+	const double shortScale = 1.0 / ((double)std::numeric_limits<short>::max() * 1.1);
+	m_path[0] = QPainterPath(QPointF(0.0, fhh));
+	m_path[1] = QPainterPath(QPointF(0.0, fhh));
+	for (size_t i = 0; i < bins; ++i)
+	{
+		const double v0 = (double)m_vis->getBins()[i * 2]     * shortScale;
+		const double v1 = (double)m_vis->getBins()[i * 2 + 1] * shortScale;
+		const double x  = (double)i * (1.0 / 1024.0) * fw;
+		m_path[0].lineTo(x, (1.0 + v0) * fhh);
+		m_path[1].lineTo(x, (1.0 + v1) * fhh);
 	}
+	const double endx = fw * (double)bins * (1.0 / 1024.0);
+	m_path[0].lineTo(endx, fhh);
+	m_path[1].lineTo(endx, fhh);
+	m_path[0].closeSubpath();
+	m_path[1].closeSubpath();
 }
 
 void SoundView::preparePaths()
 {
 	if (!m_vis)
 		return;
-	SampleVisualizerThread &t = *m_vis;
-	size_t bins = t.getBinsProcessed();
 	// Bins SHRINK on EOF when the visualizer resamples a runaway
 	// undershoot (more than numBins source bins generated) back down
 	// to numBins. Without the != path, drawnBins would stay at the
@@ -1268,51 +1378,42 @@ void SoundView::preparePaths()
 	// trailing bins live OFF-screen — the silence-at-end stays
 	// invisible. Trigger recompute on any count change, not just
 	// growth.
-	if (m_drawnBins != bins)
-	{
-		double fhh = (double)height() * 0.5;
-		double fw = (double)width();
-		double shortScale = 1.0 / ((double)std::numeric_limits<short>::max() * 1.1);
+	const size_t bins = m_vis->getBinsProcessed();
 
-		if (m_adaptToFx && m_sandbox.enabled) {
-			std::vector<float> binsL(bins), binsR(bins);
-			for (size_t i = 0; i < bins; ++i) {
-				binsL[i] = static_cast<float>(t.getBins()[i * 2]) * static_cast<float>(shortScale);
-				binsR[i] = static_cast<float>(t.getBins()[i * 2 + 1]) * static_cast<float>(shortScale);
+	// The FX view engages whenever the sandbox is ON (or the channel reverb is
+	// dialled in) - NOT only when a stage would actually move the drawing.
+	// That keeps the "FX" badge meaning what it always meant ("this waveform
+	// is the sandbox's output") and costs nothing: with an inert chain the
+	// measured ratio is exactly 1, so the shortcut below draws the raw bins,
+	// pixel for pixel.
+	if (m_adaptToFx && (m_sandbox.enabled || m_fxReverb > 0)) {
+		ensureFxSource();
+		// Both halves are required: the decimated copy to MEASURE the effect
+		// and the analyser bins to draw it on. Missing either one = raw view,
+		// never a blank widget.
+		if (!m_fxSrc.empty() && m_vis->getBins() && bins > 0) {
+			if (m_fxDirty || !m_fxPathsActive || m_drawnBins != bins) {
+				if (fxViewWouldChangeAudio()) {
+					std::vector<float> work = m_fxSrc;
+					renderFxChain(work);
+					buildPathsFxRatio(m_fxSrc, work, bins);
+				} else {
+					buildPathsFromBins(bins);
+				}
+				m_drawnBins     = bins;
+				m_fxDirty       = false;
+				m_fxPathsActive = true;
 			}
-
-			applyFxToBins(binsL, binsR, bins);
-
-			m_path[0] = QPainterPath(QPointF(0.0, fhh));
-			m_path[1] = QPainterPath(QPointF(0.0, fhh));
-			for (size_t i = 0; i < bins; ++i) {
-				double x = (double)i * (1.0 / 1024.0) * fw;
-				m_path[0].lineTo(x, (1.0 + static_cast<double>(binsL[i])) * fhh);
-				m_path[1].lineTo(x, (1.0 + static_cast<double>(binsR[i])) * fhh);
-			}
-			double endx = fw * (double)bins * (1.0 / 1024.0);
-			m_path[0].lineTo(endx, fhh);
-			m_path[1].lineTo(endx, fhh);
-			m_path[0].closeSubpath();
-			m_path[1].closeSubpath();
-		} else {
-			m_path[0] = QPainterPath(QPointF(0.0, fhh));
-			m_path[1] = QPainterPath(QPointF(0.0, fhh));
-			for(size_t i = 0; i < bins; ++i)
-			{
-				double v0 = (double)t.getBins()[i * 2] * shortScale;
-				double v1 = (double)t.getBins()[i * 2 + 1] * shortScale;
-				double x = (double)i * (1.0 / 1024.0) * fw;
-				m_path[0].lineTo(x, (1.0 + v0) * fhh);
-				m_path[1].lineTo(x, (1.0 + v1) * fhh);
-			}
-			double endx = fw * (double)bins * (1.0 / 1024.0);
-			m_path[0].lineTo(endx, fhh);
-			m_path[1].lineTo(endx, fhh);
-			m_path[0].closeSubpath();
-			m_path[1].closeSubpath();
+			return;
 		}
-		m_drawnBins = bins;
+		// Preview not available yet (still decoding): fall through and draw
+		// the raw waveform rather than nothing.
+	}
+
+	if (m_drawnBins != bins || m_fxPathsActive) {
+		buildPathsFromBins(bins);
+		m_drawnBins     = bins;
+		m_fxPathsActive = false;
 	}
 }
 

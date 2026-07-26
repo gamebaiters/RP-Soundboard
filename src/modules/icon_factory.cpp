@@ -388,6 +388,33 @@ QIcon record(const QColor &c)
     return finish(pm);
 }
 
+QIcon checklist(const QColor &c)
+{
+    QPixmap pm = canvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const qreal x0   = kInset - 2.0;
+    const qreal boxW = 11.0;
+    const qreal gapY = (kSize - kInset * 2.0) / 3.0;
+    QPen pen(c);
+    pen.setWidthF(3.5);
+    pen.setCapStyle(Qt::RoundCap);
+    pen.setJoinStyle(Qt::RoundJoin);
+    for (int i = 0; i < 3; ++i) {
+        const qreal y = kInset + gapY * i + gapY * 0.5 - boxW * 0.5;
+        // Checkbox: filled for the first two rows (enabled modules),
+        // hollow for the last one — the icon itself says "some on, some off".
+        p.setPen(pen);
+        p.setBrush(i < 2 ? QBrush(c) : QBrush(Qt::NoBrush));
+        p.drawRoundedRect(QRectF(x0, y, boxW, boxW), 2.0, 2.0);
+        // Rule next to it.
+        p.setBrush(Qt::NoBrush);
+        p.drawLine(QPointF(x0 + boxW + 6.0, y + boxW * 0.5),
+                   QPointF(kSize - kInset + 2.0, y + boxW * 0.5));
+    }
+    return finish(pm);
+}
+
 QIcon soundboard()
 {
     // 2x2 launchpad pads inside a soft dark tile. Bold shapes + four

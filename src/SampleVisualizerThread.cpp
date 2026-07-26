@@ -75,7 +75,8 @@ SampleVisualizerThread::SampleVisualizerThread() :
 	m_pendingNumBins(0),
 	m_running(false),
 	m_newFile(false),
-	m_stop(false)
+	m_stop(false),
+	m_previewReady(false)
 {
 
 }
@@ -116,6 +117,13 @@ void SampleVisualizerThread::startAnalysis( const char *filename, size_t numBins
 		m_bins.clear();
 		m_bins.reserve(numBins * 32 + 16);
 		m_numBinsProcessed.store(0, std::memory_order_release);
+		// The DSP preview belongs to the OLD file - drop it now so a GUI
+		// re-render between here and the worker's openNewFile can never
+		// render the previous sound's audio under the new file's bins.
+		m_previewReady.store(false, std::memory_order_release);
+		m_preview.clear();
+		m_previewAcc  = 0.0;
+		m_previewAccN = 0;
 		m_newFile.store(true, std::memory_order_release);
 
 		if (!m_running.load(std::memory_order_acquire))
@@ -377,6 +385,75 @@ void SampleVisualizerThread::openNewFile()
 		delete m_file;
 		m_file = NULL;
 	}
+
+	// Pick the preview decimation. Target ~11 kHz (decode is mono 44.1 kHz),
+	// which keeps EQ bands up to ~5 kHz honest; longer files decimate more so
+	// the cache never exceeds kMaxPreviewFrames.
+	m_preview.clear();
+	m_previewAcc  = 0.0;
+	m_previewAccN = 0;
+	m_previewDecim = 4;
+	if (m_numSamplesTotalEst > 0)
+	{
+		const int64_t need = (m_numSamplesTotalEst + (int64_t)kMaxPreviewFrames - 1)
+		                     / (int64_t)kMaxPreviewFrames;
+		if (need > m_previewDecim) m_previewDecim = (int)need;
+		m_preview.reserve((size_t)(m_numSamplesTotalEst / m_previewDecim) + 8);
+	}
+	m_previewRate = 44100.0 / (double)m_previewDecim;
+}
+
+
+//---------------------------------------------------------------
+// Purpose: box-average the decoded mono block down into the preview
+// cache. A box average (not plain picking) is a crude low-pass, which
+// keeps the decimated copy free of the alias garbage that would
+// otherwise land right in the band the EQ preview is trying to show.
+//---------------------------------------------------------------
+void SampleVisualizerThread::accumulatePreview(const short *data, size_t count)
+{
+	if (m_previewDecim < 1) return;
+	for (size_t i = 0; i < count; ++i)
+	{
+		m_previewAcc += (double)data[i];
+		if (++m_previewAccN >= m_previewDecim)
+		{
+			m_preview.push_back((float)(m_previewAcc / m_previewAccN / 32768.0));
+			m_previewAcc  = 0.0;
+			m_previewAccN = 0;
+			if (m_preview.size() >= kMaxPreviewFrames)
+				halvePreview();
+		}
+	}
+	// Publish EARLY and keep publishing: the cache always covers exactly the
+	// same prefix of the file as the bins do, so a partial cache maps onto the
+	// partial bin range without any x-axis skew. Waiting for EOF meant one
+	// missed finalize (preempted analysis, odd container, stopped decode) left
+	// the FX view permanently dead.
+	if (m_preview.size() >= 256)
+		m_previewReady.store(true, std::memory_order_release);
+}
+
+
+//---------------------------------------------------------------
+// Purpose: the cache hit its ceiling - halve it in place (average
+// adjacent frames) and double the decimation instead of truncating.
+// Truncating would have made the cache cover only the FIRST part of the
+// file while the bins covered all of it, which skews every x mapping
+// built on top. This way the cache ALWAYS spans the same range as the
+// bins, at whatever rate fits the budget - and it works even when the
+// container reports no duration at all.
+//---------------------------------------------------------------
+void SampleVisualizerThread::halvePreview()
+{
+	const size_t n = m_preview.size() / 2;
+	for (size_t i = 0; i < n; ++i)
+		m_preview[i] = 0.5f * (m_preview[i * 2] + m_preview[i * 2 + 1]);
+	// An odd trailing frame is half a decimated frame of audio - dropping it
+	// is below the resolution of anything drawn from this cache.
+	m_preview.resize(n);
+	m_previewDecim *= 2;
+	m_previewRate = 44100.0 / (double)m_previewDecim;
 }
 
 
@@ -398,6 +475,7 @@ void SampleVisualizerThread::processSamples(size_t newSamples)
 		if(numSamplesThisIt == 0)
 			break;
 		getMinMax(m_buffer.getBufferData(), numSamplesThisIt, m_min, m_max);
+		accumulatePreview(m_buffer.getBufferData(), numSamplesThisIt);
 		m_buffer.consume(NULL, numSamplesThisIt);
 		m_numSamplesProcessedThisBin += numSamplesThisIt;
 		if(m_numSamplesProcessedThisBin >= samplesPerBin)
@@ -433,6 +511,16 @@ void SampleVisualizerThread::processSamples(size_t newSamples)
 //---------------------------------------------------------------
 void SampleVisualizerThread::finalizeBins()
 {
+	// Flush the partial preview frame. The cache is published progressively
+	// (accumulatePreview) so this only tops it up with the final partial
+	// frame; it must run before any early-return below.
+	if (m_previewAccN > 0)
+		m_preview.push_back((float)(m_previewAcc / m_previewAccN / 32768.0));
+	m_previewAcc  = 0.0;
+	m_previewAccN = 0;
+	if (!m_preview.empty())
+		m_previewReady.store(true, std::memory_order_release);
+
 	const size_t target = m_numBins;
 	if (target == 0) return;
 	const size_t srcBins = m_bins.size() / 2;
@@ -517,6 +605,24 @@ void SampleVisualizerThread::getMinMax( const short *data, size_t count, int &mi
 volatile const int * SampleVisualizerThread::getBins() const
 {
 	return m_bins.data();
+}
+
+
+//---------------------------------------------------------------
+// Purpose: hand the GUI a copy of the decimated decoded audio so it can
+// run the real DSP chain over it. Copy (not a pointer) because the
+// worker owns the vector and can reallocate it on the next file.
+//---------------------------------------------------------------
+bool SampleVisualizerThread::getPreviewAudio(std::vector<float> &out, double &sampleRate) const
+{
+	if (!m_previewReady.load(std::memory_order_acquire))
+		return false;
+	Lock lock(m_mutex);
+	if (m_preview.empty() || m_previewRate <= 0.0)
+		return false;
+	out = m_preview;
+	sampleRate = m_previewRate;
+	return true;
 }
 
 

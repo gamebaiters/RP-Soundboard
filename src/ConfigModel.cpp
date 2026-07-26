@@ -231,6 +231,7 @@ void ConfigModel::readConfig(const QString &file)
 	m_showStopAllButton   = settings.value("show_stop_all_button",  true).toBool();
 	m_showAddChannelButton  = settings.value("show_add_channel_button",   true).toBool();
 	m_showMuteChecks        = settings.value("show_mute_checks",          true).toBool();
+	m_showVoiceIndicator    = settings.value("show_voice_indicator",      true).toBool();
 	m_showProfileButtons    = settings.value("show_profile_buttons",      true).toBool();
 	m_showGridSizeSelectors = settings.value("show_grid_size_selectors",  true).toBool();
 	m_verticalMeter       = settings.value("vertical_meter",        false).toBool();
@@ -359,6 +360,7 @@ void ConfigModel::writeConfigImmediate(const QString &file)
 	settings.setValue("show_stop_all_button",  m_showStopAllButton);
 	settings.setValue("show_add_channel_button",  m_showAddChannelButton);
 	settings.setValue("show_mute_checks",         m_showMuteChecks);
+	settings.setValue("show_voice_indicator",     m_showVoiceIndicator);
 	settings.setValue("show_profile_buttons",     m_showProfileButtons);
 	settings.setValue("show_grid_size_selectors", m_showGridSizeSelectors);
 	settings.setValue("vertical_meter",        m_verticalMeter);
@@ -973,6 +975,7 @@ void ConfigModel::setShowPauseAllButton(bool on)   { m_showPauseAllButton   = on
 void ConfigModel::setShowStopAllButton(bool on)    { m_showStopAllButton    = on; writeConfig(); }
 void ConfigModel::setShowAddChannelButton(bool on) { m_showAddChannelButton = on; writeConfig(); }
 void ConfigModel::setShowMuteChecks(bool on)       { m_showMuteChecks       = on; writeConfig(); }
+void ConfigModel::setShowVoiceIndicator(bool on)   { m_showVoiceIndicator   = on; writeConfig(); }
 void ConfigModel::setShowProfileButtons(bool on)   { m_showProfileButtons   = on; writeConfig(); }
 void ConfigModel::setShowGridSizeSelectors(bool on){ m_showGridSizeSelectors= on; writeConfig(); }
 void ConfigModel::setVerticalMeter(bool on)        { m_verticalMeter        = on; writeConfig(); }

@@ -34,6 +34,11 @@ QIcon folderOpen(const QColor &c= QColor(0xDC, 0xDC, 0xDC));  // load
 QIcon download(const QColor &c  = QColor(0xFF, 0xFF, 0xFF));  // arrow into tray
 QIcon exportAudio(const QColor &c = QColor(0xDC, 0xDC, 0xDC));// arrow out of tray + wave
 QIcon record(const QColor &c    = QColor(0xD9, 0x53, 0x4F));  // red dot
+// Checklist: three rows, each a small box + a rule. Used for the
+// "which DSP modules are visible" popup next to the pipeline reset.
+// Painted rather than a ☰ glyph — the TS3 client font renders that as
+// tofu (same reason the playlist button has a hand-drawn icon).
+QIcon checklist(const QColor &c = QColor(0xDC, 0xDC, 0xDC));
 
 // Soundboard identity glyph: a 2x2 pad grid (launchpad style) with
 // colored pads - used for the button injected into the TS3 client

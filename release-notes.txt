@@ -1,3 +1,98 @@
+GameBaiters Soundboard v2.3.6
+=============================
+
+The honesty release. The waveform now shows what your effects actually
+do to the sound instead of inventing a shape, autotune finally does
+something audible, closing one channel no longer takes the others with
+it, and the whole interface got a pass for space and clarity.
+
+Waveform
+--------
+
+* FIX - The waveform drawn while effects are active was wrong. It read
+  the position along the timeline as if it were a frequency, so moving
+  an EQ band deformed the drawing in a way that had nothing to do with
+  the audio - and the same guesswork was applied to the compressor,
+  the saturator, generation loss and the rest. It now runs the REAL
+  effects over the decoded audio and draws the result: what you see is
+  what the chain does.
+* FIX - Turning the Audio Sandbox on made the whole waveform look like
+  it was clipping from end to end, even with every effect reset. It
+  was a drawing bug - nothing was clipping - and it is gone.
+* NEW - Effects that cannot honestly be drawn on the same timeline
+  (Paulstretch, delay, the spatial stages, the modulation effects) now
+  leave the waveform alone instead of faking a change.
+* NEW - Boost an EQ band far enough and you SEE the wave hit the
+  ceiling; switch the failsafe anti-clip on and you see it stop.
+
+Audio sandbox
+-------------
+
+* NEW - A module button next to the chain-order reset: show or hide any
+  DSP module globally, straight from the sandbox window. Same switch as
+  the one in Settings, now where you actually notice you need it.
+* FIX - The EQ band sliders had lost their segmented LED look and were
+  drawn as plain sliders. The LEDs, the level response and the fader
+  cap are back.
+* FIX - Disabling Paulstretch did not survive a restart; it came back
+  enabled every session.
+
+Button options
+--------------
+
+* FIX - The per-button options window could open taller than the
+  screen, leaving OK and Cancel unreachable. It scrolls now, and the
+  buttons stay outside the scrolling area where you can always click
+  them.
+* NEW - Every section of that window folds away with one click, and it
+  remembers what you left open.
+
+Channels
+--------
+
+* FIX - Closing a channel while others were playing closed ALL the
+  channels below it. Now only the one you closed goes away; the rest
+  keep playing untouched.
+* FIX - Temporary channels never showed their glowing border - the glow
+  was being clipped away. They are now unmistakable.
+* FIX - The channel row is noticeably shorter: tighter sliders and
+  spacing, same controls, more room for the sound buttons.
+* FIX - The microphone row now has the same frame as every other
+  channel (it is a channel, after all). The oversized red "LIVE" badge
+  is gone - the red border already says it.
+* FIX - The Reverb label was cut off in Italian.
+
+Main toolbar
+------------
+
+* NEW - A voice indicator next to the mute controls. It watches your
+  own microphone: grey when you are silent, green when your voice is
+  going out to the server, amber when you are talking but something is
+  blocking it (muted during playback, or TeamSpeak not transmitting).
+  Playing a sound does not light it up. Can be switched off in
+  Settings.
+* FIX - The mute controls are named for what they do: "Only for
+  others", "Only for me", "Auto-mute my mic". The full explanation is
+  in the tooltip.
+* FIX - When the window gets narrow, the Rows / Cols selectors are the
+  first thing to go and the mute controls are the last - they decide
+  who hears what.
+* NEW - A divider between the soundboard and the controls underneath,
+  and the line between the buttons and the channels now sits in the
+  middle of the gap instead of glued to the buttons.
+* NEW - Settings > Channels > Layout: "Restore default proportions"
+  puts the divider between buttons and channels back where a fresh
+  install has it.
+
+Microphone FX
+-------------
+
+* FIX - Autotune did nothing on a real voice. Its pitch detector could
+  not physically reach the low notes it advertised and gave up on
+  anything breathy, so the correction never engaged. It has been
+  replaced with a proper detector plus a note hold, which is what makes
+  the effect audible.
+
 GameBaiters Soundboard v2.3.5
 =============================
 

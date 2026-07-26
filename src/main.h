@@ -57,6 +57,19 @@ CAPI void sb_disableHotkeysTemporarily(bool disable);
 // soundboard by duckAmount (0..1) whenever he talks. Called by the wiring on
 // settings load + change.
 CAPI void sb_setVoiceBehaviour(bool vadWhilePlaying, bool duckWhenTalking, float duckAmount);
+// TeamSpeak's OWN transmission state for the local client (whatever the user
+// configured drives it: voice activation, push-to-talk or continuous). Written
+// from ts3plugin_onTalkStatusChangeEvent - a TS3 callback thread, so it is a
+// plain atomic and the UI polls it instead of us touching widgets from there.
+CAPI void sb_setSelfTalking(bool talking);
+CAPI bool sb_isSelfTalking();
+// Own-voice indicator. detected = our VAD on the captured mic block fired;
+// passing = that voice is really leaving for the server (TS3 transmitting AND
+// the soundboard is not muting the mic during playback). Both go false when
+// capture callbacks stop arriving. NOT the same as sb_isSelfTalking(), which
+// is true for soundboard playback too.
+CAPI bool sb_isMicVoiceDetected();
+CAPI bool sb_isMicVoicePassing();
 
 
 #define HOTKEY_STOP_ALL "stop_all"

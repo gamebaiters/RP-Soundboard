@@ -33,6 +33,9 @@ public:
 
     // Re-apply theme-derived inline styles (parallels Channel::refreshTheme).
     void refreshTheme();
+    // Themed frame border/background for the mic row. Idle = the same
+    // 1 px channel frame every playback channel has; live = red 2 px.
+    void applyFrameStyle();
 
 private slots:
     void onEnableToggled(bool on);
@@ -57,8 +60,7 @@ private:
     QCheckBox   *m_enable      = nullptr;
     QSlider     *m_gain        = nullptr;   // mic boost, -20..+20 dB
     QLabel      *m_gainLabel   = nullptr;
-    class QFrame *m_frame      = nullptr;   // for the enabled red glow
-    QLabel      *m_liveBadge   = nullptr;
+    class QFrame *m_frame      = nullptr;   // themed border + enabled red glow
     ChannelMeter *m_meter      = nullptr;
     QSlider     *m_pitch       = nullptr;
     QLabel      *m_pitchLabel  = nullptr;

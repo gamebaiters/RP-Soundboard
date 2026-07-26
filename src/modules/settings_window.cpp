@@ -23,6 +23,7 @@
 #include <QMessageBox>
 #include <QGridLayout>
 #include <QCoreApplication>
+#include <QShowEvent>
 #include "../common.h"
 
 namespace {
@@ -395,12 +396,38 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     channelsLay->addLayout(indented(checkRow(m_showMuteChecks, tr(
         "The 'Mute locally' / 'Mute myself' / 'Preview only' trio in the\n"
         "toolbar. The states keep working when hidden."), this)));
+    m_showVoiceIndicator = new QCheckBox(tr("Show the \"Voice\" indicator"), this);
+    channelsLay->addLayout(indented(checkRow(m_showVoiceIndicator, tr(
+        "The LED next to the mute checkboxes that lights up when your own\n"
+        "voice is detected (green when it reaches the server, amber when\n"
+        "something is blocking it). Detection keeps running when hidden."), this)));
     m_showProfiles = new QCheckBox(tr("Show profile buttons (P1-P4)"), this);
     channelsLay->addLayout(indented(checkRow(m_showProfiles, tr(
         "Hide them if you only ever use one grid profile."), this)));
     m_showGridSize = new QCheckBox(tr("Show Rows / Cols grid-size selectors"), this);
     channelsLay->addLayout(indented(checkRow(m_showGridSize, tr(
         "Hide them once your grid has the size you want."), this)));
+
+    // -- Layout proportions --
+    // The divider between the button grid and the channels pane is
+    // draggable and its position persists forever, so a one-off drag (or a
+    // release that changes how tall a channel is) can leave the split
+    // looking wrong with no obvious way back. This is that way back.
+    channelsLay->addWidget(subHeader(tr("Layout"), this));
+    m_resetProportionsBtn = new QPushButton(
+        tr("Restore default proportions"), this);
+    m_resetProportionsBtn->setToolTip(tr(
+        "Put the divider between the sound-button grid and the channels\n"
+        "back where it is on a fresh install, and forget the saved\n"
+        "position. Nothing else is touched."));
+    {
+        auto *row = new QHBoxLayout;
+        row->addWidget(m_resetProportionsBtn);
+        row->addStretch(1);
+        channelsLay->addLayout(indented(row));
+    }
+    connect(m_resetProportionsBtn, &QPushButton::clicked,
+            this, &SettingsWindow::resetLayoutProportionsRequested);
 
     // ============== Button grid section ==============
     // Spinboxes moved to MainPage's bottom row. The QFormLayout below
@@ -954,6 +981,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_showStopAllButton,    &QCheckBox::toggled, this, &SettingsWindow::showStopAllButtonChanged);
     connect(m_showAddChannel,       &QCheckBox::toggled, this, &SettingsWindow::showAddChannelButtonChanged);
     connect(m_showMuteChecks,       &QCheckBox::toggled, this, &SettingsWindow::showMuteChecksChanged);
+    connect(m_showVoiceIndicator,   &QCheckBox::toggled, this, &SettingsWindow::showVoiceIndicatorChanged);
     connect(m_showProfiles,         &QCheckBox::toggled, this, &SettingsWindow::showProfileButtonsChanged);
     connect(m_showGridSize,         &QCheckBox::toggled, this, &SettingsWindow::showGridSizeSelectorsChanged);
     connect(m_verticalMeter,        &QCheckBox::toggled, this, &SettingsWindow::verticalMeterChanged);
@@ -1106,6 +1134,7 @@ void SettingsWindow::setWaveAnimStyle(int speed, int intensity)
 void SettingsWindow::setShowStreamBadge(bool on)  { QSignalBlocker b(m_showStreamBadge);  m_showStreamBadge->setChecked(on); }
 void SettingsWindow::setShowAddChannelButton(bool on)   { QSignalBlocker b(m_showAddChannel); m_showAddChannel->setChecked(on); }
 void SettingsWindow::setShowMuteChecks(bool on)         { QSignalBlocker b(m_showMuteChecks); m_showMuteChecks->setChecked(on); }
+void SettingsWindow::setShowVoiceIndicator(bool on)     { QSignalBlocker b(m_showVoiceIndicator); m_showVoiceIndicator->setChecked(on); }
 void SettingsWindow::setShowProfileButtons(bool on)     { QSignalBlocker b(m_showProfiles);   m_showProfiles->setChecked(on);   }
 void SettingsWindow::setShowGridSizeSelectors(bool on)  { QSignalBlocker b(m_showGridSize);   m_showGridSize->setChecked(on);   }
 void SettingsWindow::setVadWhilePlaying(bool on) { QSignalBlocker b(m_vadWhilePlaying); m_vadWhilePlaying->setChecked(on); }
@@ -1114,6 +1143,12 @@ void SettingsWindow::setDuckAmount(int pct) {
     QSignalBlocker b(m_duckAmount);
     m_duckAmount->setValue(pct);
     if (m_duckAmountLabel) m_duckAmountLabel->setText(tr("Lower by: %1%").arg(pct));
+}
+
+void SettingsWindow::showEvent(QShowEvent *e)
+{
+    setSandboxModuleMask(SandboxModules::mask());
+    QDialog::showEvent(e);
 }
 
 void SettingsWindow::setSandboxModuleMask(quint32 mask)

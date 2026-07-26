@@ -131,6 +131,8 @@ void VoiceFx::reset() {
     m_tuneHopCounter = 0;
     m_tuneRatioTarget = 1.0f;
     m_tuneRatioSm = 1.0f;
+    m_tuneHeldMidi = -1.0f;
+    m_tuneUnvoiced = 0;
     m_tuneShift.reset();
     std::fill(m_formIn.begin(), m_formIn.end(), 0.0f);
     std::fill(m_formOut.begin(), m_formOut.end(), 0.0f);
@@ -187,61 +189,88 @@ void VoiceFx::processStereo(float &l, float &r) {
 // --------------------------------------------------------------------
 
 float VoiceFx::detectPitch() {
-    // Autocorrelation over the freshest 1024 samples of the ring.
-    constexpr int W = 1024;
-    float frame[W];
-    for (int i = 0; i < W; ++i)
-        frame[i] = m_tuneRing[(m_tuneW - W + i + kTuneBuf) % kTuneBuf];
+    // YIN (cumulative-mean normalized difference) on a 4:1 decimated
+    // copy of the ring. The old plain autocorrelation was why autotune
+    // read as "does nothing" on real voice: its 1024-sample window
+    // could not even represent lags below ~94 Hz (the advertised 60 Hz
+    // floor was physically unreachable), and on breathy / mixed
+    // material the normalized peak rarely cleared the threshold, so
+    // the tuner idled as "unvoiced". YIN at fs/4 covers 60..800 Hz
+    // with margin, costs less, and its cumulative normalization is the
+    // textbook fix for the octave errors the old code hand-patched.
+    constexpr int D  = kTuneDecim;
+    constexpr int DW = kTuneBuf / D;              // 512 frames at fs/4
+    const double dfs = m_fs / D;
 
-    float energy = 0.0f;
-    for (int i = 0; i < W; ++i) energy += frame[i] * frame[i];
-    if (energy < 1e-4f) return -1.0f;    // silence
-
-    // 60..800 Hz covers deep male voice up to sung female vocals (the old
-    // 70..500 window missed a lot of real singing, which read as "autotune
-    // does nothing" on music).
-    const int minLag = static_cast<int>(m_fs / 800.0);
-    const int maxLag = std::min(W / 2, static_cast<int>(m_fs / 60.0));
-    if (maxLag <= minLag) return -1.0f;
-
-    // Store the whole correlation curve so the octave guard below can
-    // compare corr(lag/2) against the global peak.
-    static thread_local std::vector<float> corr;
-    corr.assign(static_cast<size_t>(maxLag + 1), 0.0f);
-
-    float bestCorr = 0.0f;
-    int   bestLag = -1;
-    for (int lag = minLag; lag <= maxLag; ++lag) {
-        float sum = 0.0f, norm = 0.0f;
-        for (int i = 0; i + lag < W; i += 2) {   // stride 2: half cost, ample data
-            sum  += frame[i] * frame[i + lag];
-            norm += frame[i] * frame[i] + frame[i + lag] * frame[i + lag];
-        }
-        float c = (norm > 1e-9f) ? (2.0f * sum / norm) : 0.0f;
-        corr[lag] = c;
-        if (c > bestCorr) { bestCorr = c; bestLag = lag; }
+    // m_tuneW is the next write slot = the OLDEST sample, so reading
+    // from there unrolls the ring chronologically. Boxcar-4 decimation
+    // is enough anti-alias for a pitch band that tops out at 800 Hz.
+    float x[DW];
+    float meanSq = 0.0f;
+    for (int i = 0; i < DW; ++i) {
+        int base = (m_tuneW + i * D) % kTuneBuf;
+        float acc = m_tuneRing[base];
+        for (int j = 1; j < D; ++j)
+            acc += m_tuneRing[(base + j) % kTuneBuf];
+        x[i] = acc * (1.0f / D);
+        meanSq += x[i] * x[i];
     }
-    // 0.30 (was 0.45): voiced-but-breathy material and vocals mixed over
-    // instruments rarely reach 0.45 normalized correlation, so the tuner
-    // spent most of the time "unvoiced" = inaudible.
-    if (bestLag < 0 || bestCorr < 0.30f) return -1.0f;   // unvoiced
-    // Octave-down error guard: for a periodic signal the autocorrelation
-    // peaks at every multiple of the period, and the global max often
-    // lands on 2x the true period (an octave LOW). If half the winning
-    // lag is nearly as strong, the true pitch is the higher octave.
-    int half = bestLag / 2;
-    if (half >= minLag && corr[half] >= 0.90f * bestCorr)
-        bestLag = half;
-    return static_cast<float>(m_fs / bestLag);
+    meanSq /= static_cast<float>(DW);
+    if (meanSq < 1e-6f) return -1.0f;             // silence (< -60 dBFS)
+
+    const int tauMin = std::max(2, static_cast<int>(dfs / 800.0));
+    const int tauMax = std::min(DW - kTuneYinW - 1,
+                                static_cast<int>(dfs / 60.0));
+    if (tauMax <= tauMin) return -1.0f;
+
+    static thread_local std::vector<float> dp;
+    dp.assign(static_cast<size_t>(tauMax) + 1, 1.0f);
+    double cum = 0.0;
+    for (int tau = 1; tau <= tauMax; ++tau) {
+        double s = 0.0;
+        for (int i = 0; i < kTuneYinW; ++i) {
+            float diff = x[i] - x[i + tau];
+            s += diff * diff;
+        }
+        cum += s;
+        dp[tau] = (cum > 1e-12) ? static_cast<float>(s * tau / cum) : 1.0f;
+    }
+
+    // Canonical YIN pick: first dip under the absolute threshold,
+    // walked down to its local minimum. Fallback to the global minimum
+    // (looser threshold) keeps less clearly voiced frames tracking.
+    int tauPick = -1;
+    for (int tau = tauMin; tau <= tauMax; ++tau) {
+        if (dp[tau] < 0.20f) {
+            while (tau + 1 <= tauMax && dp[tau + 1] < dp[tau]) ++tau;
+            tauPick = tau;
+            break;
+        }
+    }
+    if (tauPick < 0) {
+        float best = 1e9f;
+        for (int tau = tauMin; tau <= tauMax; ++tau)
+            if (dp[tau] < best) { best = dp[tau]; tauPick = tau; }
+        if (tauPick < 0 || best > 0.35f) return -1.0f;   // unvoiced
+    }
+
+    // Parabolic refinement: sub-sample lag precision (< 5 cents).
+    float tauF = static_cast<float>(tauPick);
+    if (tauPick > tauMin && tauPick < tauMax) {
+        float a = dp[tauPick - 1], b = dp[tauPick], c = dp[tauPick + 1];
+        float den = a - 2.0f * b + c;
+        if (std::fabs(den) > 1e-9f)
+            tauF += 0.5f * (a - c) / den;
+    }
+    float hz = static_cast<float>(dfs / tauF);
+    return (hz >= 60.0f && hz <= 800.0f) ? hz : -1.0f;
 }
 
-float VoiceFx::nearestScaleFreq(float hz) const {
+float VoiceFx::nearestScaleMidi(float midi) const {
     static const int kMajor[7] = { 0, 2, 4, 5, 7, 9, 11 };
     static const int kMinor[7] = { 0, 2, 3, 5, 7, 8, 10 };
 
-    float midi = 69.0f + 12.0f * std::log2(hz / 440.0f);
     int centre = static_cast<int>(std::lround(midi));
-
     int bestNote = centre;
     float bestDist = 1e9f;
     for (int n = centre - 6; n <= centre + 6; ++n) {
@@ -258,7 +287,7 @@ float VoiceFx::nearestScaleFreq(float hz) const {
         float d = std::fabs(midi - n);
         if (d < bestDist) { bestDist = d; bestNote = n; }
     }
-    return 440.0f * std::pow(2.0f, (bestNote - 69) / 12.0f);
+    return static_cast<float>(bestNote);
 }
 
 void VoiceFx::processTune(float &m) {
@@ -269,15 +298,43 @@ void VoiceFx::processTune(float &m) {
         m_tuneHopCounter = 0;
         float hz = detectPitch();
         if (hz > 0.0f) {
-            float target = nearestScaleFreq(hz);
-            float ratio = target / hz;
+            m_tuneUnvoiced = 0;
+            float midi = 69.0f + 12.0f * std::log2(hz / 440.0f);
+            float nearest = nearestScaleMidi(midi);
+            // Sticky note hold - THE part that makes autotune audible.
+            // Without it every hop retargets the note closest to the
+            // CURRENT pitch, so the correction can never exceed half a
+            // scale step (+-50 cents chromatic) and the glide smears
+            // even that away. Holding the note while the voice drifts
+            // builds the multi-semitone flattening / staircase jumps
+            // that define the effect. The held note is abandoned only
+            // when the voice is decisively closer to another scale
+            // note (0.45 st hysteresis margin) or has clearly left it
+            // (an intentional interval, > 2.5 st away).
+            if (m_tuneHeldMidi < 0.0f) {
+                m_tuneHeldMidi = nearest;
+            } else if (nearest != m_tuneHeldMidi) {
+                float dHeld = std::fabs(midi - m_tuneHeldMidi);
+                float dNew  = std::fabs(midi - nearest);
+                if (dNew + 0.45f < dHeld || dHeld > 2.5f)
+                    m_tuneHeldMidi = nearest;
+            }
+            float targetHz = 440.0f *
+                std::pow(2.0f, (m_tuneHeldMidi - 69.0f) / 12.0f);
+            float ratio = targetHz / hz;
             if (ratio < 0.5f) ratio = 0.5f;
             if (ratio > 2.0f) ratio = 2.0f;
             // Strength warps the correction toward/away from full snap.
             float st = clamp01(m_p.vfxTuneStrength);
             m_tuneRatioTarget = std::exp(std::log(ratio) * st);
-        } else {
-            m_tuneRatioTarget = 1.0f;   // unvoiced: glide back to unity
+        } else if (++m_tuneUnvoiced >= 28) {
+            // ~150 ms without voicing: release the note and glide back
+            // to unity. Short dropouts (consonants, breaths - roughly
+            // half of natural speech) KEEP the running correction; the
+            // old per-hop reset meant speech never held a correction
+            // long enough to hear it.
+            m_tuneHeldMidi = -1.0f;
+            m_tuneRatioTarget = 1.0f;
         }
     }
 

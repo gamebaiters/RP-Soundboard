@@ -184,12 +184,9 @@ MicChannel::MicChannel(QWidget *parent)
     m_gainLabel->setMinimumWidth(44);
     head->addWidget(m_gainLabel);
 
-    m_liveBadge = new QLabel(tr("LIVE"), frame);
-    m_liveBadge->setStyleSheet(
-        "color: white; background-color: #c0392b; font-weight: bold;"
-        "border-radius: 3px; padding: 1px 6px; font-size: 10px;");
-    m_liveBadge->hide();
-    head->addWidget(m_liveBadge);
+    // (The big red "LIVE" pill that used to sit here is gone - the red
+    // frame border + glow already says the voice changer is running, and
+    // the badge was just shouting the same thing twice.)
 
     head->addStretch(1);
 
@@ -398,7 +395,28 @@ MicChannel::MicChannel(QWidget *parent)
 
 void MicChannel::refreshTheme()
 {
-    // Frame follows the app palette automatically; nothing custom yet.
+    applyFrameStyle();
+}
+
+void MicChannel::applyFrameStyle()
+{
+    if (!m_frame) return;
+    // The mic row is a CHANNEL, just a special one - it must carry the same
+    // themed frame as every playback channel (Channel::refreshTheme). It used
+    // to clear its stylesheet when idle, which left it borderless and floating
+    // against the channels background. Live (voice changer on) keeps the red
+    // 2 px border + glow so the "your mic is being processed" state still
+    // shouts louder than a normal channel.
+    const Theme::Derived d = Theme::derive(Theme::colors());
+    if (MicFx::instance().enabled()) {
+        m_frame->setStyleSheet(QString(
+            "#micChannelFrame { border: 2px solid #e03131; border-radius: 6px;"
+            " background-color: %1; }").arg(d.surface.name()));
+    } else {
+        m_frame->setStyleSheet(QString(
+            "#micChannelFrame { border: 1px solid %1; border-radius: 6px;"
+            " background-color: %2; }").arg(d.border.name(), d.surface.name()));
+    }
 }
 
 void MicChannel::pullFromMicFx()
@@ -478,9 +496,8 @@ void MicChannel::applyCompact()
 void MicChannel::updateLiveBadge()
 {
     const bool on = MicFx::instance().enabled();
-    m_liveBadge->setVisible(on);
-    // Red glow on the whole panel while the voice changer is live -
-    // unmissable "the mic is being processed" affordance.
+    // Red border + glow on the whole panel while the voice changer is live -
+    // that IS the affordance now; the separate "LIVE" pill was removed.
     if (m_frame) {
         if (on) {
             auto *glow = new QGraphicsDropShadowEffect(m_frame);
@@ -488,13 +505,12 @@ void MicChannel::updateLiveBadge()
             glow->setOffset(0.0, 0.0);
             glow->setColor(QColor(0xe0, 0x31, 0x31));
             m_frame->setGraphicsEffect(glow);
-            m_frame->setStyleSheet(QStringLiteral(
-                "#micChannelFrame { border: 2px solid #e03131;"
-                " border-radius: 4px; }"));
         } else {
-            m_frame->setGraphicsEffect(nullptr);
-            m_frame->setStyleSheet(QString());
+            m_frame->setGraphicsEffect(nullptr);   // deletes the old effect
         }
+        // Border/background always come from the themed helper - idle must
+        // still look like a channel, not like a bare widget.
+        applyFrameStyle();
     }
 }
 

@@ -11,6 +11,13 @@
 
 static QString fmtPct(int v) { return QString::number(v) + "%"; }
 
+// Channel-row compaction (post-2.3.5): rows are only as tall as the handle
+// needs. HEIGHT ONLY - an attempt to also cap the width made the channel
+// stop filling the window and was rejected outright: the channel row must
+// use ALL the horizontal space it is given. Kept in sync with fx_panel.cpp
+// so both blocks line up.
+static const int kSliderH = 18;
+
 VolumeControl::VolumeControl(QWidget *parent)
     : QWidget(parent)
     , m_local(new FineSlider(Qt::Horizontal, this))
@@ -31,14 +38,20 @@ VolumeControl::VolumeControl(QWidget *parent)
     m_remote->setValue(100);
     m_local->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_remote->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    // Compact rows: the groove is 6 px and the handle 16 px, so anything
+    // above ~18 px is dead air that makes the whole channel taller.
+    m_local ->setFixedHeight(kSliderH);
+    m_remote->setFixedHeight(kSliderH);
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 
     m_capLocal  = new QLabel(tr("Local"),  this);
     m_capRemote = new QLabel(tr("Remote"), this);
+    // Upper bound generous enough for the longest translation ("Riverbero",
+    // "Velocità"): a tight cap ELIDED the caption instead of saving space.
     m_capLocal ->setMinimumWidth(48);
     m_capRemote->setMinimumWidth(48);
-    m_capLocal ->setMaximumWidth(60);
-    m_capRemote->setMaximumWidth(60);
+    m_capLocal ->setMaximumWidth(84);
+    m_capRemote->setMaximumWidth(84);
     m_localLabel->setText(fmtPct(m_local->value()));
     m_remoteLabel->setText(fmtPct(m_remote->value()));
     m_localLabel->setMinimumWidth(36);
@@ -54,8 +67,8 @@ VolumeControl::VolumeControl(QWidget *parent)
 
     auto *grid = new QGridLayout(this);
     grid->setContentsMargins(0,0,0,0);
-    grid->setHorizontalSpacing(2);
-    grid->setVerticalSpacing(2);
+    grid->setHorizontalSpacing(4);
+    grid->setVerticalSpacing(1);
     grid->setColumnStretch(0, 0);   // caption fixed
     grid->setColumnStretch(1, 1);   // slider grows
     grid->setColumnStretch(2, 0);   // value fixed

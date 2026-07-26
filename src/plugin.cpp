@@ -635,7 +635,13 @@ void ts3plugin_onTalkStatusChangeEvent(uint64 serverConnectionHandlerID, int sta
 	anyID myId = 0;
 	if (checkError(ts3Functions.getClientID(serverConnectionHandlerID, &myId), "getClientID error"))
 		return;
-	if (clientID == myId && status == 0 && isReceivedWhisper == 0)
+	if (clientID != myId || isReceivedWhisper != 0)
+		return;
+	// Mirror TS3's own talk state for the local client so the soundboard
+	// can show a live "the server is hearing me" dot. status != 0 means
+	// STATUS_TALKING (whatever triggered it: VAD, PTT or continuous).
+	sb_setSelfTalking(status != 0);
+	if (status == 0)
 		sb_onStopTalking();
 }
 

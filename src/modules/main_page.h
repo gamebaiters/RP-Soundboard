@@ -55,6 +55,7 @@ public:
     void setMuteChecksVisible(bool on);      // Mute locally / myself / Preview
     void setProfileButtonsVisible(bool on);  // P1..P4 + their help bubble
     void setGridSizeVisible(bool on);        // Rows / Cols spinners + labels
+    void setVoiceIndicatorVisible(bool on);  // the "Voice" LED next to them
 
     QVector<Channel *> channels() const   { return m_channels; }
     Channel           *channelAt(int idx) const;
@@ -65,6 +66,9 @@ public:
     // count + waveform-visible flag so the soundboard can shrink when
     // there's only one channel.
     void               updateChannelsAreaHeight(bool waveformVisible);
+    // Settings > "Restore default proportions": puts the grid / channels
+    // splitter back to the factory split and forgets the saved position.
+    void               resetLayoutProportions();
 
     // Show/hide the "not connected" overlay covering the soundboard surface.
     void               setConnected(bool connected);
@@ -158,6 +162,9 @@ private:
     bool                m_wantMuteChecks = true;
     bool                m_wantProfiles   = true;
     bool                m_wantGridSize   = true;
+    bool                m_wantVoiceDot   = true;
+    // 1 px rule between the grid+channels box and the bottom control strip.
+    class QFrame       *m_bottomSeparator = nullptr;
 
     // Preview-only checkbox: when checked, label fades smoothly
     // between two warning colours so the user always sees at a glance
@@ -169,4 +176,11 @@ private:
     class QTimer       *m_previewBlinkTimer = nullptr;
     class QElapsedTimer *m_previewBlinkPhase = nullptr;
     void syncPreviewBlink();   // start/stop based on current check state
+
+    // Live TeamSpeak talk indicator next to the mute checkboxes: a dot
+    // that lights up exactly when TS3 says the local client is
+    // transmitting (its own VAD / PTT decision, polled from the
+    // sb_isSelfTalking atomic). Hidden with the mute group.
+    class TalkStateDot *m_talkDot = nullptr;
+    class QTimer       *m_talkPollTimer = nullptr;
 };

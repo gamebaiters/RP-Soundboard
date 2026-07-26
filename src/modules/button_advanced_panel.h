@@ -31,6 +31,7 @@ class QTimer;
 class QGroupBox;
 class FxPanel;
 class SoundView;
+class SectionBox;
 
 class ButtonAdvancedPanel : public QDialog {
     Q_OBJECT
@@ -74,7 +75,7 @@ private:
     SoundInfo    m_info;
     bool         m_globalFxOn = true;   // mirrors setGlobalFxEnabled()
 
-    QGroupBox   *m_fileBox = nullptr;
+    SectionBox  *m_fileBox = nullptr;
     QLineEdit   *m_filePath;
     QPushButton *m_browse;
     SoundView   *m_soundView;
@@ -93,18 +94,18 @@ private:
     QPushButton *m_imageBrowse;
     QPushButton *m_imageClear;
 
-    QGroupBox   *m_volBox = nullptr;
+    SectionBox  *m_volBox = nullptr;
     QSlider     *m_volume;
     QLabel      *m_volumeLabel;
 
-    QGroupBox   *m_cropGroup;        // checkable - when off, crop is ignored
+    SectionBox  *m_cropGroup;        // checkable - when off, crop is ignored
     QSpinBox    *m_cropStart;
     QComboBox   *m_cropStartUnit;
     QComboBox   *m_cropStopMode;     // "after" / "at"
     QSpinBox    *m_cropStop;
     QComboBox   *m_cropStopUnit;
 
-    QGroupBox   *m_fxGroup;          // checkable - when off, per-button FX
+    SectionBox  *m_fxGroup;          // checkable - when off, per-button FX
                                      // are ignored at playback / preview
     FxPanel     *m_fx;
 
@@ -118,7 +119,7 @@ private:
 
     // Channel behaviour: mandatory temporary channel + full per-button
     // Audio Sandbox package (edited via a private ChannelSandboxDialog).
-    QGroupBox   *m_chanBox = nullptr;
+    SectionBox  *m_chanBox = nullptr;
     QCheckBox   *m_tempChannelChk = nullptr;
     QCheckBox   *m_sandboxRememberChk = nullptr;
     QPushButton *m_sandboxEditBtn = nullptr;

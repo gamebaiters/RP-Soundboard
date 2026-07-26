@@ -138,6 +138,66 @@ void sb_setVoiceBehaviour(bool vadWhilePlaying, bool duckWhenTalking, float duck
 	}
 }
 
+// --- TS3's own transmission state for the local client (post-2.3.5) -----------
+// Mirrors ts3plugin_onTalkStatusChangeEvent for OUR client id. Purely
+// informational: the bottom-bar dot reads it so the user can see whether
+// TeamSpeak currently considers him talking (voice activation / PTT /
+// continuous - whichever he configured). Written from a TS3 callback
+// thread, read from the GUI thread on a timer, hence the atomic.
+static std::atomic<bool> g_selfTalking{false};
+
+// --- Own-voice detection on the capture stream ---------------------------
+// TS3's talk status alone is NOT "the user is speaking": while the soundboard
+// plays, the plugin deliberately forces CONT_TRANS, so the client counts as
+// transmitting even in dead silence. The indicator therefore runs its own VAD
+// on the captured mic block (RMS + envelope + hold, same maths the
+// vadWhilePlaying gate uses) and reports two things:
+//   detected = your voice was picked up by the microphone
+//   passing  = ...AND it is actually reaching the server, i.e. TS3 is
+//              transmitting and the soundboard is not muting your mic
+//              ("mute myself during playback").
+// Written from the TS3 capture thread; the GUI polls. The timestamp lets the
+// getters report "no" when capture callbacks stop (disconnect, mic off)
+// instead of freezing on the last value.
+static std::atomic<bool>    g_micVoiceDetected{false};
+static std::atomic<bool>    g_micVoicePassing{false};
+static std::atomic<int64_t> g_micVoiceStampMs{0};
+
+static int64_t sb_steadyMs()
+{
+	using namespace std::chrono;
+	return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+void sb_setSelfTalking(bool talking)
+{
+	g_selfTalking.store(talking, std::memory_order_relaxed);
+	if (!talking) g_micVoicePassing.store(false, std::memory_order_relaxed);
+}
+
+bool sb_isSelfTalking()
+{
+	return g_selfTalking.load(std::memory_order_relaxed);
+}
+
+// Capture callbacks stop arriving when the mic is off / the client is not
+// connected. Anything older than 400 ms (20 blocks) is stale, not "still true".
+static bool sb_micStateFresh()
+{
+	const int64_t t = g_micVoiceStampMs.load(std::memory_order_relaxed);
+	return t != 0 && (sb_steadyMs() - t) < 400;
+}
+
+bool sb_isMicVoiceDetected()
+{
+	return sb_micStateFresh() && g_micVoiceDetected.load(std::memory_order_relaxed);
+}
+
+bool sb_isMicVoicePassing()
+{
+	return sb_micStateFresh() && g_micVoicePassing.load(std::memory_order_relaxed);
+}
+
 bool hotkeysTemporarilyDisabled = false;
 
 ModelObserver_Prog *modelObserver = NULL;
@@ -274,6 +334,43 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 	if (MicFx::instance().processCapture(samples, sampleCount, channels))
 		*edited |= 0x1;
 
+	// --- Own-voice VAD for the bottom-bar indicator --------------------
+	// Runs on EVERY capture block, before any early return, so the dot
+	// reflects the microphone and not the soundboard. Measured after Mic FX
+	// because that is the signal the server would receive.
+	bool micTalking = false;
+	if (sampleCount > 0)
+	{
+		double sumsq = 0.0;
+		for (int i = 0; i < sampleCount; ++i) {
+			const double v = samples[i * channels];
+			sumsq += v * v;
+		}
+		const double rms = std::sqrt(sumsq / (double)sampleCount);
+		// Envelope + hold so the LED does not strobe on word gaps.
+		static double s_indEnv  = 0.0;
+		static int    s_indHold = 0;
+		s_indEnv = (rms > s_indEnv) ? rms : (s_indEnv * 0.90 + rms * 0.10);
+		const double kIndThresh = 500.0;   // ~ -36 dBFS on int16
+		const int    kIndHold   = 12;      // ~240 ms at 20 ms/block
+		micTalking = s_indEnv > kIndThresh;
+		if (micTalking) s_indHold = kIndHold;
+		else if (s_indHold > 0) { --s_indHold; micTalking = true; }
+	}
+	{
+		// "Passing" = the server really gets this voice. Blocked when the
+		// soundboard is muting the mic during playback (mute-myself), or
+		// when TS3 is not transmitting at all (PTT up / below TS3's own VAD
+		// threshold). Preview-only does NOT block the mic - it only silences
+		// the soundboard on the server side.
+		const bool mutedByPlayback = s->getMuteMyself() && s->anyPlaying();
+		const bool tsTransmitting  = g_selfTalking.load(std::memory_order_relaxed);
+		g_micVoiceDetected.store(micTalking, std::memory_order_relaxed);
+		g_micVoicePassing.store(micTalking && !mutedByPlayback && tsTransmitting,
+		                        std::memory_order_relaxed);
+		g_micVoiceStampMs.store(sb_steadyMs(), std::memory_order_relaxed);
+	}
+
 	if (g_rpsbPreviewOnly)
 	{
 		// Preview-only: server must hear only the real mic. Earlier we
@@ -305,23 +402,11 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 		const bool duckOpt = g_duckWhenTalking.load(std::memory_order_relaxed);
 		if ((vadOpt || duckOpt) && s->anyPlaying() && sampleCount > 0)
 		{
-			// Block RMS of the first channel (mic is mono into TS3 anyway).
-			double sumsq = 0.0;
-			for (int i = 0; i < sampleCount; ++i) {
-				const double v = samples[i * channels];
-				sumsq += v * v;
-			}
-			const double rms = std::sqrt(sumsq / (double)sampleCount);
-
-			// Envelope + hold so the gate/duck doesn't chatter on word gaps.
-			static double s_env = 0.0;
-			static int    s_hold = 0;
-			s_env = (rms > s_env) ? rms : (s_env * 0.90 + rms * 0.10);
-			const double kTalkThresh = 500.0;   // ~ -36 dBFS on int16
-			const int    kHoldBlocks = 12;       // ~240 ms at 20 ms/block
-			bool talking = s_env > kTalkThresh;
-			if (talking) s_hold = kHoldBlocks;
-			else if (s_hold > 0) { --s_hold; talking = true; }
+			// Same detector the indicator uses (RMS + envelope + 240 ms hold),
+			// computed once above. Two envelopes would have drifted apart and
+			// the LED would have disagreed with the gate that is actually
+			// muting the mic.
+			const bool talking = micTalking;
 
 			if (duckOpt) {
 				// Only set the TARGET — fetchSamples ramps the actual gain
@@ -970,7 +1055,12 @@ CAPI void sb_onConnectStatusChange(uint64 serverConnectionHandlerID, int newStat
     Q_UNUSED(errorNumber)
 
     if(newStatus == STATUS_DISCONNECTED)
+	{
 		connectionStatusMap.erase(serverConnectionHandlerID);
+		// No connection = no transmission: clear the talk flag so the
+		// bottom-bar dot cannot stay stuck lit after a disconnect.
+		g_selfTalking.store(false, std::memory_order_relaxed);
+	}
 	else
 		connectionStatusMap[serverConnectionHandlerID] = newStatus;
 

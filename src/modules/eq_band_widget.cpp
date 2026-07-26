@@ -49,6 +49,11 @@ EqBandWidget::EqBandWidget(QWidget *parent) : QSlider(Qt::Vertical, parent)
     setPageStep(10);       // PgUp/PgDn = 1.0 dB
     setMinimumWidth(22);
     setTracking(true);
+    // Hands off: this widget owns its paint (segmented LED column + level
+    // overlay + fader cap). Theme::tagOneSlider skips any slider carrying
+    // this property, so the global self-painted-slider pass cannot replace
+    // the EQ band visual with a generic groove + handle.
+    setProperty("selfPainted", true);
 }
 
 void EqBandWidget::setLevel(float v)

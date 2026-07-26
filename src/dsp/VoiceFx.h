@@ -48,7 +48,7 @@ private:
     // ---- Autotune ----
     void  processTune(float &m);
     float detectPitch();                  // Hz, <= 0 when unvoiced
-    float nearestScaleFreq(float hz) const;
+    float nearestScaleMidi(float midi) const;   // snapped MIDI note
 
     // ---- Formant (FFT OLA) ----
     void  processFormantSample(float &m);
@@ -106,13 +106,17 @@ private:
     float m_excPrevL = 0.0f, m_excPrevR = 0.0f;
 
     // ---- Autotune ----
-    static constexpr int kTuneBuf = 2048;     // detection window
+    static constexpr int kTuneBuf   = 2048;   // detection window (~43 ms)
+    static constexpr int kTuneDecim = 4;      // YIN runs at fs/4 (12 kHz)
+    static constexpr int kTuneYinW  = 288;    // YIN integration window (24 ms)
     float  m_tuneRing[kTuneBuf] = {};
     int    m_tuneW = 0;
     int    m_tuneHopCounter = 0;
     float  m_tuneRatioTarget = 1.0f;
     float  m_tuneRatioSm = 1.0f;
     float  m_tuneSmCoeff = 0.05f;
+    float  m_tuneHeldMidi = -1.0f;   // scale note currently held (-1 = none)
+    int    m_tuneUnvoiced = 0;       // consecutive unvoiced detection hops
     PitchShiftGrain m_tuneShift;
 
     // ---- Formant ----

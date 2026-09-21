@@ -1,3 +1,22 @@
+GameBaiters Soundboard v2.4.3
+==============================================================
+
+Defensive fix: the microphone can no longer be held silent by the
+GameBaiters TTS plugin (when both are installed) for longer than a
+few seconds under any circumstances.
+
+* FIX - The cross-plugin coexistence bridge (v2.4.0) let the TTS
+  plugin ask the soundboard to silence/duck the real microphone while
+  it is speaking. If the TTS side ever got stuck signalling "still
+  speaking" (a bug or a version mismatch on its end), the soundboard
+  had no way to know and would keep honouring it indefinitely - your
+  mic would stay silent for everyone else until you restarted
+  TeamSpeak. The soundboard now ignores that signal after 8 seconds of
+  it being continuously asserted (a real utterance plus its effects'
+  ring-out never takes that long) and resumes normal mic behaviour on
+  its own; it re-applies the signal again the moment the TTS
+  genuinely asks for it on a fresh utterance.
+
 GameBaiters Soundboard v2.4.2
 ==============================================================
 

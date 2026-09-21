@@ -487,6 +487,29 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 	GbBridge::Shared *bridge = g_audioBridge.get();
 	const bool haveTts = bridge && bridge->readTts(s_ttsPull, GbBridge::kMaxFrames * 2,
 	                                                ttsFrames, ttsChannels, ttsPolicy, ttsAudioActive);
+	// Safety valve: the TTS plugin is a SEPARATE process/DLL this code
+	// cannot fully verify the state of. A real TTS utterance (plus its
+	// own effects ring-out) is capped at a few seconds on the TTS side;
+	// if a Silence/Duck policy stays continuously asserted well past
+	// that, something on the TTS side is stuck (a bug there, or a
+	// version mismatch) - never let another plugin hold this client's
+	// microphone shut indefinitely. Self-heals: the moment the policy
+	// genuinely returns to None (or goes stale), the timer resets.
+	{
+		static int64_t s_ttsPolicyStartMs = 0;
+		constexpr int64_t kMaxTtsMicHoldMs = 8000;
+		const int64_t nowMsV = GbBridge::nowMsSteady();
+		if (ttsPolicy == GbBridge::MicPolicy::None) {
+			s_ttsPolicyStartMs = 0;
+		} else {
+			if (s_ttsPolicyStartMs == 0) s_ttsPolicyStartMs = nowMsV;
+			if (nowMsV - s_ttsPolicyStartMs > kMaxTtsMicHoldMs) {
+				logDebug("TTS bridge mic policy held for over %lldms - ignoring until it clears",
+				         (long long)kMaxTtsMicHoldMs);
+				ttsPolicy = GbBridge::MicPolicy::None;
+			}
+		}
+	}
 	if (ttsPolicy == GbBridge::MicPolicy::Silence) {
 		std::fill_n(samples, (size_t)sampleCount * channels, (short)0);
 		*edited |= 0x1;

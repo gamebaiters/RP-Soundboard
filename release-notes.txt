@@ -1,3 +1,19 @@
+GameBaiters Soundboard v2.4.1
+==============================================================
+
+Hotfix for a v2.4.0 regression: the own-voice indicator stopped
+detecting speech entirely for some users.
+
+* FIX - v2.4.0 changed the own-voice indicator to read TS3's live mic
+  level directly from the SDK, but used the result unconditionally
+  with no check on whether the call actually succeeded - on some
+  TeamSpeak client/SDK builds it silently never did, and the LED
+  stopped detecting speech at all. It now measures the microphone the
+  same proven way as before (RMS on the real captured samples, which
+  cannot fail) and only uses the SDK's reported threshold - sanity-
+  checked - as an improvement when available, falling back to the
+  previous fixed threshold otherwise. Cannot go silent again.
+
 GameBaiters Soundboard v2.4.0
 ==============================================================
 

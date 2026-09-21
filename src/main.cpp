@@ -360,16 +360,34 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 	bool micTalking = false;
 	if (sampleCount > 0)
 	{
-		// The threshold is NEVER a soundboard slider - it mirrors TS3's
-		// own voice-activation setting exactly, read live from the
-		// client via the same SDK preprocessor idents TS3's own VAD
-		// uses internally: "level" is TS3's real-time measured mic
-		// level in dB, compared against the user's configured
-		// "voiceactivation_level". The config value essentially never
-		// changes while connected, so it is cached and re-read every
-		// ~500 ms instead of doing a string alloc/free on every 20 ms
-		// block; the live level is read fresh every block.
-		static float s_vadThresholdDb       = -40.0f;
+		// Measure the mic ourselves (RMS + envelope on the actual capture
+		// samples) - this is the proven, known-working signal path from
+		// before v2.4.0. Only the THRESHOLD it's compared against tries
+		// to mirror TS3's own configured voice-activation level, read
+		// live via the SDK, instead of the old hardcoded constant.
+		//
+		// v2.4.0 replaced the measurement itself with
+		// getPreProcessorInfoValueFloat(.., "level", ..) and used its
+		// result unconditionally, with no check on the call's return
+		// code and no sanity bound on the value - if that ident is not
+		// what it was assumed to be on a given TS3 client/SDK build (it
+		// was never verified against real SDK docs/samples), the level
+		// silently stayed at a permanently-too-low default and the
+		// indicator never fired at all. Fixed by going back to
+		// measuring the real samples (cannot fail) and only trusting
+		// the SDK-reported threshold when the call succeeds AND the
+		// value is in a sane dBFS-ish range; otherwise it keeps the
+		// previous known-good constant instead of going silent forever.
+		double sumsq = 0.0;
+		for (int i = 0; i < sampleCount; ++i) {
+			const double v = samples[i * channels];
+			sumsq += v * v;
+		}
+		const double rms = std::sqrt(sumsq / (double)sampleCount);
+		static double s_indEnv = 0.0;
+		s_indEnv = (rms > s_indEnv) ? rms : (s_indEnv * 0.90 + rms * 0.10);
+
+		static double s_indThreshRms          = 500.0;   // ~ -36 dBFS on int16, the old proven default
 		static qint64 s_vadThresholdRefreshMs = 0;
 		const qint64 nowMs = sb_steadyMs();
 		if (nowMs - s_vadThresholdRefreshMs >= 500)
@@ -378,21 +396,21 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 			if (ts3Functions.getPreProcessorConfigValue(serverConnectionHandlerID, "voiceactivation_level", &thStr) == ERROR_ok && thStr)
 			{
 				bool ok = false;
-				float v = QString::fromUtf8(thStr).toFloat(&ok);
-				if (ok) s_vadThresholdDb = v;
+				const double db = QString::fromUtf8(thStr).toDouble(&ok);
 				ts3Functions.freeMemory(thStr);
+				// Sanity-bound before trusting it: a wrong/unsupported
+				// ident could return 0, an error string parsed as 0, or
+				// something out of any plausible dBFS threshold range.
+				if (ok && db > -80.0 && db < 20.0)
+					s_indThreshRms = 32768.0 * std::pow(10.0, db / 20.0);
 			}
 			s_vadThresholdRefreshMs = nowMs;
 		}
 
-		float levelDb = -96.0f;
-		ts3Functions.getPreProcessorInfoValueFloat(serverConnectionHandlerID, "level", &levelDb);
-
-		// Hold so the LED does not strobe on word gaps (TS3 applies its
-		// own "voiceactivation_hold" the same way to the real gate).
+		// Hold so the LED does not strobe on word gaps.
 		static int s_indHold = 0;
 		const int  kIndHold  = 12;   // ~240 ms at 20 ms/block
-		const bool above = levelDb > s_vadThresholdDb;
+		const bool above = s_indEnv > s_indThreshRms;
 		micTalking = above;
 		if (above) s_indHold = kIndHold;
 		else if (s_indHold > 0) { --s_indHold; micTalking = true; }

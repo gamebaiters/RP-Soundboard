@@ -124,6 +124,20 @@ static std::atomic<bool>  g_vadWhilePlaying{false};
 static std::atomic<bool>  g_duckWhenTalking{false};
 static std::atomic<float> g_duckAmount{0.4f};
 
+// Own-voice detection threshold (own-voice indicator, vadWhilePlaying gate,
+// duckWhenTalking gate - all share the same detector). Plain user slider in
+// dBFS, NOT auto-read from the TS3 SDK - see sb_handleCaptureData's own-voice
+// VAD block for why. Default matches the value that shipped for years before
+// v2.4.0 ever touched this code.
+static std::atomic<float> g_micDetectThreshDb{-36.0f};
+
+void sb_setMicDetectThreshDb(float db)
+{
+	if (db < -60.0f) db = -60.0f;
+	if (db > -6.0f)  db = -6.0f;
+	g_micDetectThreshDb.store(db, std::memory_order_relaxed);
+}
+
 void sb_setVoiceBehaviour(bool vadWhilePlaying, bool duckWhenTalking, float duckAmount)
 {
 	g_vadWhilePlaying.store(vadWhilePlaying);
@@ -361,23 +375,18 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 	if (sampleCount > 0)
 	{
 		// Measure the mic ourselves (RMS + envelope on the actual capture
-		// samples) - this is the proven, known-working signal path from
-		// before v2.4.0. Only the THRESHOLD it's compared against tries
-		// to mirror TS3's own configured voice-activation level, read
-		// live via the SDK, instead of the old hardcoded constant.
-		//
-		// v2.4.0 replaced the measurement itself with
-		// getPreProcessorInfoValueFloat(.., "level", ..) and used its
-		// result unconditionally, with no check on the call's return
-		// code and no sanity bound on the value - if that ident is not
-		// what it was assumed to be on a given TS3 client/SDK build (it
-		// was never verified against real SDK docs/samples), the level
-		// silently stayed at a permanently-too-low default and the
-		// indicator never fired at all. Fixed by going back to
-		// measuring the real samples (cannot fail) and only trusting
-		// the SDK-reported threshold when the call succeeds AND the
-		// value is in a sane dBFS-ish range; otherwise it keeps the
-		// previous known-good constant instead of going silent forever.
+		// samples) - the proven, known-working signal path from before
+		// v2.4.0. The THRESHOLD is a plain user-adjustable slider
+		// (Settings -> Voice, "Mic detection level", sb_setMicDetectThreshDb)
+		// instead of trying to auto-read it from the TS3 SDK: v2.4.0 and
+		// v2.4.1 both tried to mirror TS3's own configured level via
+		// getPreProcessorInfoValueFloat()/getPreProcessorConfigValue(),
+		// and on at least one real TS3 client/SDK build those calls
+		// never returned anything usable (undocumented idents in this
+		// SDK copy, unverified) - the indicator went completely silent
+		// twice. A direct slider can never silently misread an
+		// undocumented API; it defaults to the old proven constant
+		// (-36 dBFS) so behaviour is unchanged until the user touches it.
 		double sumsq = 0.0;
 		for (int i = 0; i < sampleCount; ++i) {
 			const double v = samples[i * channels];
@@ -387,30 +396,13 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 		static double s_indEnv = 0.0;
 		s_indEnv = (rms > s_indEnv) ? rms : (s_indEnv * 0.90 + rms * 0.10);
 
-		static double s_indThreshRms          = 500.0;   // ~ -36 dBFS on int16, the old proven default
-		static qint64 s_vadThresholdRefreshMs = 0;
-		const qint64 nowMs = sb_steadyMs();
-		if (nowMs - s_vadThresholdRefreshMs >= 500)
-		{
-			char *thStr = nullptr;
-			if (ts3Functions.getPreProcessorConfigValue(serverConnectionHandlerID, "voiceactivation_level", &thStr) == ERROR_ok && thStr)
-			{
-				bool ok = false;
-				const double db = QString::fromUtf8(thStr).toDouble(&ok);
-				ts3Functions.freeMemory(thStr);
-				// Sanity-bound before trusting it: a wrong/unsupported
-				// ident could return 0, an error string parsed as 0, or
-				// something out of any plausible dBFS threshold range.
-				if (ok && db > -80.0 && db < 20.0)
-					s_indThreshRms = 32768.0 * std::pow(10.0, db / 20.0);
-			}
-			s_vadThresholdRefreshMs = nowMs;
-		}
+		const double threshDb  = g_micDetectThreshDb.load(std::memory_order_relaxed);
+		const double threshRms = 32768.0 * std::pow(10.0, threshDb / 20.0);
 
 		// Hold so the LED does not strobe on word gaps.
 		static int s_indHold = 0;
 		const int  kIndHold  = 12;   // ~240 ms at 20 ms/block
-		const bool above = s_indEnv > s_indThreshRms;
+		const bool above = s_indEnv > threshRms;
 		micTalking = above;
 		if (above) s_indHold = kIndHold;
 		else if (s_indHold > 0) { --s_indHold; micTalking = true; }

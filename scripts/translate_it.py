@@ -161,6 +161,14 @@ TRANSLATIONS: dict[str, str] = {
         "Controlla aggiornamenti",
     "A newer version is available, but no macOS build has been published for it yet. Please check back later.":
         "È disponibile una versione più recente, ma non è ancora stata pubblicata una build per macOS. Riprova più tardi.",
+    "Own-voice detection":
+        "Rilevamento della propria voce",
+    "Detection level: -36 dB":
+        "Livello di rilevamento: -36 dB",
+    "Detection level: %1 dB":
+        "Livello di rilevamento: %1 dB",
+    "How loud you need to be for the soundboard to count it as &quot;you are\ntalking&quot; (own-voice indicator, and the two options above). Lower =\nmore sensitive, picks up quieter speech; higher = less sensitive,\nignores more background noise.":
+        "Quanto devi essere forte perché la soundboard consideri che stai\nparlando (indicatore voce, e le due opzioni sopra). Più basso =\npiù sensibile, capta anche la voce sommessa; più alto = meno\nsensibile, ignora più rumore di fondo.",
 }
 
 

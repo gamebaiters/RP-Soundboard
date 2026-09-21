@@ -308,6 +308,11 @@ public:
 	// How much to lower the soundboard while talking, 0..90 percent. Default 40.
 	inline int getDuckAmountPercent() const { return m_duckAmountPercent; }
 	void setDuckAmountPercent(int pct);
+	// Own-voice detection threshold (dBFS, -60..-6) shared by the own-voice
+	// indicator LED and the two gates above. Default -36 matches the fixed
+	// constant this used to be before it became a slider (v2.4.2).
+	inline int getMicDetectThreshDb() const { return m_micDetectThreshDb; }
+	void setMicDetectThreshDb(int db);
 
 	inline bool getResetChVolume() const { return m_resetChVolume; }
 	void setResetChVolume(bool on);
@@ -422,6 +427,7 @@ private:
 	bool m_vadWhilePlaying        = false;
 	bool m_duckWhenTalking        = false;
 	int  m_duckAmountPercent      = 40;
+	int  m_micDetectThreshDb      = -36;
 
 	bool m_resetChVolume     = true;
 	bool m_resetChFx         = true;

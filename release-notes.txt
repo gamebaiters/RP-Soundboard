@@ -1,3 +1,18 @@
+GameBaiters Soundboard v2.4.2
+==============================================================
+
+Second hotfix for the own-voice indicator: v2.4.1 kept it working with a
+fixed threshold, but "fixed" doesn't fit every microphone.
+
+* NEW - Settings -> Voice & transmission -> "Own-voice detection":
+  a plain slider for how loud you need to be before the soundboard
+  counts it as you talking (own-voice indicator, voice-activation-
+  while-playing, and ducking all use it). Replaces the attempt to
+  auto-read this from the TeamSpeak client via an undocumented SDK
+  call, which twice turned out to silently return nothing usable on
+  some TS3 builds. The slider defaults to the same level that was
+  hardcoded before v2.4.0, so nothing changes until you move it.
+
 GameBaiters Soundboard v2.4.1
 ==============================================================
 

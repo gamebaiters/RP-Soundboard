@@ -4029,7 +4029,7 @@ sentirsi mentre si parla distrae.</translation>
         <translation>Importazione riuscita</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3112"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3118"/>
         <source>(unknown file)</source>
         <translation>(file sconosciuto)</translation>
     </message>
@@ -4059,77 +4059,77 @@ sentirsi mentre si parla distrae.</translation>
         <translation>Errore sconosciuto</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1174"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1176"/>
         <source>Export profile %1</source>
         <translation>Esporta profilo %1</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1175"/>
-        <location filename="../modules/main_page_wiring.cpp" line="1183"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1177"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1185"/>
         <source>Soundboard profile (*.ini);;All files (*.*)</source>
         <translation>Profilo soundboard (*.ini);;Tutti i file (*.*)</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1178"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1180"/>
         <source>Export profile</source>
         <translation>Esporta profilo</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1179"/>
-        <location filename="../modules/main_page_wiring.cpp" line="1225"/>
-        <location filename="../modules/main_page_wiring.cpp" line="1256"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1181"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1227"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1258"/>
         <source>Failed to write %1</source>
         <translation>Scrittura di %1 fallita</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1182"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1184"/>
         <source>Import profile %1</source>
         <translation>Importa profilo %1</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1187"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1189"/>
         <source>Import profile</source>
         <translation>Importa profilo</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1217"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1219"/>
         <source>Export configuration</source>
         <translation>Esporta configurazione</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1219"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1221"/>
         <source>Legacy soundboard INI (*.ini);;Wrapped JSON (*.json);;All files (*.*)</source>
         <translation>INI legacy (*.ini);;JSON (*.json);;Tutti i file (*.*)</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1224"/>
-        <location filename="../modules/main_page_wiring.cpp" line="4461"/>
-        <location filename="../modules/main_page_wiring.cpp" line="4466"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1226"/>
+        <location filename="../modules/main_page_wiring.cpp" line="4467"/>
+        <location filename="../modules/main_page_wiring.cpp" line="4472"/>
         <source>Export</source>
         <translation>Esporta</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1228"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1230"/>
         <source>Import configuration</source>
         <translation>Importa configurazione</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1230"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1232"/>
         <source>Soundboard config (*.ini *.json);;Legacy INI (*.ini);;Wrapped JSON (*.json);;All files (*.*)</source>
         <translation>Config soundboard (*.ini *.json);;INI legacy (*.ini);;JSON (*.json);;Tutti i file (*.*)</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1236"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1238"/>
         <source>Import</source>
         <translation>Importa</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1339"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1341"/>
         <source>Copy theme</source>
         <translation>Copia tema</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1340"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1342"/>
         <source>Theme copied to clipboard:
 
 %1
@@ -4142,30 +4142,30 @@ Send that string to anyone running this soundboard and they can paste it via Pas
 Invia la stringa a chi usa questa soundboard: potrà incollarla con Incolla tema.</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1347"/>
-        <location filename="../modules/main_page_wiring.cpp" line="1384"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1349"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1386"/>
         <source>Paste theme</source>
         <translation>Incolla tema</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1348"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1350"/>
         <source>Theme share string:</source>
         <translation>Stringa di condivisione tema:</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1385"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1387"/>
         <source>That doesn&apos;t look like a valid theme string.
 Expected format: GBSB4#XXXXXX#XXXXXX#XXXXXX#XXXXXX#XXXXXX#NN</source>
         <translation>Non sembra una stringa di tema valida.
 Formato atteso: GBSB4#XXXXXX#XXXXXX#XXXXXX#XXXXXX#XXXXXX#NN</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1406"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1408"/>
         <source>Reset all hotkeys</source>
         <translation>Reset tutti i tasti</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1407"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1409"/>
         <source>Stop every saved hotkey from triggering a button?
 
 This wipes the soundboard&apos;s local list of hotkeys. TeamSpeak&apos;s hotkey profile still holds the binding until you remove it via TeamSpeak&apos;s hotkey settings.</source>
@@ -4174,47 +4174,47 @@ This wipes the soundboard&apos;s local list of hotkeys. TeamSpeak&apos;s hotkey 
 Cancella l&apos;elenco locale delle scorciatoie. Il profilo di TeamSpeak conserva l&apos;associazione finché non la rimuovi dalle sue impostazioni.</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1582"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1588"/>
         <source>Saved to the button.</source>
         <translation>Salvato nel pulsante.</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2216"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2222"/>
         <source>Mic FX</source>
         <translation>Mic FX</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3146"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3152"/>
         <source>No file assigned</source>
         <translation>Nessun file assegnato</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3149"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3155"/>
         <source>File not found</source>
         <translation>File non trovato</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3150"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3156"/>
         <source>Permission denied</source>
         <translation>Permesso negato</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3151"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3157"/>
         <source>Empty file</source>
         <translation>File vuoto</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3152"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3158"/>
         <source>Unsupported format or corrupt file</source>
         <translation>Formato non supportato o file corrotto</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3155"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3161"/>
         <source>%1 — %2</source>
         <translation>%1 — %2</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2195"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2201"/>
         <source>Macro %1</source>
         <translation>Macro %1</translation>
     </message>
@@ -4229,49 +4229,49 @@ Cancella l&apos;elenco locale delle scorciatoie. Il profilo di TeamSpeak conserv
         <translation>Questo link è una playlist. Salvare l&apos;intera playlist nel pulsante, o solo questo video?</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2225"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2231"/>
         <source>Choose sound file</source>
         <translation>Scegli file audio</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2226"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2232"/>
         <source>Audio (*.mp3 *.wav *.flac *.ogg *.opus *.aac *.m4a);;All files (*.*)</source>
         <translation>Audio (*.mp3 *.wav *.flac *.ogg *.opus *.aac *.m4a);;Tutti i file (*.*)</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2241"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2247"/>
         <source>Rename macro</source>
         <translation>Rinomina macro</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2242"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2248"/>
         <source>Macro name:</source>
         <translation>Nome macro:</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3780"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3786"/>
         <source>Channel 1</source>
         <translation>Canale 1</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3969"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3975"/>
         <source>Pause every active channel</source>
         <translation>Metti in pausa ogni canale attivo</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3973"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3979"/>
         <source>Resume all</source>
         <translation>Riprendi tutto</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3967"/>
-        <location filename="../modules/main_page_wiring.cpp" line="3986"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3973"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3992"/>
         <source>Pause all</source>
         <translation>Pausa tutto</translation>
     </message>
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="445"/>
-        <location filename="../modules/main_page_wiring.cpp" line="1923"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1929"/>
         <source>Couldn&apos;t load the link.
 %1</source>
         <translation>Impossibile caricare il link.
@@ -4282,14 +4282,14 @@ Cancella l&apos;elenco locale delle scorciatoie. Il profilo di TeamSpeak conserv
         <location filename="../modules/main_page_wiring.cpp" line="484"/>
         <location filename="../modules/main_page_wiring.cpp" line="643"/>
         <location filename="../modules/main_page_wiring.cpp" line="644"/>
-        <location filename="../modules/main_page_wiring.cpp" line="2074"/>
-        <location filename="../modules/main_page_wiring.cpp" line="2112"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2080"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2118"/>
         <source>Playlist</source>
         <translation>Playlist</translation>
     </message>
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="480"/>
-        <location filename="../modules/main_page_wiring.cpp" line="2428"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2434"/>
         <source>Channel %1</source>
         <translation>Canale %1</translation>
     </message>
@@ -4356,50 +4356,50 @@ Cancella l&apos;elenco locale delle scorciatoie. Il profilo di TeamSpeak conserv
 %1</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1953"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1959"/>
         <source>Loading…</source>
         <translation>Caricamento…</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2004"/>
-        <location filename="../modules/main_page_wiring.cpp" line="2009"/>
-        <location filename="../modules/main_page_wiring.cpp" line="2014"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2010"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2015"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2020"/>
         <source>Save link</source>
         <translation>Salva link</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2005"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2011"/>
         <source>URL / YouTube streaming is disabled in Settings.</source>
         <translation>Lo streaming URL / YouTube è disattivato nelle Impostazioni.</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2010"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2016"/>
         <source>Paste a video / audio link (YouTube, etc.):</source>
         <translation>Incolla un link video / audio (YouTube, ecc.):</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2015"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2021"/>
         <source>That does not look like a valid link.</source>
         <translation>Questo non sembra un link valido.</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2029"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2035"/>
         <source>Loading...</source>
         <translation>Caricamento...</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2096"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2102"/>
         <source>(link)</source>
         <translation>(link)</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2115"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2121"/>
         <source>Playlist saved to the button.</source>
         <translation>Playlist salvata nel pulsante.</translation>
     </message>
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="753"/>
-        <location filename="../modules/main_page_wiring.cpp" line="2124"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2130"/>
         <source>Choose destination folder</source>
         <translation>Scegli la cartella di destinazione</translation>
     </message>
@@ -4454,91 +4454,91 @@ Cancella l&apos;elenco locale delle scorciatoie. Il profilo di TeamSpeak conserv
         <translation>Questa è una diretta — non ha una fine, quindi non può essere esportata in un file.</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1246"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1248"/>
         <source>Full soundboard backup</source>
         <translation>Backup completo della soundboard</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1247"/>
-        <location filename="../modules/main_page_wiring.cpp" line="1261"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1249"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1263"/>
         <source>Soundboard backup (*.gbsb);;All files (*.*)</source>
         <translation>Backup soundboard (*.gbsb);;Tutti i file (*.*)</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1250"/>
-        <location filename="../modules/main_page_wiring.cpp" line="1255"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1252"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1257"/>
         <source>Full backup</source>
         <translation>Backup completo</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1251"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1253"/>
         <source>Backup saved. It contains EVERYTHING: buttons, channels, presets, Mic FX, theme and every setting.</source>
         <translation>Backup salvato. Contiene TUTTO: pulsanti, canali, preset, Mic FX, tema e ogni impostazione.</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1260"/>
-        <location filename="../modules/main_page_wiring.cpp" line="1263"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1262"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1265"/>
         <source>Restore full backup</source>
         <translation>Ripristina backup completo</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1264"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1266"/>
         <source>This OVERWRITES the entire current soundboard configuration with the backup. Continue?</source>
         <translation>Questa operazione SOSTITUISCE l&apos;intera configurazione attuale della soundboard con quella del backup. Continuare?</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1270"/>
-        <location filename="../modules/main_page_wiring.cpp" line="1279"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1272"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1281"/>
         <source>Restore</source>
         <translation>Ripristina</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1280"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1282"/>
         <source>Backup restored. Restart TeamSpeak to apply every last setting (channels, layout, ...).</source>
         <translation>Backup ripristinato. Riavvia TeamSpeak per applicare tutte le impostazioni (canali, layout, ...).</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="1989"/>
+        <location filename="../modules/main_page_wiring.cpp" line="1995"/>
         <source>Not a supported audio file.</source>
         <translation>File audio non supportato.</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2891"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2897"/>
         <source>Did you know? You can paste and play a YouTube video directly — just paste the link as the channel name. Try it now!</source>
         <translation>Lo sapevi? Puoi incollare e riprodurre direttamente un video di YouTube — basta incollare il link come nome del canale. Provalo ora!</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3142"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3148"/>
         <source>Network stream error</source>
         <translation>Errore stream di rete</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3143"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3149"/>
         <source>stream</source>
         <translation>stream</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3274"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3280"/>
         <source>Reverb engine</source>
         <translation>Motore riverbero</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3285"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3291"/>
         <source>Engine:</source>
         <translation>Motore:</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3287"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3293"/>
         <source>Algorithmic (classic)</source>
         <translation>Algoritmico (classico)</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3288"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3294"/>
         <source>Convolution (IR)</source>
         <translation>Convoluzione (IR)</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3290"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3296"/>
         <source>Algorithmic = the classic Freeverb engine (cheap).
 Convolution = real impulse-response reverb: denser,
 richer tails at a higher CPU cost. The wet amount is
@@ -4549,98 +4549,98 @@ più dense e ricche a un costo CPU maggiore. La quantità wet è
 lo slider Riverbero di questo canale in entrambi i motori.</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3296"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3302"/>
         <source>IR preset:</source>
         <translation>IR preset:</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3298"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3304"/>
         <source>Hall</source>
         <translation>Hall</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3299"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3305"/>
         <source>Church</source>
         <translation>Chiesa</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3300"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3306"/>
         <source>Room</source>
         <translation>Room</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3301"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3307"/>
         <source>Spring</source>
         <translation>Spring</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3310"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3316"/>
         <source>Load IR...</source>
         <translation>Carica IR...</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3311"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3317"/>
         <source>Use any audio file as the impulse response (first 2 s).</source>
         <translation>Usa un file audio qualsiasi come risposta all&apos;impulso (primi 2 s).</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3313"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3319"/>
         <source>Preset IR</source>
         <translation>IR preset</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3314"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3320"/>
         <source>Drop the custom IR file and use the preset above.</source>
         <translation>Scarta il file IR personalizzato e usa il preset qui sopra.</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3326"/>
-        <location filename="../modules/main_page_wiring.cpp" line="3367"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3332"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3373"/>
         <source>Using preset IR</source>
         <translation>Uso IR preset</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3327"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3333"/>
         <source>IR: %1</source>
         <translation>IR: %1</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3353"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3359"/>
         <source>Load impulse response</source>
         <translation>Carica risposta all&apos;impulso</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3354"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3360"/>
         <source>Audio files (*.wav *.flac *.mp3 *.ogg *.m4a);;All files (*.*)</source>
         <translation>File audio (*.wav *.flac *.mp3 *.ogg *.m4a);;Tutti i file (*.*)</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3975"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3981"/>
         <source>Resume every paused channel</source>
         <translation>Riprendi ogni canale in pausa</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3979"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3985"/>
         <source>Replay all</source>
         <translation>Riproduci tutto</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3981"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3987"/>
         <source>Replay every channel that still has a sound loaded</source>
         <translation>Riproduce ogni canale che ha ancora un suono caricato</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="3988"/>
+        <location filename="../modules/main_page_wiring.cpp" line="3994"/>
         <source>No active or replayable channels</source>
         <translation>Nessun canale attivo o rieseguibile</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="4238"/>
+        <location filename="../modules/main_page_wiring.cpp" line="4244"/>
         <source>Buffering stream…</source>
         <translation>Buffering dello stream…</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="4279"/>
+        <location filename="../modules/main_page_wiring.cpp" line="4285"/>
         <source>Network error — this stream could not be played. Try again in a moment.</source>
         <translation>Errore di rete — impossibile riprodurre questo stream. Riprova tra un momento.</translation>
     </message>
@@ -4679,12 +4679,12 @@ Vuoi assegnarlo anche a un pulsante della soundboard? Clicca Sì, poi clicca la 
         <translation>Clicca una cella della soundboard per salvarci l&apos;audio.</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="4462"/>
+        <location filename="../modules/main_page_wiring.cpp" line="4468"/>
         <source>No audio file loaded on this channel.</source>
         <translation>Nessun file audio su questo canale.</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="4467"/>
+        <location filename="../modules/main_page_wiring.cpp" line="4473"/>
         <source>Source file no longer exists:
 %1</source>
         <translation>Il file sorgente non esiste più:
@@ -4692,28 +4692,28 @@ Vuoi assegnarlo anche a un pulsante della soundboard? Clicca Sì, poi clicca la 
     </message>
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="815"/>
-        <location filename="../modules/main_page_wiring.cpp" line="4476"/>
+        <location filename="../modules/main_page_wiring.cpp" line="4482"/>
         <source>WAV (PCM 16-bit) (*.wav);;FLAC (lossless) (*.flac);;OGG Vorbis (*.ogg);;AAC / M4A (*.m4a);;All files (*.*)</source>
         <translation>WAV (PCM 16-bit) (*.wav);;FLAC (lossless) (*.flac);;OGG Vorbis (*.ogg);;AAC / M4A (*.m4a);;Tutti i file (*.*)</translation>
     </message>
     <message>
         <location filename="../modules/main_page_wiring.cpp" line="818"/>
-        <location filename="../modules/main_page_wiring.cpp" line="4479"/>
+        <location filename="../modules/main_page_wiring.cpp" line="4485"/>
         <source>Export audio with DSP</source>
         <translation>Esporta audio con DSP</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2767"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2773"/>
         <source>Create loop area %1 → %2 (%3 s)?</source>
         <translation>Crea area di loop %1 → %2 (%3 s)?</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2772"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2778"/>
         <source>Yes</source>
         <translation>Sì</translation>
     </message>
     <message>
-        <location filename="../modules/main_page_wiring.cpp" line="2773"/>
+        <location filename="../modules/main_page_wiring.cpp" line="2779"/>
         <source>No</source>
         <translation>No</translation>
     </message>
@@ -5343,37 +5343,64 @@ resta ben udibile, poi torna quando smetti.</translation>
     </message>
     <message>
         <location filename="../modules/settings_window.cpp" line="907"/>
-        <location filename="../modules/settings_window.cpp" line="1145"/>
+        <location filename="../modules/settings_window.cpp" line="1171"/>
         <source>Lower by: %1%</source>
         <translation>Abbassa di: %1%</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="912"/>
+        <location filename="../modules/settings_window.cpp" line="913"/>
+        <source>Detection level: -36 dB</source>
+        <translation>Livello di rilevamento: -36 dB</translation>
+    </message>
+    <message>
+        <location filename="../modules/settings_window.cpp" line="914"/>
+        <source>Own-voice detection</source>
+        <translation>Rilevamento della propria voce</translation>
+    </message>
+    <message>
+        <location filename="../modules/settings_window.cpp" line="916"/>
+        <source>How loud you need to be for the soundboard to count it as &quot;you are
+talking&quot; (own-voice indicator, and the two options above). Lower =
+more sensitive, picks up quieter speech; higher = less sensitive,
+ignores more background noise.</source>
+        <translation>Quanto devi essere forte perché la soundboard consideri che stai
+parlando (indicatore voce, e le due opzioni sopra). Più basso =
+più sensibile, capta anche la voce sommessa; più alto = meno
+sensibile, ignora più rumore di fondo.</translation>
+    </message>
+    <message>
+        <location filename="../modules/settings_window.cpp" line="931"/>
+        <location filename="../modules/settings_window.cpp" line="1176"/>
+        <source>Detection level: %1 dB</source>
+        <translation>Livello di rilevamento: %1 dB</translation>
+    </message>
+    <message>
+        <location filename="../modules/settings_window.cpp" line="936"/>
         <source>General</source>
         <translation>Generale</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="913"/>
+        <location filename="../modules/settings_window.cpp" line="937"/>
         <source>Streaming (YouTube / URL)</source>
         <translation>Streaming (YouTube / URL)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="914"/>
+        <location filename="../modules/settings_window.cpp" line="938"/>
         <source>Voice &amp;&amp; transmission</source>
         <translation>Voce e trasmissione</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="916"/>
+        <location filename="../modules/settings_window.cpp" line="940"/>
         <source>Audio sandbox &amp;&amp; 3D HRTF</source>
         <translation>Audio sandbox &amp;&amp; HRTF 3D</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="924"/>
+        <location filename="../modules/settings_window.cpp" line="948"/>
         <source>Profiles &amp;&amp; Config I/O</source>
         <translation>Profili &amp;&amp; Config I/O</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="925"/>
+        <location filename="../modules/settings_window.cpp" line="949"/>
         <source>Appearance</source>
         <translation>Aspetto</translation>
     </message>
@@ -5412,7 +5439,7 @@ del tuo tema personalizzato quando un tema è impostato.</translation>
         <translation>Intensità animazione:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="927"/>
+        <location filename="../modules/settings_window.cpp" line="951"/>
         <source>Advanced</source>
         <translation>Avanzate</translation>
     </message>
@@ -5933,7 +5960,7 @@ i canali esistenti mantengono l&apos;engine salvato per-cella.</translation>
         <translation>Audio</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="915"/>
+        <location filename="../modules/settings_window.cpp" line="939"/>
         <source>Channels</source>
         <translation>Canali</translation>
     </message>
@@ -5942,7 +5969,7 @@ i canali esistenti mantengono l&apos;engine salvato per-cella.</translation>
         <translation type="vanished">Griglia pulsanti</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="923"/>
+        <location filename="../modules/settings_window.cpp" line="947"/>
         <source>Hotkeys</source>
         <translation>Scorciatoie</translation>
     </message>
@@ -5967,7 +5994,7 @@ i canali esistenti mantengono l&apos;engine salvato per-cella.</translation>
         <translation type="vanished">Tema pers.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="926"/>
+        <location filename="../modules/settings_window.cpp" line="950"/>
         <source>Reset behaviour</source>
         <translation>Comportamento reset</translation>
     </message>

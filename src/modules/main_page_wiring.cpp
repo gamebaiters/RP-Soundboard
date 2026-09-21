@@ -1013,9 +1013,11 @@ void pushSettingsToWindow(MainPage *page, ConfigModel *model) {
     w->setVadWhilePlaying     (model->getVadWhilePlaying());
     w->setDuckWhenTalking     (model->getDuckWhenTalking());
     w->setDuckAmount          (model->getDuckAmountPercent());
+    w->setMicDetectThreshDb   (model->getMicDetectThreshDb());
     // Push the persisted voice behaviour into the audio path at load.
     sb_setVoiceBehaviour(model->getVadWhilePlaying(), model->getDuckWhenTalking(),
                          model->getDuckAmountPercent() / 100.0f);
+    sb_setMicDetectThreshDb(static_cast<float>(model->getMicDetectThreshDb()));
     // Sandbox module kill switch: restore the persisted mask into the
     // static SlotDsp mask (audio side) + the Settings checkboxes.
     {
@@ -1542,6 +1544,10 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
     QObject::connect(w, &SettingsWindow::duckAmountChanged, [model](int v){
         model->setDuckAmountPercent(v);
         sb_setVoiceBehaviour(model->getVadWhilePlaying(), model->getDuckWhenTalking(), v / 100.0f);
+    });
+    QObject::connect(w, &SettingsWindow::micDetectThreshChanged, [model](int v){
+        model->setMicDetectThreshDb(v);
+        sb_setMicDetectThreshDb(static_cast<float>(v));
     });
     QObject::connect(w, &SettingsWindow::resetLayoutProportionsRequested, [page]{
         page->resetLayoutProportions();

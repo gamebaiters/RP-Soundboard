@@ -57,6 +57,11 @@ CAPI void sb_disableHotkeysTemporarily(bool disable);
 // soundboard by duckAmount (0..1) whenever he talks. Called by the wiring on
 // settings load + change.
 CAPI void sb_setVoiceBehaviour(bool vadWhilePlaying, bool duckWhenTalking, float duckAmount);
+// Own-voice detection threshold (dBFS, clamped -60..-6) shared by the own-
+// voice indicator LED and the vadWhilePlaying/duckWhenTalking gates. Plain
+// user slider (Settings -> Voice) - never auto-read from the TS3 SDK.
+// Called by the wiring on settings load + change.
+CAPI void sb_setMicDetectThreshDb(float db);
 // TeamSpeak's OWN transmission state for the local client (whatever the user
 // configured drives it: voice activation, push-to-talk or continuous). Written
 // from ts3plugin_onTalkStatusChangeEvent - a TS3 callback thread, so it is a

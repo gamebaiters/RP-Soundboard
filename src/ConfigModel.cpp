@@ -259,6 +259,8 @@ void ConfigModel::readConfig(const QString &file)
 	m_vadWhilePlaying       = settings.value("vad_while_playing",         false).toBool();
 	m_duckWhenTalking       = settings.value("duck_when_talking",         false).toBool();
 	m_duckAmountPercent     = settings.value("duck_amount_percent",       40).toInt();
+	m_micDetectThreshDb     = settings.value("mic_detect_thresh_db",      -36).toInt();
+	if (m_micDetectThreshDb < -60 || m_micDetectThreshDb > -6) m_micDetectThreshDb = -36;
 	m_loudnessNormalize   = settings.value("loudness_normalize",    false).toBool();
 	m_resetChVolume       = settings.value("reset_ch_volume", true).toBool();
 	m_resetChFx           = settings.value("reset_ch_fx", true).toBool();
@@ -381,6 +383,7 @@ void ConfigModel::writeConfigImmediate(const QString &file)
 	settings.setValue("vad_while_playing",         m_vadWhilePlaying);
 	settings.setValue("duck_when_talking",         m_duckWhenTalking);
 	settings.setValue("duck_amount_percent",       m_duckAmountPercent);
+	settings.setValue("mic_detect_thresh_db",      m_micDetectThreshDb);
 	settings.setValue("loudness_normalize",    m_loudnessNormalize);
 	settings.setValue("reset_ch_volume", m_resetChVolume);
 	settings.setValue("reset_ch_fx", m_resetChFx);
@@ -996,6 +999,7 @@ void ConfigModel::setWaveAnimIntensity(int v)         { m_waveAnimIntensity = qB
 void ConfigModel::setVadWhilePlaying(bool on)         { m_vadWhilePlaying        = on; writeConfig(); }
 void ConfigModel::setDuckWhenTalking(bool on)         { m_duckWhenTalking        = on; writeConfig(); }
 void ConfigModel::setDuckAmountPercent(int pct)       { m_duckAmountPercent      = pct; writeConfig(); }
+void ConfigModel::setMicDetectThreshDb(int db)        { m_micDetectThreshDb      = db;  writeConfig(); }
 void ConfigModel::setLoudnessNormalize(bool on)    { m_loudnessNormalize    = on; writeConfig(); }
 
 void ConfigModel::setResetChVolume(bool on) { m_resetChVolume = on; writeConfig(); }

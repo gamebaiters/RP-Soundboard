@@ -907,6 +907,30 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         m_duckAmountLabel->setText(tr("Lower by: %1%").arg(v));
     });
 
+    m_micDetectThresh = new QSlider(Qt::Horizontal, this);
+    m_micDetectThresh->setRange(-60, -6);
+    m_micDetectThresh->setValue(-36);
+    m_micDetectThreshLabel = new QLabel(tr("Detection level: -36 dB"), this);
+    voiceLay->addWidget(subHeader(tr("Own-voice detection"), this));
+    {
+        auto *note = new QLabel(tr(
+            "How loud you need to be for the soundboard to count it as \"you are\n"
+            "talking\" (own-voice indicator, and the two options above). Lower =\n"
+            "more sensitive, picks up quieter speech; higher = less sensitive,\n"
+            "ignores more background noise."), this);
+        note->setStyleSheet("color: palette(mid);");
+        voiceLay->addWidget(note);
+    }
+    {
+        auto *mr = new QHBoxLayout;
+        mr->addWidget(m_micDetectThreshLabel);
+        mr->addWidget(m_micDetectThresh, 1);
+        voiceLay->addLayout(indented(mr));
+    }
+    connect(m_micDetectThresh, &QSlider::valueChanged, this, [this](int v){
+        m_micDetectThreshLabel->setText(tr("Detection level: %1 dB").arg(v));
+    });
+
     auto *body = new QVBoxLayout;
     body->setSpacing(2);
     body->addWidget(makeSection(tr("General"),                        generalLay,  this, "general_v2"));
@@ -1004,6 +1028,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(m_vadWhilePlaying,      &QCheckBox::toggled, this, &SettingsWindow::vadWhilePlayingChanged);
     connect(m_duckWhenTalking,      &QCheckBox::toggled, this, &SettingsWindow::duckWhenTalkingChanged);
     connect(m_duckAmount,           &QSlider::valueChanged, this, &SettingsWindow::duckAmountChanged);
+    connect(m_micDetectThresh,      &QSlider::valueChanged, this, &SettingsWindow::micDetectThreshChanged);
 
     connect(m_resetChVolume,      &QCheckBox::toggled, this, &SettingsWindow::resetChVolumeChanged);
     connect(m_resetChFx,          &QCheckBox::toggled, this, &SettingsWindow::resetChFxChanged);
@@ -1061,6 +1086,7 @@ QString SettingsWindow::streamQuality()       const { return m_streamQuality->cu
 bool SettingsWindow::vadWhilePlaying()        const { return m_vadWhilePlaying->isChecked();      }
 bool SettingsWindow::duckWhenTalking()        const { return m_duckWhenTalking->isChecked();      }
 int  SettingsWindow::duckAmount()             const { return m_duckAmount->value();               }
+int  SettingsWindow::micDetectThreshDb()      const { return m_micDetectThresh->value();          }
 
 bool SettingsWindow::resetChVolume()          const { return m_resetChVolume->isChecked();      }
 bool SettingsWindow::resetChFx()              const { return m_resetChFx->isChecked();          }
@@ -1143,6 +1169,11 @@ void SettingsWindow::setDuckAmount(int pct) {
     QSignalBlocker b(m_duckAmount);
     m_duckAmount->setValue(pct);
     if (m_duckAmountLabel) m_duckAmountLabel->setText(tr("Lower by: %1%").arg(pct));
+}
+void SettingsWindow::setMicDetectThreshDb(int db) {
+    QSignalBlocker b(m_micDetectThresh);
+    m_micDetectThresh->setValue(db);
+    if (m_micDetectThreshLabel) m_micDetectThreshLabel->setText(tr("Detection level: %1 dB").arg(db));
 }
 
 void SettingsWindow::showEvent(QShowEvent *e)

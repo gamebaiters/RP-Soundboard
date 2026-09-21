@@ -62,6 +62,7 @@ public:
     bool vadWhilePlaying() const;
     bool duckWhenTalking() const;
     int  duckAmount() const;              // percent 0..90
+    int  micDetectThreshDb() const;       // dBFS -60..-6
 
     // Reset behaviour flags
     bool resetChVolume() const;
@@ -127,6 +128,7 @@ public slots:
     void setVadWhilePlaying(bool on);
     void setDuckWhenTalking(bool on);
     void setDuckAmount(int pct);
+    void setMicDetectThreshDb(int db);
     // Sandbox module kill-switch: push the current global stage mask
     // into the checkboxes (bit set = module enabled).
     void setSandboxModuleMask(quint32 mask);
@@ -213,6 +215,7 @@ signals:
     void vadWhilePlayingChanged(bool);
     void duckWhenTalkingChanged(bool);
     void duckAmountChanged(int);
+    void micDetectThreshChanged(int);
     // A sandbox module was enabled/disabled process-wide (stage =
     // SandboxState::DspStage value).
     void sandboxModuleToggled(int stage, bool enabled);
@@ -326,6 +329,8 @@ private:
     QCheckBox   *m_duckWhenTalking      = nullptr;
     class QSlider *m_duckAmount         = nullptr;
     QLabel      *m_duckAmountLabel      = nullptr;
+    class QSlider *m_micDetectThresh    = nullptr;
+    QLabel      *m_micDetectThreshLabel = nullptr;
 
     // One checkbox per DSP stage (index = DspStage). Unchecked =
     // module bypassed everywhere AND hidden from the sandbox UI.

@@ -30,6 +30,56 @@ float rngFloat(uint32_t &s) {   // -1..1
     return (static_cast<float>(rngNext(s) >> 9) / 4194304.0f) - 1.0f;
 }
 
+// Process-wide cache of already-built frequency-domain IR partitions,
+// keyed by (preset, irPath, sampleRate). A fresh SlotDsp (created e.g. per
+// per-button temp channel after Sampler::clearSlotSandbox) previously had
+// to redo the decode/synth + partition-FFT work from scratch on every
+// single playback, leaving a real (if small) window where Stage_Reverb's
+// convolution engine was not ready() yet. Reusing partitions another slot
+// already built for the identical IR at the same rate makes ready() go
+// true on the very next block instead.
+struct IrCacheEntry {
+    int     preset;
+    QString irPath;
+    double  sampleRate;
+    std::vector<std::vector<float>> freqL, freqR;
+};
+std::mutex g_irCacheMutex;
+std::vector<IrCacheEntry> g_irCache;
+constexpr size_t kIrCacheCap = 8;
+
+bool irCacheLookup(int preset, const QString &irPath, double sr,
+                    std::vector<std::vector<float>> &outL,
+                    std::vector<std::vector<float>> &outR) {
+    std::lock_guard<std::mutex> g(g_irCacheMutex);
+    for (const auto &e : g_irCache) {
+        if (e.preset == preset && e.irPath == irPath &&
+            std::fabs(e.sampleRate - sr) < 0.5) {
+            outL = e.freqL;
+            outR = e.freqR;
+            return true;
+        }
+    }
+    return false;
+}
+
+void irCacheStore(int preset, const QString &irPath, double sr,
+                   const std::vector<std::vector<float>> &freqL,
+                   const std::vector<std::vector<float>> &freqR) {
+    std::lock_guard<std::mutex> g(g_irCacheMutex);
+    for (auto &e : g_irCache) {
+        if (e.preset == preset && e.irPath == irPath &&
+            std::fabs(e.sampleRate - sr) < 0.5) {
+            e.freqL = freqL;
+            e.freqR = freqR;
+            return;
+        }
+    }
+    if (g_irCache.size() >= kIrCacheCap)
+        g_irCache.erase(g_irCache.begin());   // drop oldest
+    g_irCache.push_back({preset, irPath, sr, freqL, freqR});
+}
+
 } // namespace
 
 ConvolutionReverb::ConvolutionReverb() {
@@ -66,6 +116,17 @@ void ConvolutionReverb::prepare(int preset, const QString &irPath) {
         preset == m_loadedPreset && irPath == m_loadedPath)
         return;   // already loaded
 
+    std::vector<std::vector<float>> cachedL, cachedR;
+    if (irCacheLookup(preset, irPath, m_fs, cachedL, cachedR)) {
+        std::lock_guard<std::mutex> g(m_lock);
+        m_ready.store(false, std::memory_order_release);
+        adoptPartitions(cachedL, cachedR);
+        m_loadedPreset = preset;
+        m_loadedPath   = irPath;
+        m_ready.store(true, std::memory_order_release);
+        return;
+    }
+
     std::vector<float> irL, irR;
     bool haveFile = false;
     if (!irPath.isEmpty())
@@ -79,6 +140,25 @@ void ConvolutionReverb::prepare(int preset, const QString &irPath) {
     m_loadedPreset = preset;
     m_loadedPath   = haveFile ? irPath : QString();
     m_ready.store(true, std::memory_order_release);
+
+    irCacheStore(preset, m_loadedPath, m_fs, m_irFreqL, m_irFreqR);
+}
+
+void ConvolutionReverb::adoptPartitions(const std::vector<std::vector<float>> &freqL,
+                                        const std::vector<std::vector<float>> &freqR) {
+    m_irFreqL = freqL;
+    m_irFreqR = freqR;
+    const int P = static_cast<int>(m_irFreqL.size());
+    m_histL.assign(P, std::vector<float>(2 * kBins, 0.0f));
+    m_histR.assign(P, std::vector<float>(2 * kBins, 0.0f));
+    m_histIdx = 0;
+    std::fill(m_tailL.begin(), m_tailL.end(), 0.0f);
+    std::fill(m_tailR.begin(), m_tailR.end(), 0.0f);
+    std::memset(m_inL, 0, sizeof(m_inL));
+    std::memset(m_inR, 0, sizeof(m_inR));
+    std::memset(m_outL, 0, sizeof(m_outL));
+    std::memset(m_outR, 0, sizeof(m_outR));
+    m_pos = 0;
 }
 
 bool ConvolutionReverb::loadIrFile(const QString &path,

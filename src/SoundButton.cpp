@@ -15,6 +15,8 @@
 #include <QFontMetrics>
 #include <QFileInfo>
 #include <QEvent>
+#include <QVariantAnimation>
+#include <QEasingCurve>
 
 
 const QString &getButtonMime()
@@ -252,21 +254,57 @@ void SoundButton::setBackgroundImage(const QString &path)
 void SoundButton::paintEvent(QPaintEvent *evt)
 {
 	QPushButton::paintEvent(evt);
-	if (backgroundPixmap.isNull()) return;
 
-	QPainter p(this);
-	p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-	QRect imgRect = rect().adjusted(2, 2, -2, -2);
-	p.drawPixmap(imgRect, backgroundPixmap);
+	if (!backgroundPixmap.isNull())
+	{
+		QPainter p(this);
+		p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+		QRect imgRect = rect().adjusted(2, 2, -2, -2);
+		p.drawPixmap(imgRect, backgroundPixmap);
 
-	QString t = text();
-	if (t.isEmpty()) return;
-	QFontMetrics fm(font());
-	QRect tr = fm.boundingRect(rect().adjusted(4, 4, -4, -4),
-	                           Qt::AlignCenter | Qt::TextWordWrap, t);
-	tr.adjust(-6, -3, 6, 3);
-	tr.moveCenter(rect().center());
-	p.fillRect(tr, QColor(0, 0, 0, 200));
-	p.setPen(Qt::white);
-	p.drawText(rect(), Qt::AlignCenter | Qt::TextWordWrap, t);
+		QString t = text();
+		if (!t.isEmpty())
+		{
+			QFontMetrics fm(font());
+			QRect tr = fm.boundingRect(rect().adjusted(4, 4, -4, -4),
+			                           Qt::AlignCenter | Qt::TextWordWrap, t);
+			tr.adjust(-6, -3, 6, 3);
+			tr.moveCenter(rect().center());
+			p.fillRect(tr, QColor(0, 0, 0, 200));
+			p.setPen(Qt::white);
+			p.drawText(rect(), Qt::AlignCenter | Qt::TextWordWrap, t);
+		}
+	}
+
+	// "Audio just saved here" feedback: a brief accent-colored fade-out
+	// highlight over the whole cell (flashSaved()). Painted last, on top
+	// of everything above, so it reads regardless of custom color/image.
+	if (flashOpacity > 0.001)
+	{
+		QPainter fp(this);
+		fp.setRenderHint(QPainter::Antialiasing, true);
+		QColor c = Theme::colors().accent;
+		c.setAlphaF(0.55 * flashOpacity);
+		fp.setPen(Qt::NoPen);
+		fp.setBrush(c);
+		fp.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 6, 6);
+	}
+}
+
+void SoundButton::flashSaved()
+{
+	if (!flashAnim)
+	{
+		flashAnim = new QVariantAnimation(this);
+		flashAnim->setDuration(900);
+		flashAnim->setEasingCurve(QEasingCurve::OutCubic);
+		connect(flashAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant &v){
+			flashOpacity = v.toReal();
+			update();
+		});
+	}
+	flashAnim->stop();
+	flashAnim->setStartValue(qreal(1.0));
+	flashAnim->setEndValue(qreal(0.0));
+	flashAnim->start();
 }

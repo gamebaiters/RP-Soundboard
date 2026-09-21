@@ -60,6 +60,10 @@ private:
 
     void buildPartitions(const std::vector<float> &irL,
                          const std::vector<float> &irR);
+    // Adopts already-built frequency-domain partitions (process-wide IR
+    // cache hit) instead of re-decoding/re-synthesizing + re-FFTing.
+    void adoptPartitions(const std::vector<std::vector<float>> &freqL,
+                         const std::vector<std::vector<float>> &freqR);
     void synthesizeIr(int preset, std::vector<float> &outL,
                       std::vector<float> &outR) const;
     bool loadIrFile(const QString &path, std::vector<float> &outL,

@@ -55,12 +55,25 @@ private:
 	void onFinishDownloadXml(QNetworkReply *reply);
 	void onFinishDownloadFeatures(QNetworkReply * reply);
 	void askUserForUpdate();
+#if defined(__APPLE__)
+	// Real GitHub check: HEAD the actual macOS asset for m_verInfo
+	// before ever prompting, so an explicit "Check for Updates" on
+	// macOS only offers an update when a macOS build genuinely exists
+	// for that version (the self-hosted macOS CI job can lag days
+	// behind Windows/Linux).
+	QString macAssetUrl() const;
+	void probeMacAssetThenProceed();
+	void onFinishMacAssetProbe(QNetworkReply *reply);
+#endif
 
 private:
 	enum class Loading
 	{
 		mainXml,
 		features,
+#if defined(__APPLE__)
+		macAssetProbe,
+#endif
 	} loading;
 
 	QNetworkAccessManager *m_mgr;

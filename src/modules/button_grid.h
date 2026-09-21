@@ -56,6 +56,8 @@ public slots:
     // Re-apply the SoundButton appearance for every cell. Called when
     // the theme changes so default-bg buttons pick up the new colors.
     void refreshAppearance();
+    // Brief accent fade highlight on one cell ("audio just saved here").
+    void flashSaved(int idx);
     // Provider queried when a right-click menu opens: returns the channels that
     // currently hold a resolved YouTube/URL video, so the menu can offer
     // "save link" / "download audio" into this button per channel.

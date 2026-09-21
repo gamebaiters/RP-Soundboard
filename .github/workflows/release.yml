@@ -566,8 +566,15 @@ jobs:
 
 
   # ---------------- COMBINE + RELEASE ----------------
+  # Windows + Linux release: NEVER waits on build-macos. That job runs on
+  # a personal self-hosted Mac - if it is offline, a `needs:` dependency
+  # on it would leave this job (and therefore every release) queued
+  # indefinitely until someone turns the Mac on. macOS still gets built
+  # by CI (never locally) - see attach-macos-release-asset below, which
+  # runs independently and appends the macOS asset to this same release
+  # whenever build-macos actually completes, on this run or a later one.
   package-and-release:
-    needs: [build-windows, build-linux, build-macos]
+    needs: [build-windows, build-linux]
     runs-on: ubuntu-22.04
     permissions:
       # softprops/action-gh-release uses GITHUB_TOKEN; default-token has
@@ -591,15 +598,10 @@ jobs:
           name: linux-x64
           path: pkg-linux/plugins/
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: macos-x64
-          path: pkg-macos/plugins/
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: macos-installer
-          path: ./
+      # macOS is intentionally NOT downloaded here - it is not part of
+      # build-windows/build-linux's dependency graph, so its artifact
+      # usually does not exist yet at this point in the run. It is
+      # packaged + attached separately in attach-macos-release-asset.
 
       - name: Resolve version + render package.ini per platform
         id: ver
@@ -611,7 +613,7 @@ jobs:
               VERSION="0.0.0-$(date +%Y%m%d%H%M)-$(echo $GITHUB_SHA | cut -c1-7)"
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-          for d in pkg-win pkg-linux pkg-macos; do
+          for d in pkg-win pkg-linux; do
               sed "s/@version@/$VERSION/" src/package.ini.in > "$d/package.ini"
           done
           echo "--- package.ini ---"
@@ -625,8 +627,6 @@ jobs:
           (cd pkg-win    && zip -r "../rp_soundboard_fx_${VERSION}_win64.ts3_plugin"        . -x "**/.DS_Store")
           # Linux: only the .so + soundboard assets
           (cd pkg-linux  && zip -r "../rp_soundboard_fx_${VERSION}_linux_amd64.ts3_plugin"  . -x "**/.DS_Store")
-          # macOS: bundled dylibs + soundboard assets (also wrapped in the .app installer)
-          (cd pkg-macos  && zip -r "../rp_soundboard_fx_${VERSION}_macos_x86_64.ts3_plugin" . -x "**/.DS_Store")
           echo "--- packages ---"
           ls -la rp_soundboard_fx_*.ts3_plugin
           for f in rp_soundboard_fx_*.ts3_plugin; do
@@ -673,9 +673,57 @@ jobs:
           files: |
             rp_soundboard_fx_*_win64.ts3_plugin
             rp_soundboard_fx_*_linux_amd64.ts3_plugin
-            rp_soundboard_fx_*_macos_x86_64.ts3_plugin
-            Install_Soundboard_macOS.zip
             dist/uninstall_soundboard.bat
             dist/uninstall_soundboard.sh
+          fail_on_unmatched_files: false
+
+  # Attached independently: needs build-macos, which runs on a personal
+  # self-hosted Mac and may complete minutes, hours or days after the
+  # Windows/Linux release above already published (or may never complete
+  # for THIS run if the Mac stays off - re-running this workflow with
+  # workflow_dispatch on the same tag later picks it up then). Uploading
+  # via the same tag name EDITS the existing release in place instead of
+  # creating a second one.
+  attach-macos-release-asset:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-macos, package-and-release]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-x64
+          path: pkg-macos/plugins/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-installer
+          path: ./
+
+      - name: Resolve version + render package.ini
+        id: ver
+        run: |
+          TAG="${GITHUB_REF##refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          sed "s/@version@/$VERSION/" src/package.ini.in > pkg-macos/package.ini
+
+      - name: Build macOS .ts3_plugin package
+        run: |
+          set -e
+          VERSION="${{ steps.ver.outputs.VERSION }}"
+          (cd pkg-macos && zip -r "../rp_soundboard_fx_${VERSION}_macos_x86_64.ts3_plugin" . -x "**/.DS_Store")
+          ls -la rp_soundboard_fx_*.ts3_plugin
+
+      - name: Attach macOS asset to the existing release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "GameBaiters Soundboard ${{ github.ref_name }}"
+          files: |
+            rp_soundboard_fx_*_macos_x86_64.ts3_plugin
+            Install_Soundboard_macOS.zip
             dist/uninstall_soundboard_macos.sh
           fail_on_unmatched_files: false

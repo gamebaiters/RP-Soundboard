@@ -1,3 +1,75 @@
+GameBaiters Soundboard v2.4.0
+==============================================================
+
+Stability and compatibility pass, plus the soundboard and the GameBaiters
+TTS plugin now actually talk to each other when both are installed.
+
+Audio sandbox / DSP
+--------------------
+
+* FIX - Switching a channel's reverb to the convolution (IR) engine
+  briefly played the OLD algorithmic reverb before flipping over to
+  convolution - an audible "wrong engine for a moment" glitch on almost
+  every sound, because a fresh per-button channel had to rebuild the
+  impulse response from scratch every time. The chain now never falls
+  back to the algorithmic engine while convolution is loading (it just
+  has no wet signal for a few ms, inaudible) and, more importantly,
+  reuses an already-built impulse response from another channel instead
+  of rebuilding it, so the load window is essentially gone.
+* FIX - Changing a lot of effects very quickly (mass-toggling modules,
+  fast slider drags, quick engine switches) could leave the audio
+  sandbox in a broken state where effects stopped loading correctly
+  until the soundboard was restarted. Every single change used to reach
+  the real-time audio thread's lock immediately; changes are now
+  coalesced to one update per audio block, so a fast burst can no
+  longer starve the audio callback.
+* NEW - The voice-detection threshold used by the own-voice indicator
+  no longer guesses at a fixed level. It reads your TeamSpeak client's
+  own voice-activation level and live mic level straight from the TS3
+  client - whatever you have configured there is exactly what the
+  soundboard uses, with no separate slider to keep in sync.
+
+Streaming
+---------
+
+* NEW - "Save audio" and "download to a button" no longer always
+  re-download from the network. If you already saved that exact video's
+  audio once this session, saving it again just copies the file you
+  already have and asks where to put it - falling back to a real
+  download only if that copy is missing or fails.
+* NEW - If the stream you just saved is still playing in its channel,
+  playback now switches over to the freshly saved local file instead of
+  continuing to read from the network.
+* NEW - A button that just received saved audio flashes with a brief
+  accent-colored fade so it is obvious which cell it landed on.
+
+Soundboard buttons
+-------------------
+
+* NEW - Dragging an audio file from Explorer onto a button now checks
+  the extension before accepting it, instead of silently accepting any
+  file type.
+
+GameBaiters TTS integration
+-----------------------------
+
+* NEW - If the GameBaiters TTS plugin is also installed, the two
+  plugins now coordinate instead of fighting over the microphone: the
+  soundboard becomes the single point that writes the outgoing audio,
+  and the TTS's own speech (with its own effects already applied) is
+  mixed in as the very last step, right before it reaches TeamSpeak.
+  Previously, whichever plugin's turn came second could silently wipe
+  out whatever the other one had just written.
+
+macOS
+-----
+
+* FIX - Installed macOS clients no longer get nagged to update on every
+  release - the macOS build is decoupled from the Windows/Linux release
+  pipeline (it no longer has to wait on a personal machine being turned
+  on) and an explicit "Check for Updates" on macOS now genuinely checks
+  whether a macOS build exists for the new version before offering it.
+
 GameBaiters Soundboard v2.3.6
 =============================
 

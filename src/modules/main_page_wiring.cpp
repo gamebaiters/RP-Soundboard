@@ -198,6 +198,16 @@ static QHash<int, QString> s_slotPlaylistTitle;
 // binds this file instead of playing. Empty = not in assign mode.
 static QString s_pendingAssignFile;
 static QString s_pendingAssignTitle;
+// Coalesces rapid SandboxState pushes (fast slider drags, mass module
+// toggling, quick engine switches) into one Sampler::setSlotSandboxState
+// call per ~audio-block period instead of one per QSlider::valueChanged
+// tick. Every push takes Sampler::m_mutex (shared with the real-time TS3
+// audio thread) and can trigger a full SlotDsp::resetFull() on mode/engine
+// changes; an unthrottled burst queued lock round-trips faster than the
+// 20 ms audio budget could drain them, starving fetchSamples and leaving
+// the sandbox in a state that needed a plugin restart to recover from.
+static QHash<int, SandboxState> s_pendingSandboxState;
+static QHash<int, QTimer*>      s_sandboxPushTimers;
 // slot -> wall-clock (ms) of the last AUTOMATIC stream reconnect. When a
 // stream's direct URL dies mid-play (expiry / CDN throttle), the poll re-
 // resolves the page URL through yt-dlp and resumes at the last position
@@ -206,6 +216,10 @@ static QString s_pendingAssignTitle;
 // per slot, so a genuinely broken stream still errors out instead of
 // resolve-looping forever. Cleared on every MANUAL load of the slot.
 static QHash<int, qint64> s_slotNetRetryMs;
+// pageUrl -> last local file a "Save audio" / "Export audio" actually wrote
+// to disk this session. A repeat save for the same source reuses this file
+// (plain copy) instead of re-downloading it - see runStreamDownload().
+static QHash<QString, QString> s_streamLastSavedFile;
 // slot -> "the user wanted playback to start" for the stream load in flight,
 // captured at resolve time. The one-shot open-failure retry below re-loads
 // with the ORIGINAL play/paused intent instead of guessing.
@@ -679,6 +693,28 @@ static void runStreamDownload(MainPage *page, const QString &pageUrl,
     prog->show();
     prog->raise();
 
+    // Reuse instead of a fresh network request: a "Save audio" for this
+    // exact source already landed a real file on disk earlier this
+    // session (per-pageUrl cache). Just copy that file to the new
+    // destination and ask nothing of yt-dlp/FFmpeg. Falls through to a
+    // genuine download if the cached file is gone or the copy fails.
+    const QString cached = s_streamLastSavedFile.value(pageUrl);
+    if (!cached.isEmpty() && QFileInfo::exists(cached)) {
+        bool ok = true;
+        if (QFileInfo(cached).absoluteFilePath() != QFileInfo(destFile).absoluteFilePath()) {
+            QFile::remove(destFile);
+            ok = QFile::copy(cached, destFile);
+        }
+        if (ok) {
+            s_streamLastSavedFile[pageUrl] = destFile;
+            prog->setProgress(100);
+            prog->setFinished(true, QString());
+            if (onOk) onOk(destFile);
+            return;
+        }
+        // Cached file vanished/unreadable mid-race - fall through below.
+    }
+
     StreamResolver &R = StreamResolver::instance();
     QObject *ctx = new QObject(prog);   // dies with the dialog
 
@@ -688,9 +724,12 @@ static void runStreamDownload(MainPage *page, const QString &pageUrl,
         StreamResolver::instance().cancelDownload();
     });
     QObject::connect(&R, &StreamResolver::downloadFinished, ctx,
-        [prog, onOk](bool ok, const QString &msg, const QString &dest){
+        [prog, onOk, pageUrl](bool ok, const QString &msg, const QString &dest){
             prog->setFinished(ok, ok ? QString() : msg);
-            if (ok && onOk) onOk(dest);
+            if (ok) {
+                s_streamLastSavedFile[pageUrl] = dest;
+                if (onOk) onOk(dest);
+            }
         });
     R.downloadAudio(pageUrl, destFile);
 }
@@ -700,7 +739,7 @@ static void runStreamDownload(MainPage *page, const QString &pageUrl,
 // button. This is a separate action from "Export audio" (the DSP bake of a
 // local file), which does not apply to streams — the channel shows a
 // dedicated green download button instead of repurposing the export one.
-static void startStreamDownloadFlow(MainPage *page, int slot)
+static void startStreamDownloadFlow(MainPage *page, Sampler *sampler, int slot)
 {
     if (!page || !s_slotStreamUrl.contains(slot)) return;
     if (s_slotStreamLive.contains(slot)) {
@@ -714,7 +753,33 @@ static void startStreamDownloadFlow(MainPage *page, int slot)
         QObject::tr("Choose destination folder"));
     if (dir.isEmpty()) return;
     const QString dest = QDir(dir).filePath(safeFileStem(title) + ".m4a");
-    runStreamDownload(page, pageUrl, dest, [page, title](const QString &file){
+    runStreamDownload(page, pageUrl, dest, [page, sampler, slot, pageUrl, title](const QString &file){
+        // If this exact stream is STILL loaded in this slot and still
+        // actively playing, hand playback over to the just-saved local
+        // file: stop the network source and re-trigger from disk, the
+        // same stop-and-retrigger pattern setSlotReverse uses for a
+        // live source swap. Never touches a slot that moved on to a
+        // different sound meanwhile (pageUrl/state re-checked here,
+        // AFTER the download, not assumed from before it started).
+        if (sampler && s_slotStreamUrl.value(slot) == pageUrl &&
+            sampler->getState(slot) == Sampler::ePLAYING &&
+            slot < page->channels().size())
+        {
+            if (auto *ch = page->channels().at(slot)) {
+                SoundInfo snd;
+                snd.filename    = file;
+                snd.isStreamUrl = false;
+                snd.isLive      = false;
+                snd.streamTitle = title;
+                sampler->playSoundInSlotAsync(slot, snd,
+                    ch->volume()->local(), ch->volume()->remote(),
+                    AudioUtils::sliderToPitchFactor(ch->fx()->pitch()),
+                    AudioUtils::sliderToPitchFactor(ch->fx()->speed()),
+                    ch->fx()->reverb() / 100.0f,
+                    /*applyFx=*/true, /*autoPlay=*/true);
+            }
+        }
+
         // Offer to also bind the saved file to a soundboard button.
         if (QMessageBox::question(page, QObject::tr("Save to a button"),
                 QObject::tr("Audio saved.\n\nAlso assign it to a soundboard button? "
@@ -1501,7 +1566,7 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
 void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
     auto *grid = page->buttonGrid();
 
-    QObject::connect(grid, &ButtonGrid::buttonTriggered, [model, sampler, page](int idx){
+    QObject::connect(grid, &ButtonGrid::buttonTriggered, [model, sampler, page, grid](int idx){
         // "Assign a just-downloaded audio to a button" mode: the next cell
         // click BINDS the file instead of playing anything.
         if (!s_pendingAssignFile.isEmpty()) {
@@ -1513,6 +1578,7 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
             s.customText  = s_pendingAssignTitle;
             model->setSoundInfo(idx, s);
             pushSoundsToGrid(page, model);
+            grid->flashSaved(idx);
             showInfoToast(page, QObject::tr("Saved to the button."), 3000);
             s_pendingAssignFile.clear();
             s_pendingAssignTitle.clear();
@@ -1910,7 +1976,20 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
             R.resolve(pageUrl);
             return;
         }
-        s.filename    = u.toLocalFile();
+        // Same allowlist as the "Choose sound file" browse dialog
+        // (chooseFileRequested below) - a drag from Explorer had no
+        // filter step, so anything (a .txt, a folder shortcut, an .exe)
+        // was silently accepted onto the cell before this check.
+        static const QSet<QString> kAudioExt = {
+            "mp3", "wav", "flac", "ogg", "opus", "aac", "m4a", "wma", "mp4"
+        };
+        const QString localPath = u.toLocalFile();
+        const QString ext = QFileInfo(localPath).suffix().toLower();
+        if (localPath.isEmpty() || !kAudioExt.contains(ext)) {
+            showInfoToast(page, QObject::tr("Not a supported audio file."), 2500);
+            return;
+        }
+        s.filename    = localPath;
         s.isStreamUrl = false;
         model->setSoundInfo(idx, s);
         pushSoundsToGrid(page, model);
@@ -2039,13 +2118,13 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
     // Right-click a cell -> "Download <channel>'s audio here…": pick a folder,
     // download the audio, then bind this button to the resulting local file.
     QObject::connect(grid, &ButtonGrid::downloadStreamToButton,
-        [model, page](int idx, const QString &pageUrl, const QString &title){
+        [model, page, grid](int idx, const QString &pageUrl, const QString &title){
             if (!model || !model->getStreamingEnabled()) return;
             QString dir = QFileDialog::getExistingDirectory(page,
                 QObject::tr("Choose destination folder"));
             if (dir.isEmpty()) return;
             const QString dest = QDir(dir).filePath(safeFileStem(title) + ".m4a");
-            runStreamDownload(page, pageUrl, dest, [model, page, idx, title](const QString &file){
+            runStreamDownload(page, pageUrl, dest, [model, page, grid, idx, title](const QString &file){
                 SoundInfo s;
                 if (auto *cur = model->getSoundInfo(idx)) s = *cur;
                 s.filename    = file;
@@ -2054,6 +2133,7 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 s.customText  = title;
                 model->setSoundInfo(idx, s);
                 pushSoundsToGrid(page, model);
+                grid->flashSaved(idx);
             });
         });
 
@@ -4288,9 +4368,31 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
     // forwarding plumbing.
     auto wireChannelSandbox = [sampler, applyChannelSandboxFlags, model, page](Channel *ch){
         QObject::connect(ch, &Channel::sandboxStateChanged, [sampler, page, model](int slot, const SandboxState &s){
-            if (sampler) sampler->setSlotSandboxState(slot, s);
+            // Waveform FX preview coalesces itself internally
+            // (scheduleFxRerender, 180 ms) - keep it unthrottled here.
             if (model->getAdaptWaveformToFx() && slot >= 0 && slot < page->channels().size())
                 page->channels().at(slot)->waveform()->setSandboxState(s);
+
+            if (!sampler) return;
+            s_pendingSandboxState[slot] = s;
+            QTimer *&t = s_sandboxPushTimers[slot];
+            if (!t) {
+                t = new QTimer();
+                t->setSingleShot(true);
+                QObject::connect(t, &QTimer::timeout, [sampler, slot](){
+                    auto it = s_pendingSandboxState.find(slot);
+                    if (it == s_pendingSandboxState.end()) return;
+                    SandboxState pending = it.value();
+                    s_pendingSandboxState.erase(it);
+                    sampler->setSlotSandboxState(slot, pending);
+                });
+            }
+            // Coalesce, don't debounce: only arm if idle, so a continuous
+            // drag pushes at a steady ~20 ms cadence (one audio-block
+            // period) instead of never firing while the user is still
+            // moving a slider.
+            if (!t->isActive())
+                t->start(20);
         });
         QObject::connect(ch, &Channel::sandboxResetRequested, [sampler, model, page](int slot){
             extremeLog("sandboxResetRequested slot=%d resetChVol=%d resetChFx=%d resetChFile=%d resetChSbx=%d",
@@ -4335,8 +4437,8 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
         });
         // Dedicated "Save audio" button on stream channels (separate from the
         // DSP "Export audio" — see startStreamDownloadFlow).
-        QObject::connect(ch, &Channel::downloadRequested, page, [page](int slot){
-            startStreamDownloadFlow(page, slot);
+        QObject::connect(ch, &Channel::downloadRequested, page, [page, sampler](int slot){
+            startStreamDownloadFlow(page, sampler, slot);
         });
         QObject::connect(ch, &Channel::exportRequested, page, [page, model](int slot){
             // slot here is Channel::m_id which equals the channel's

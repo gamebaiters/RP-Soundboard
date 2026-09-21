@@ -9,6 +9,7 @@
 
 #include "common.h"
 #include "AudioUtils.h"
+#include "ipc/GbAudioBridge.h"
 
 #include <cstdio>
 #include <cmath>
@@ -162,6 +163,16 @@ static std::atomic<bool> g_selfTalking{false};
 static std::atomic<bool>    g_micVoiceDetected{false};
 static std::atomic<bool>    g_micVoicePassing{false};
 static std::atomic<int64_t> g_micVoiceStampMs{0};
+
+// --- Cross-plugin audio bridge (Soundboard <-> TTS, see ipc/GbAudioBridge.h) ---
+// Opened lazily on first capture callback, kept for the plugin's lifetime.
+// The Soundboard is the authoritative writer of the shared TS3 capture
+// buffer when the TTS plugin is also installed and loaded: it folds the
+// TTS plugin's mic policy + already-DSP-processed audio in as the final
+// step of sb_handleCaptureData. Falls back to today's solo behaviour the
+// instant the TTS plugin is not present (get() returns nullptr, or its
+// heartbeat is stale) - see readTts()'s own doc comment.
+static GbBridge::Handle g_audioBridge;
 
 static int64_t sb_steadyMs()
 {
@@ -328,6 +339,14 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 	Sampler *s = g_samplerAtomic.load(std::memory_order_acquire);
 	if (!s) return;
 
+	// Cross-plugin bridge heartbeat: lets the TTS plugin (if also
+	// installed) know the soundboard is alive and will act as the single
+	// writer of this shared capture buffer, so TTS skips its own writes
+	// instead of the two plugins blindly overwriting each other. See
+	// ipc/GbAudioBridge.h.
+	if (GbBridge::Shared *bridge = g_audioBridge.get())
+		bridge->soundboardHeartbeatMs.store(GbBridge::nowMsSteady(), std::memory_order_relaxed);
+
 	// Mic FX (V1): process the user's OWN voice BEFORE the soundboard
 	// mix-in, so listeners hear voice-through-effects + clean soundboard
 	// audio on top. try-lock design inside: never blocks this thread.
@@ -341,20 +360,41 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 	bool micTalking = false;
 	if (sampleCount > 0)
 	{
-		double sumsq = 0.0;
-		for (int i = 0; i < sampleCount; ++i) {
-			const double v = samples[i * channels];
-			sumsq += v * v;
+		// The threshold is NEVER a soundboard slider - it mirrors TS3's
+		// own voice-activation setting exactly, read live from the
+		// client via the same SDK preprocessor idents TS3's own VAD
+		// uses internally: "level" is TS3's real-time measured mic
+		// level in dB, compared against the user's configured
+		// "voiceactivation_level". The config value essentially never
+		// changes while connected, so it is cached and re-read every
+		// ~500 ms instead of doing a string alloc/free on every 20 ms
+		// block; the live level is read fresh every block.
+		static float s_vadThresholdDb       = -40.0f;
+		static qint64 s_vadThresholdRefreshMs = 0;
+		const qint64 nowMs = sb_steadyMs();
+		if (nowMs - s_vadThresholdRefreshMs >= 500)
+		{
+			char *thStr = nullptr;
+			if (ts3Functions.getPreProcessorConfigValue(serverConnectionHandlerID, "voiceactivation_level", &thStr) == ERROR_ok && thStr)
+			{
+				bool ok = false;
+				float v = QString::fromUtf8(thStr).toFloat(&ok);
+				if (ok) s_vadThresholdDb = v;
+				ts3Functions.freeMemory(thStr);
+			}
+			s_vadThresholdRefreshMs = nowMs;
 		}
-		const double rms = std::sqrt(sumsq / (double)sampleCount);
-		// Envelope + hold so the LED does not strobe on word gaps.
-		static double s_indEnv  = 0.0;
-		static int    s_indHold = 0;
-		s_indEnv = (rms > s_indEnv) ? rms : (s_indEnv * 0.90 + rms * 0.10);
-		const double kIndThresh = 500.0;   // ~ -36 dBFS on int16
-		const int    kIndHold   = 12;      // ~240 ms at 20 ms/block
-		micTalking = s_indEnv > kIndThresh;
-		if (micTalking) s_indHold = kIndHold;
+
+		float levelDb = -96.0f;
+		ts3Functions.getPreProcessorInfoValueFloat(serverConnectionHandlerID, "level", &levelDb);
+
+		// Hold so the LED does not strobe on word gaps (TS3 applies its
+		// own "voiceactivation_hold" the same way to the real gate).
+		static int s_indHold = 0;
+		const int  kIndHold  = 12;   // ~240 ms at 20 ms/block
+		const bool above = levelDb > s_vadThresholdDb;
+		micTalking = above;
+		if (above) s_indHold = kIndHold;
 		else if (s_indHold > 0) { --s_indHold; micTalking = true; }
 	}
 	{
@@ -424,9 +464,57 @@ CAPI void sb_handleCaptureData(uint64 serverConnectionHandlerID, short* samples,
 		}
 	}
 
+	// Cross-plugin bridge: fold the TTS plugin's mic policy in (if it is
+	// also installed, loaded and alive), independently of the soundboard's
+	// OWN vadOpt/duckOpt settings above — applied to the REAL mic here,
+	// BEFORE fetchInputSamples mixes the soundboard's own slot audio in,
+	// so silencing/ducking the mic for the TTS never also mutes the
+	// soundboard's own sound. See ipc/GbAudioBridge.h.
+	GbBridge::MicPolicy ttsPolicy = GbBridge::MicPolicy::None;
+	int32_t ttsFrames = 0, ttsChannels = 0;
+	bool ttsAudioActive = false;
+	static int16_t s_ttsPull[GbBridge::kMaxFrames * 2];
+	GbBridge::Shared *bridge = g_audioBridge.get();
+	const bool haveTts = bridge && bridge->readTts(s_ttsPull, GbBridge::kMaxFrames * 2,
+	                                                ttsFrames, ttsChannels, ttsPolicy, ttsAudioActive);
+	if (ttsPolicy == GbBridge::MicPolicy::Silence) {
+		std::fill_n(samples, (size_t)sampleCount * channels, (short)0);
+		*edited |= 0x1;
+	} else if (ttsPolicy == GbBridge::MicPolicy::Duck) {
+		for (int i = 0; i < sampleCount * channels; ++i)
+			samples[i] = (short)(samples[i] / 4);
+		*edited |= 0x1;
+	}
+
 	int written = s->fetchInputSamples(samples, sampleCount, channels, NULL);
 	if(written > 0)
 		*edited |= 0x1;
+
+	// Cross-plugin bridge: the TTS plugin's OWN fully processed audio
+	// (its effects chain already applied) is inserted HERE, as the very
+	// last step before this buffer goes back to TeamSpeak — after the
+	// soundboard's own slot mix, exactly like another sound source
+	// layered on top. This is what fixes "soundboard playback overwrites
+	// the TTS and vice versa": whichever plugin's own capture callback
+	// TS3 happens to invoke, the soundboard is always the single writer
+	// once both are present, so nothing overwrites anything.
+	if (haveTts && ttsAudioActive && ttsFrames > 0 && ttsChannels > 0) {
+		const int n = std::min(sampleCount, ttsFrames);
+		for (int i = 0; i < n; ++i) {
+			const int l = s_ttsPull[i * ttsChannels];
+			const int r = (ttsChannels > 1) ? s_ttsPull[i * ttsChannels + 1] : l;
+			if (channels == 1) {
+				int v = samples[i] + (l + r) / 2;
+				samples[i] = (short)std::max(-32768, std::min(32767, v));
+			} else {
+				int vl = samples[i * channels] + l;
+				int vr = samples[i * channels + 1] + r;
+				samples[i * channels]     = (short)std::max(-32768, std::min(32767, vl));
+				samples[i * channels + 1] = (short)std::max(-32768, std::min(32767, vr));
+			}
+		}
+		*edited |= 0x1;
+	}
 }
 
 

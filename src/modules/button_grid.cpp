@@ -56,6 +56,11 @@ void ButtonGrid::refreshAppearance() {
     for (int i = 0; i < m_buttons.size(); ++i) applyButtonAppearance(i);
 }
 
+void ButtonGrid::flashSaved(int idx) {
+    if (idx < 0 || idx >= m_buttons.size()) return;
+    if (SoundButton *b = m_buttons[idx]) b->flashSaved();
+}
+
 void ButtonGrid::setShowHotkeys(bool on) {
     if (m_showHotkeys == on) return;
     m_showHotkeys = on;

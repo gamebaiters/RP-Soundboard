@@ -8,6 +8,7 @@
 #include <QString>
 
 class ConfigModel;
+class QVariantAnimation;
 
 class SoundButton : public QPushButton
 {
@@ -42,6 +43,9 @@ public:
 	// Stored, not decoded - probing happens on enterEvent so opening the
 	// soundboard does not pay the cost for every cell.
 	void setSoundFilePath(const QString &path);
+	// Brief accent-colored fade-out highlight ("audio just saved here"),
+	// e.g. after a streamed sound's local copy lands on this cell.
+	void flashSaved();
 
 protected:
 	virtual void enterEvent(QEvent *evt) override;
@@ -67,6 +71,9 @@ private:
 	// for `soundFilePath`. Cleared on setSoundFilePath() so a path
 	// swap re-probes on the next hover.
 	bool    tooltipPrimed;
+
+	QVariantAnimation *flashAnim = nullptr;
+	qreal               flashOpacity = 0.0;
 };
 
 #endif // SOUNDBUTTON_H

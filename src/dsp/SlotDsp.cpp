@@ -916,10 +916,19 @@ void SlotDsp::applyStage(int stage, PathState &p, float &l, float &r) {
     case SandboxState::Stage_Reverb:
         if ((m_state.reverbWet + m_fxReverbWet) > 0.001f ||
             ((p.lfoForce >> SandboxState::Stage_Reverb) & 1u)) {
-            // Convolution engine when selected AND its IR is built;
-            // otherwise the algorithmic Freeverb path (also the
-            // fallback while an IR is still loading).
-            if (m_state.reverbConvMode == 1 && p.convRev.ready())
+            // Convolution engine when selected: ConvolutionReverb::process()
+            // self-guards on ready() and leaves the dry signal untouched
+            // (no wet added) until its IR partitions are built, so there is
+            // never a fallback call into the algorithmic Freeverb path here.
+            // A prior version fell back to p.reverb.process() while the IR
+            // was loading, which briefly played the ALGORITHMIC engine's
+            // own audible character before the swap to convolution — an
+            // engine-switch glitch the user hears as "wrong reverb for a
+            // moment". Skipping the wet stage entirely during that (now
+            // usually near-zero thanks to the IR cache below) load window
+            // is inaudible; jumping between two different-sounding reverb
+            // engines is not.
+            if (m_state.reverbConvMode == 1)
                 p.convRev.process(l, r);
             else
                 p.reverb.process(l, r);

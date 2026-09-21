@@ -155,6 +155,12 @@ TRANSLATIONS: dict[str, str] = {
         "Genera un nuovo offset di pitch casuale a ogni esecuzione e a ogni\nloop. Evita che i trigger ripetuti suonino meccanici.",
     "While this channel produces audio every other slot&apos;s\noutput is attenuated by the amount below. Smooth attack /\nrelease. Music channel + SFX channel pair: music dips\nunder the SFX and returns when it ends.":
         "Mentre questo canale produce audio, l&apos;uscita di ogni altro slot\nviene attenuata della quantità sotto. Attack / release smussati.\nCoppia canale musica + canale SFX: la musica si abbassa sotto\ngli SFX e torna su quando finiscono.",
+    "Not a supported audio file.":
+        "File audio non supportato.",
+    "Check for Updates":
+        "Controlla aggiornamenti",
+    "A newer version is available, but no macOS build has been published for it yet. Please check back later.":
+        "È disponibile una versione più recente, ma non è ancora stata pubblicata una build per macOS. Riprova più tardi.",
 }
 
 

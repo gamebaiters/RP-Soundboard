@@ -80,7 +80,23 @@ void UpdateChecker::startCheck(bool explicitCheck, ConfigModel *config)
 {
 	m_explicitCheck = explicitCheck;
 	m_config = config;
-	
+
+#if defined(__APPLE__)
+	// The macOS CI job is decoupled from the Windows/Linux release (it
+	// runs on the maintainer's self-hosted Mac and can lag days behind),
+	// so a version.xml bump does not reliably mean a macOS asset exists
+	// yet. The passive background poll stays a silent no-op - it would
+	// otherwise nag an already-installed macOS client toward a version
+	// with no macOS build. An explicit "Check for Updates" click DOES
+	// go ask GitHub for real (below): it fetches version.xml like every
+	// platform, then - before ever prompting - HEADs the actual macOS
+	// asset URL and only offers the update if that asset is really
+	// there (probeMacAssetThenProceed(), called from
+	// onFinishDownloadXml()). No asset yet -> the notice is dropped.
+	if (!m_explicitCheck)
+		return;
+#endif
+
 	uint currentTime = QDateTime::currentDateTime().toTime_t();
 	if (!m_explicitCheck && m_config && currentTime < m_config->getNextUpdateCheck())
 		return;
@@ -110,6 +126,11 @@ void UpdateChecker::onFinishDownload(QNetworkReply *reply)
 	case Loading::features:
 		onFinishDownloadFeatures(reply);
 		break;
+#if defined(__APPLE__)
+	case Loading::macAssetProbe:
+		onFinishMacAssetProbe(reply);
+		break;
+#endif
 	}
 }
 
@@ -129,6 +150,11 @@ void UpdateChecker::onFinishDownloadXml(QNetworkReply *reply)
 		parseXml(reply);
 		if(m_verInfo.valid() && m_verInfo.build > buildinfo_getVersionNumber(3))
 		{
+#if defined(__APPLE__)
+			// Never prompt from the version number alone here - go verify
+			// the macOS asset itself actually exists first.
+			probeMacAssetThenProceed();
+#else
 			if (!m_verInfo.featuresUrl.isEmpty())
 			{
 				QNetworkRequest request;
@@ -139,6 +165,7 @@ void UpdateChecker::onFinishDownloadXml(QNetworkReply *reply)
 			}
 			else
 				askUserForUpdate();
+#endif
 		}
 		else // no new version
 		{
@@ -179,8 +206,70 @@ void UpdateChecker::onFinishDownloadFeatures(QNetworkReply *reply)
 }
 
 
+#if defined(__APPLE__)
 //---------------------------------------------------------------
-// Purpose: 
+// Purpose: same URL rewrite askUserForUpdate() applies before actually
+// downloading - factored out so the probe checks the EXACT asset URL
+// the update would use.
+//---------------------------------------------------------------
+QString UpdateChecker::macAssetUrl() const
+{
+	QString dl = m_verInfo.latestDownload;
+	dl.replace(QStringLiteral("_win64.ts3_plugin"),
+	           QStringLiteral("_macos_x86_64.ts3_plugin"));
+	return dl;
+}
+
+
+//---------------------------------------------------------------
+// Purpose: HEAD the macOS asset URL. No download, just existence.
+//---------------------------------------------------------------
+void UpdateChecker::probeMacAssetThenProceed()
+{
+	QNetworkRequest request;
+	request.setUrl(QUrl(macAssetUrl()));
+	setUserAgent(request);
+	loading = Loading::macAssetProbe;
+	m_mgr->head(request);
+}
+
+
+//---------------------------------------------------------------
+// Purpose: only now - asset confirmed present on GitHub - does the
+// normal "new version available" flow (features fetch / prompt) run.
+// A missing asset drops the notice; an explicit check still tells the
+// user why instead of looking like nothing happened.
+//---------------------------------------------------------------
+void UpdateChecker::onFinishMacAssetProbe(QNetworkReply *reply)
+{
+	const bool exists = (reply->error() == QNetworkReply::NoError);
+	if (exists)
+	{
+		if (!m_verInfo.featuresUrl.isEmpty())
+		{
+			QNetworkRequest request;
+			request.setUrl(QUrl(m_verInfo.featuresUrl));
+			setUserAgent(request);
+			loading = Loading::features;
+			m_mgr->get(request);
+		}
+		else
+		{
+			askUserForUpdate();
+		}
+	}
+	else if (m_explicitCheck)
+	{
+		QMessageBox::information(NULL, tr("Check for Updates"),
+			tr("A newer version is available, but no macOS build has been "
+			   "published for it yet. Please check back later."));
+	}
+}
+#endif
+
+
+//---------------------------------------------------------------
+// Purpose:
 //---------------------------------------------------------------
 void UpdateChecker::parseXml(QIODevice *device)
 {
@@ -276,12 +365,13 @@ void UpdateChecker::askUserForUpdate()
 		// version.xml ships a single Windows download URL; rewrite the
 		// file name to match the running platform so Linux + macOS pull
 		// their own .ts3_plugin instead of the Windows one (which would
-		// fail to load on every other OS). The release pipeline always
-		// uploads all three artefacts to the same tag URL.
+		// fail to load on every other OS). The release pipeline uploads
+		// the Windows/Linux artefacts on every tag; the macOS one lands
+		// separately (decoupled CI job) - on macOS we only ever get here
+		// after probeMacAssetThenProceed() already confirmed it exists.
 		QString dl = m_verInfo.latestDownload;
 #if defined(__APPLE__)
-		dl.replace(QStringLiteral("_win64.ts3_plugin"),
-		           QStringLiteral("_macos_x86_64.ts3_plugin"));
+		dl = macAssetUrl();
 #elif defined(__linux__)
 		dl.replace(QStringLiteral("_win64.ts3_plugin"),
 		           QStringLiteral("_linux_amd64.ts3_plugin"));

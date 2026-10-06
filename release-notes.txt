@@ -1,3 +1,37 @@
+GameBaiters Soundboard v2.5.0
+==============================================================
+
+Sign in to YouTube - so age-restricted, members-only and "confirm
+you're not a bot" videos load like any other link.
+
+* NEW - Settings -> Streaming -> YouTube account -> "Sign in with
+  Google". Google's real sign-in page opens in your own browser
+  (Chrome, Edge, Brave...) in a fresh, separate window; you sign in
+  there exactly as usual (passkey, 2-step verification, phone
+  prompt). The soundboard never sees your password: as soon as the
+  sign-in completes it keeps only the YouTube session, closes that
+  window by itself and shows "Connected as <your account>".
+* NEW - The session is saved once and survives restarts and plugin
+  updates. It never leaves your computer: encrypted with your Windows
+  account (on macOS / Linux: a file only your user can read).
+  "Disconnect" deletes it; the uninstaller always removes it too.
+* NEW - Links still load anonymously first. Only when YouTube asks for
+  a sign-in (age-restricted, members-only, private videos you have
+  access to, the "confirm you're not a bot" wall) the soundboard
+  retries automatically with your account - you just see the video
+  load. Optional: "Use the account for every YouTube video".
+* NEW - Your Watch Later / Liked videos playlists can be loaded too
+  (they go straight to the account).
+* NEW - "Save audio" / "Export audio" of a stream use the account the
+  same way.
+* NEW - If YouTube stops accepting the saved session (signed out from
+  another device, expired) the panel says so and offers "Reconnect".
+* NEW - "Other ways": take the session from a browser where you are
+  already signed in to YouTube (works best with Firefox), or import a
+  cookies.txt file.
+* FIX - A video that needs an account now says so clearly, and where
+  to connect it, instead of a generic "Couldn't load the link".
+
 GameBaiters Soundboard v2.4.3
 ==============================================================
 

@@ -187,7 +187,10 @@ void YouTubeAccountPanel::refresh()
 			if (!detail.isEmpty()) detail += '\n';
 			detail += tr("It expired or was signed out (e.g. from Google's \"Your devices\" page).\n"
 			             "Reconnect to keep loading videos that need a sign-in.");
-		} else if (!m_lastResult.isEmpty() && m_lastOk) {
+			if (!m_lastResult.isEmpty()) detail = m_lastResult + QStringLiteral("\n") + detail;
+		} else if (!m_lastResult.isEmpty()) {
+			// A fresh success ("Connected as ...") or a failed / cancelled
+			// account switch: show it above the usual details.
 			detail = m_lastResult + (detail.isEmpty() ? QString() : QStringLiteral("\n") + detail);
 		}
 		m_detail->setText(detail);

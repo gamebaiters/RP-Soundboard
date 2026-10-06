@@ -4781,17 +4781,17 @@ i pulsanti la cui etichetta non contiene il testo. Svuota il campo
 <context>
     <name>SettingsWindow</name>
     <message>
-        <location filename="../modules/settings_window.cpp" line="81"/>
+        <location filename="../modules/settings_window.cpp" line="82"/>
         <source>Earrape protection</source>
         <translation>Anti-earrape</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="131"/>
+        <location filename="../modules/settings_window.cpp" line="132"/>
         <source>Show crop start/end markers on the waveform</source>
         <translation>Mostra i marcatori di inizio/fine ritaglio sulla waveform</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="352"/>
+        <location filename="../modules/settings_window.cpp" line="353"/>
         <source>When ON, a sound that has a per-cell crop start and/or end point
 shows coloured markers on the waveform at those positions.
 Only the points that are actually set are drawn.</source>
@@ -4800,47 +4800,47 @@ mostra dei marcatori colorati sulla waveform in quelle posizioni.
 Vengono disegnati solo i punti effettivamente impostati.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="82"/>
+        <location filename="../modules/settings_window.cpp" line="83"/>
         <source>New channels inherit settings from the first channel</source>
         <translation>I nuovi canali ereditano dal primo canale</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="83"/>
+        <location filename="../modules/settings_window.cpp" line="84"/>
         <source>Remember pitch / speed / reverb per channel</source>
         <translation>Ricorda pitch / velocità / riverbero per canale</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="84"/>
+        <location filename="../modules/settings_window.cpp" line="85"/>
         <source>Restore last session on startup</source>
         <translation>Ripristina ultima sessione all&apos;avvio</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="85"/>
+        <location filename="../modules/settings_window.cpp" line="86"/>
         <source>Enable custom FX (pitch / speed / reverb)</source>
         <translation>Abilita FX pers. (pitch / velocità / riverbero)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="86"/>
+        <location filename="../modules/settings_window.cpp" line="87"/>
         <source>Hide waveform in channels (compact view)</source>
         <translation>Nascondi forma d&apos;onda (vista compatta)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="87"/>
+        <location filename="../modules/settings_window.cpp" line="88"/>
         <source>Write debug log file</source>
         <translation>Scrivi file di log debug</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="91"/>
+        <location filename="../modules/settings_window.cpp" line="92"/>
         <source>Enable audio sandbox (per-channel HRTF / EQ / reverb)</source>
         <translation>Abilita audio sandbox (HRTF / EQ / riverbero per canale)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="92"/>
+        <location filename="../modules/settings_window.cpp" line="93"/>
         <source>Show audio meter on each channel</source>
         <translation>Mostra misuratore audio sui canali</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="93"/>
+        <location filename="../modules/settings_window.cpp" line="94"/>
         <source>Show export button on each channel</source>
         <translation>Mostra pulsante esporta sui canali</translation>
     </message>
@@ -4849,185 +4849,185 @@ Vengono disegnati solo i punti effettivamente impostati.</translation>
         <translation type="vanished">Reset tutte le impostazioni audio sandbox</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="96"/>
+        <location filename="../modules/settings_window.cpp" line="97"/>
         <source>Export profile...</source>
         <translation>Esporta profilo...</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="97"/>
+        <location filename="../modules/settings_window.cpp" line="98"/>
         <source>Import profile...</source>
         <translation>Importa profilo...</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="103"/>
-        <location filename="../modules/settings_window.cpp" line="105"/>
+        <location filename="../modules/settings_window.cpp" line="104"/>
+        <location filename="../modules/settings_window.cpp" line="106"/>
         <source>Auto</source>
         <translation>Auto</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="106"/>
+        <location filename="../modules/settings_window.cpp" line="107"/>
         <source>Reset</source>
         <translation>Reset</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="107"/>
+        <location filename="../modules/settings_window.cpp" line="108"/>
         <source>Copy theme</source>
         <translation>Copia tema</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="108"/>
+        <location filename="../modules/settings_window.cpp" line="109"/>
         <source>Paste theme...</source>
         <translation>Incolla tema...</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="117"/>
+        <location filename="../modules/settings_window.cpp" line="118"/>
         <source>Multi soundboard (parallel channels)</source>
         <translation>Soundboard multipla (canali paralleli)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="118"/>
+        <location filename="../modules/settings_window.cpp" line="119"/>
         <source>Mute on my client</source>
         <translation>Muto sul mio client</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="119"/>
+        <location filename="../modules/settings_window.cpp" line="120"/>
         <source>Mute myself during playback</source>
         <translation>Mutami durante la riproduzione</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="120"/>
+        <location filename="../modules/settings_window.cpp" line="121"/>
         <source>Show hotkeys on buttons</source>
         <translation>Mostra tasti sui pulsanti</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="121"/>
+        <location filename="../modules/settings_window.cpp" line="122"/>
         <source>Disable hotkeys</source>
         <translation>Disabilita tasti</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="124"/>
+        <location filename="../modules/settings_window.cpp" line="125"/>
         <source>Export configuration...</source>
         <translation>Esporta configurazione...</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="125"/>
+        <location filename="../modules/settings_window.cpp" line="126"/>
         <source>Import configuration...</source>
         <translation>Importa configurazione...</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="126"/>
+        <location filename="../modules/settings_window.cpp" line="127"/>
         <source>Full backup...</source>
         <translation>Backup completo...</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="127"/>
+        <location filename="../modules/settings_window.cpp" line="128"/>
         <source>Restore backup...</source>
         <translation>Ripristina backup...</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="128"/>
+        <location filename="../modules/settings_window.cpp" line="129"/>
         <source>Reset all hotkeys</source>
         <translation>Reset tutti i tasti</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="129"/>
+        <location filename="../modules/settings_window.cpp" line="130"/>
         <source>Close</source>
         <translation>Chiudi</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="130"/>
+        <location filename="../modules/settings_window.cpp" line="131"/>
         <source>Adapt waveform display to audio effects</source>
         <translation>Adatta forma d&apos;onda agli effetti audio</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="132"/>
+        <location filename="../modules/settings_window.cpp" line="133"/>
         <source>Multi-channel infinity (auto-add temp channel per click)</source>
         <translation>Multi-canale infinito (aggiunge un canale temp per click)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="133"/>
+        <location filename="../modules/settings_window.cpp" line="134"/>
         <source>Show &quot;Pause all&quot; button in the main toolbar</source>
         <translation>Mostra il pulsante &quot;Pausa tutto&quot; nella barra principale</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="134"/>
+        <location filename="../modules/settings_window.cpp" line="135"/>
         <source>Show &quot;Stop all&quot; button in the main toolbar</source>
         <translation>Mostra il pulsante &quot;Ferma tutto&quot; nella barra principale</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="135"/>
+        <location filename="../modules/settings_window.cpp" line="136"/>
         <source>Vertical LED visualizer on channels</source>
         <translation>Visualizer LED verticale sui canali</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="136"/>
+        <location filename="../modules/settings_window.cpp" line="137"/>
         <source>Show skip buttons (-10s / -5s / +5s / +10s) on channels</source>
         <translation>Mostra pulsanti skip (-10s / -5s / +5s / +10s) sui canali</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="137"/>
+        <location filename="../modules/settings_window.cpp" line="138"/>
         <source>Render channel waveform as a spectrogram-style heatmap</source>
         <translation>Disegna la waveform come heatmap stile spettrogramma</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="138"/>
+        <location filename="../modules/settings_window.cpp" line="139"/>
         <source>Show vinyl (tape stop) button on channels</source>
         <translation>Mostra il pulsante vinile (tape stop) sui canali</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="139"/>
+        <location filename="../modules/settings_window.cpp" line="140"/>
         <source>Enable Mic FX (real-time voice changer)</source>
         <translation>Abilita Mic FX (voice changer in tempo reale)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="140"/>
+        <location filename="../modules/settings_window.cpp" line="141"/>
         <source>Show soundboard button in the TeamSpeak toolbar</source>
         <translation>Mostra il pulsante della soundboard nella barra di TeamSpeak</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="142"/>
+        <location filename="../modules/settings_window.cpp" line="143"/>
         <source>Normalize loudness of every sound (EBU R128, -16 LUFS)</source>
         <translation>Normalizza il volume di ogni suono (EBU R128, -16 LUFS)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="143"/>
+        <location filename="../modules/settings_window.cpp" line="144"/>
         <source>Enable URL / YouTube live streaming</source>
         <translation>Attiva lo streaming live URL / YouTube</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="144"/>
+        <location filename="../modules/settings_window.cpp" line="145"/>
         <source>Load a link pasted as a channel name</source>
         <translation>Carica un link incollato come nome del canale</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="145"/>
+        <location filename="../modules/settings_window.cpp" line="146"/>
         <source>Auto-play files loaded from a link</source>
         <translation>Avvia automaticamente i file caricati da un link</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="146"/>
-        <location filename="../modules/settings_window.cpp" line="151"/>
+        <location filename="../modules/settings_window.cpp" line="147"/>
+        <location filename="../modules/settings_window.cpp" line="152"/>
         <source>Volume</source>
         <translation>Volume</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="147"/>
-        <location filename="../modules/settings_window.cpp" line="152"/>
+        <location filename="../modules/settings_window.cpp" line="148"/>
+        <location filename="../modules/settings_window.cpp" line="153"/>
         <source>Pitch / speed / reverb</source>
         <translation>Pitch / velocità / riverbero</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="214"/>
+        <location filename="../modules/settings_window.cpp" line="215"/>
         <source>Interface</source>
         <translation>Interfaccia</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="247"/>
+        <location filename="../modules/settings_window.cpp" line="248"/>
         <source>Limits local audio output so a too-loud sample cannot deafen you.</source>
         <translation>Limita l&apos;uscita audio locale così un campione troppo forte non può assordarti.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="249"/>
+        <location filename="../modules/settings_window.cpp" line="250"/>
         <source>Bring every sound to the same perceived loudness (-16 LUFS,
 single-pass EBU R128) so loud cells no longer drown quiet
 ones. Applies from the NEXT play of each sound. Per-cell
@@ -5039,12 +5039,12 @@ suono. Le checkbox &apos;Normalizza&apos; per-cella funzionano quando
 questo è off.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="256"/>
+        <location filename="../modules/settings_window.cpp" line="257"/>
         <source>Features</source>
         <translation>Funzionalità</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="261"/>
+        <location filename="../modules/settings_window.cpp" line="262"/>
         <source>Master switch for the Mic FX voice changer. When OFF, the
 microphone panel, its toolbar button and all mic processing
 disappear completely.</source>
@@ -5053,22 +5053,22 @@ il pannello del microfono, il suo pulsante nella toolbar e tutta
 l&apos;elaborazione mic spariscono completamente.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="270"/>
+        <location filename="../modules/settings_window.cpp" line="271"/>
         <source>System</source>
         <translation>Sistema</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="271"/>
+        <location filename="../modules/settings_window.cpp" line="272"/>
         <source> pt</source>
         <translation> pt</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="274"/>
+        <location filename="../modules/settings_window.cpp" line="275"/>
         <source>Interface text size:</source>
         <translation>Dimensione testo interfaccia:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="279"/>
+        <location filename="../modules/settings_window.cpp" line="280"/>
         <source>Adds a native-looking toggle button next to TeamSpeak&apos;s own
 toolbar buttons that shows / hides the soundboard. Uncheck to
 remove it from the client toolbar.</source>
@@ -5077,12 +5077,12 @@ barra di TeamSpeak, che mostra / nasconde la soundboard.
 Deseleziona per rimuoverlo dalla barra del client.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="297"/>
+        <location filename="../modules/settings_window.cpp" line="298"/>
         <source>Channel elements</source>
         <translation>Elementi del canale</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="311"/>
+        <location filename="../modules/settings_window.cpp" line="312"/>
         <source>Show the vinyl button on every channel&apos;s transport row. It
 opens the tape-stop popup: hold the disc to brake the audio
 like a stopped turntable, click for a one-shot full stop.</source>
@@ -5116,27 +5116,27 @@ passano in tooltip in tempo reale sugli slider. Ogni controllo
 resta usabile — il fondo di ogni canale occupa molto meno spazio.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="341"/>
+        <location filename="../modules/settings_window.cpp" line="342"/>
         <source>Waveform</source>
         <translation>Forma d&apos;onda</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="363"/>
+        <location filename="../modules/settings_window.cpp" line="364"/>
         <source>Behavior</source>
         <translation>Comportamento</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="386"/>
+        <location filename="../modules/settings_window.cpp" line="387"/>
         <source>Main toolbar</source>
         <translation>Barra principale</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="583"/>
+        <location filename="../modules/settings_window.cpp" line="584"/>
         <source>Sandbox modules (uncheck = hide + disable everywhere)</source>
         <translation>Moduli sandbox (deseleziona = nascondi + disabilita ovunque)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="602"/>
+        <location filename="../modules/settings_window.cpp" line="603"/>
         <source>Full control over the effect catalogue: unchecked modules
 stop processing in EVERY channel and vanish from the Audio
 Sandbox window (pipeline block + parameter panel). Their
@@ -5147,22 +5147,22 @@ Audio Sandbox (blocco pipeline + pannello parametri). Le loro
 impostazioni salvate sono preservate e tornano alla riattivazione.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="629"/>
+        <location filename="../modules/settings_window.cpp" line="630"/>
         <source>Active profile:</source>
         <translation>Profilo attivo:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="637"/>
+        <location filename="../modules/settings_window.cpp" line="638"/>
         <source>Full configuration:</source>
         <translation>Configurazione completa:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="647"/>
+        <location filename="../modules/settings_window.cpp" line="648"/>
         <source>Full native backup:</source>
         <translation>Backup nativo completo:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="648"/>
+        <location filename="../modules/settings_window.cpp" line="649"/>
         <source>Save EVERYTHING the soundboard persists (buttons, channels,
 presets, Mic FX, theme, UI layout, every setting) into one
 backup file.</source>
@@ -5171,7 +5171,7 @@ preset, Mic FX, tema, layout dell&apos;interfaccia, ogni impostazione)
 in un unico file di backup.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="652"/>
+        <location filename="../modules/settings_window.cpp" line="653"/>
         <source>Restore a full backup file. The soundboard comes back exactly
 as it was when the backup was made (restart TeamSpeak to
 apply everything).</source>
@@ -5180,12 +5180,12 @@ esattamente com&apos;era quando è stato creato il backup (riavvia
 TeamSpeak per applicare tutto).</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="720"/>
+        <location filename="../modules/settings_window.cpp" line="721"/>
         <source>Waveform animation</source>
         <translation>Animazione della forma d&apos;onda</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="722"/>
+        <location filename="../modules/settings_window.cpp" line="723"/>
         <source>The already-played part of the waveform gets a slow colour flow
 (any playback, not just streams). Colours follow the custom theme
 when one is enabled, the default palette otherwise.</source>
@@ -5195,27 +5195,27 @@ seguono il tema personalizzato quando è attivo, altrimenti usano
 il gradiente azzurro-viola predefinito.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="856"/>
+        <location filename="../modules/settings_window.cpp" line="857"/>
         <source>Best available</source>
         <translation>Migliore disponibile</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="857"/>
+        <location filename="../modules/settings_window.cpp" line="858"/>
         <source>Balanced (recommended)</source>
         <translation>Bilanciata (consigliata)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="858"/>
+        <location filename="../modules/settings_window.cpp" line="859"/>
         <source>Data saver (smallest)</source>
         <translation>Risparmio dati (minima)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="860"/>
+        <location filename="../modules/settings_window.cpp" line="861"/>
         <source>Behaviour</source>
         <translation>Comportamento</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="861"/>
+        <location filename="../modules/settings_window.cpp" line="862"/>
         <source>Master switch for URL / YouTube live streaming. When OFF,
 pasting a link (as a channel name, a button&apos;s Save link, or a
 dropped URL) does nothing - everything stays local files.</source>
@@ -5224,14 +5224,14 @@ incollare un link (come nome del canale, tramite il Salva link di un pulsante,
 o trascinandolo) non fa nulla — tutto resta file locali.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="865"/>
+        <location filename="../modules/settings_window.cpp" line="866"/>
         <source>When ON, pasting a link AS A CHANNEL NAME loads it as a stream
 in that channel. OFF = a pasted link stays a plain name.</source>
         <translation>Quando è ON, incollare un link COME NOME DEL CANALE lo carica come stream
 in quel canale. OFF = un link incollato resta un nome normale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="868"/>
+        <location filename="../modules/settings_window.cpp" line="869"/>
         <source>When ON, a file loaded from a link starts playing immediately.
 OFF = it loads paused, ready for you to press play.</source>
         <translation>Quando è ON, un file caricato da un link parte subito.
@@ -5266,7 +5266,7 @@ OFF = si carica in pausa, pronto per premere play.</translation>
         <translation type="vanished">Mini-equalizzatore animato accanto al titolo</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="721"/>
+        <location filename="../modules/settings_window.cpp" line="722"/>
         <source>Animated gradient on the played waveform</source>
         <translation>Gradiente animato sulla parte riprodotta della waveform</translation>
     </message>
@@ -5289,44 +5289,49 @@ colour flow while a stream is playing.</source>
 colore azzurro-viola mentre uno stream è in riproduzione.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="871"/>
+        <location filename="../modules/settings_window.cpp" line="872"/>
         <source>Engine (yt-dlp)</source>
         <translation>Motore (yt-dlp)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="874"/>
+        <location filename="../modules/settings_window.cpp" line="875"/>
         <source>Audio quality:</source>
         <translation>Qualità audio:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="877"/>
+        <location filename="../modules/settings_window.cpp" line="878"/>
         <source>Higher quality uses more bandwidth. The streaming engine and its
 version/update controls live in the About dialog.</source>
         <translation>Una qualità superiore usa più banda. Il motore di streaming e i suoi
 controlli di versione/aggiornamento sono nella finestra Informazioni.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="885"/>
+        <location filename="../modules/settings_window.cpp" line="886"/>
+        <source>YouTube account</source>
+        <translation>Account YouTube</translation>
+    </message>
+    <message>
+        <location filename="../modules/settings_window.cpp" line="895"/>
         <source>Use voice activation for my mic while a sound plays</source>
         <translation>Usa l&apos;attivazione vocale per il mio microfono mentre un suono è in riproduzione</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="886"/>
+        <location filename="../modules/settings_window.cpp" line="896"/>
         <source>Lower the soundboard when I talk (ducking)</source>
         <translation>Abbassa la soundboard quando parlo (ducking)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="890"/>
+        <location filename="../modules/settings_window.cpp" line="900"/>
         <source>Lower by: 40%</source>
         <translation>Abbassa di: 40%</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="892"/>
+        <location filename="../modules/settings_window.cpp" line="902"/>
         <source>While a sound is playing</source>
         <translation>Mentre un suono è in riproduzione</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="893"/>
+        <location filename="../modules/settings_window.cpp" line="903"/>
         <source>The soundboard is transmitted continuously; your OWN voice is only
 sent when you actually speak (voice activation), independent of the
 soundboard. Applies while a sound plays and you are not muted.</source>
@@ -5335,30 +5340,30 @@ solo quando parli davvero (attivazione vocale), indipendentemente dalla
 soundboard. Vale mentre un suono è in riproduzione e non sei mutato.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="897"/>
+        <location filename="../modules/settings_window.cpp" line="907"/>
         <source>When you speak, the soundboard volume dips so your voice stays
 clearly audible, then returns when you stop.</source>
         <translation>Quando parli, il volume della soundboard si abbassa così la tua voce
 resta ben udibile, poi torna quando smetti.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="907"/>
-        <location filename="../modules/settings_window.cpp" line="1171"/>
+        <location filename="../modules/settings_window.cpp" line="917"/>
+        <location filename="../modules/settings_window.cpp" line="1181"/>
         <source>Lower by: %1%</source>
         <translation>Abbassa di: %1%</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="913"/>
+        <location filename="../modules/settings_window.cpp" line="923"/>
         <source>Detection level: -36 dB</source>
         <translation>Livello di rilevamento: -36 dB</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="914"/>
+        <location filename="../modules/settings_window.cpp" line="924"/>
         <source>Own-voice detection</source>
         <translation>Rilevamento della propria voce</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="916"/>
+        <location filename="../modules/settings_window.cpp" line="926"/>
         <source>How loud you need to be for the soundboard to count it as &quot;you are
 talking&quot; (own-voice indicator, and the two options above). Lower =
 more sensitive, picks up quieter speech; higher = less sensitive,
@@ -5369,38 +5374,38 @@ più sensibile, capta anche la voce sommessa; più alto = meno
 sensibile, ignora più rumore di fondo.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="931"/>
-        <location filename="../modules/settings_window.cpp" line="1176"/>
+        <location filename="../modules/settings_window.cpp" line="941"/>
+        <location filename="../modules/settings_window.cpp" line="1186"/>
         <source>Detection level: %1 dB</source>
         <translation>Livello di rilevamento: %1 dB</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="936"/>
+        <location filename="../modules/settings_window.cpp" line="946"/>
         <source>General</source>
         <translation>Generale</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="937"/>
+        <location filename="../modules/settings_window.cpp" line="947"/>
         <source>Streaming (YouTube / URL)</source>
         <translation>Streaming (YouTube / URL)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="938"/>
+        <location filename="../modules/settings_window.cpp" line="948"/>
         <source>Voice &amp;&amp; transmission</source>
         <translation>Voce e trasmissione</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="940"/>
+        <location filename="../modules/settings_window.cpp" line="950"/>
         <source>Audio sandbox &amp;&amp; 3D HRTF</source>
         <translation>Audio sandbox &amp;&amp; HRTF 3D</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="948"/>
+        <location filename="../modules/settings_window.cpp" line="958"/>
         <source>Profiles &amp;&amp; Config I/O</source>
         <translation>Profili &amp;&amp; Config I/O</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="949"/>
+        <location filename="../modules/settings_window.cpp" line="959"/>
         <source>Appearance</source>
         <translation>Aspetto</translation>
     </message>
@@ -5429,17 +5434,17 @@ del tuo tema personalizzato quando un tema è impostato.</translation>
         <translation type="vanished">Colori animazione:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="734"/>
+        <location filename="../modules/settings_window.cpp" line="735"/>
         <source>Animation speed:</source>
         <translation>Velocità animazione:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="746"/>
+        <location filename="../modules/settings_window.cpp" line="747"/>
         <source>Animation intensity:</source>
         <translation>Intensità animazione:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="951"/>
+        <location filename="../modules/settings_window.cpp" line="961"/>
         <source>Advanced</source>
         <translation>Avanzate</translation>
     </message>
@@ -5448,17 +5453,17 @@ del tuo tema personalizzato quando un tema è impostato.</translation>
         <translation type="vanished">File caricato / posizione riprod.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="148"/>
+        <location filename="../modules/settings_window.cpp" line="149"/>
         <source>Stop playback + clear loaded audio</source>
         <translation>Ferma riproduzione + svuota audio caricato</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="90"/>
+        <location filename="../modules/settings_window.cpp" line="91"/>
         <source>Replay mode (keep file + cursor after stop / end, reload glyph to replay)</source>
         <translation>Modalità replay (mantieni file + cursore dopo stop / fine, icona ricarica per rigiocare)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="368"/>
+        <location filename="../modules/settings_window.cpp" line="369"/>
         <source>When ON, a channel that finished or was stopped keeps its
 filename + waveform + crop markers; the play button glyph
 flips to a reload icon and one click replays from the
@@ -5473,55 +5478,55 @@ ripulisce completamente il canale allo stato vuoto (identico
 al clic sulla X rossa accanto al nome del file).</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="149"/>
-        <location filename="../modules/settings_window.cpp" line="154"/>
+        <location filename="../modules/settings_window.cpp" line="150"/>
+        <location filename="../modules/settings_window.cpp" line="155"/>
         <source>Audio sandbox settings</source>
         <translation>Impostazioni audio sandbox</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="150"/>
+        <location filename="../modules/settings_window.cpp" line="151"/>
         <source>Remove extra channels</source>
         <translation>Rimuovi canali extra</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="153"/>
+        <location filename="../modules/settings_window.cpp" line="154"/>
         <source>Loaded files</source>
         <translation>File caricati</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="157"/>
+        <location filename="../modules/settings_window.cpp" line="158"/>
         <source>Soundboard Settings</source>
         <translation>Impostazioni soundboard</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="167"/>
+        <location filename="../modules/settings_window.cpp" line="168"/>
         <source>Limits local output so a too-loud sample cannot blow your ears.</source>
         <translation>Limita l&apos;uscita locale per non farti male alle orecchie.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="168"/>
+        <location filename="../modules/settings_window.cpp" line="169"/>
         <source>When ON, every new Channel created via &quot;+ Add channel&quot; copies the local/remote volume, pitch, speed and reverb from the first channel. When OFF, new channels start with neutral defaults.</source>
         <translation>Da ON, ogni nuovo canale creato con &quot;+ Canale&quot; copia volume locale/remoto, pitch, velocità e riverbero dal primo canale. Da OFF, parte con valori neutri.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="172"/>
+        <location filename="../modules/settings_window.cpp" line="173"/>
         <source>Persist pitch/speed/reverb per channel between sessions.</source>
         <translation>Mantieni pitch/velocità/riverbero per canale tra le sessioni.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="173"/>
+        <location filename="../modules/settings_window.cpp" line="174"/>
         <source>Remember channel count, what was loaded in each channel and the pitch / speed / reverb / volume on every channel.</source>
         <translation>Ricorda il numero di canali, i file caricati e pitch / velocità / riverbero / volume di ogni canale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="180"/>
+        <location filename="../modules/settings_window.cpp" line="181"/>
         <source>Master switch for the pitch / speed / reverb effects.
 Off = the controls disappear from every channel.</source>
         <translation>Interruttore principale per pitch / velocità / riverbero.
 Off = i controlli scompaiono da ogni canale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="243"/>
+        <location filename="../modules/settings_window.cpp" line="244"/>
         <source>Master switch for the pitch / speed / reverb effects. When OFF
 every channel hides its FX panel and per-button custom FX are
 skipped at playback time.</source>
@@ -5534,27 +5539,27 @@ vengono saltati alla riproduzione.</translation>
         <translation type="vanished">Limita l&apos;uscita locale per non assordarti con un campione troppo forte.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="364"/>
+        <location filename="../modules/settings_window.cpp" line="365"/>
         <source>When ON, each new Channel copies settings from the first channel.</source>
         <translation>Da ON, ogni nuovo canale copia le impostazioni dal primo.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="366"/>
+        <location filename="../modules/settings_window.cpp" line="367"/>
         <source>When ON, each channel remembers its pitch / speed / reverb between sessions.</source>
         <translation>Da ON, ogni canale ricorda pitch / velocità / riverbero tra le sessioni.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="342"/>
+        <location filename="../modules/settings_window.cpp" line="343"/>
         <source>Compact channel view: removes the waveform display from every channel.</source>
         <translation>Vista compatta: rimuove la forma d&apos;onda da ogni canale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="259"/>
+        <location filename="../modules/settings_window.cpp" line="260"/>
         <source>Remember channel count, loaded files and all settings on the next open.</source>
         <translation>Ricorda numero di canali, file caricati e impostazioni alla prossima apertura.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="348"/>
+        <location filename="../modules/settings_window.cpp" line="349"/>
         <source>When ON, the waveform display adapts to show the visual effect of
 active audio sandbox effects (especially Paulstretch stretching).
 When OFF, the raw audio waveform is always shown.</source>
@@ -5563,7 +5568,7 @@ degli effetti attivi della sandbox (specie Paulstretch).
 Da OFF, viene sempre mostrata la forma d&apos;onda grezza.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="375"/>
+        <location filename="../modules/settings_window.cpp" line="376"/>
         <source>When ON, clicking an audio plays it on the default channel;
 any additional click spawns a NEW temporary channel per audio,
 which is automatically removed when playback stops.
@@ -5578,17 +5583,17 @@ spariscono solo cliccando il pulsante rosso di stop.
 Con questa modalità attiva, il pulsante &apos;+ Canale&apos; è nascosto.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="387"/>
+        <location filename="../modules/settings_window.cpp" line="388"/>
         <source>Show or hide the &apos;Pause all&apos; button in the main toolbar.</source>
         <translation>Mostra o nasconde il pulsante &apos;Pausa tutto&apos; nella barra principale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="389"/>
+        <location filename="../modules/settings_window.cpp" line="390"/>
         <source>Show or hide the &apos;Stop all&apos; button in the main toolbar.</source>
         <translation>Mostra o nasconde il pulsante &apos;Ferma tutto&apos; nella barra principale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="300"/>
+        <location filename="../modules/settings_window.cpp" line="301"/>
         <source>Draw the per-channel L/R LED visualizer as a vertical pair of
 bars instead of the default horizontal layout. The channel
 height is NOT enlarged - the meter is compacted and the
@@ -5601,39 +5606,39 @@ dello slider vengono ri-ancorati per chiudere lo spazio vuoto
 che altrimenti si formerebbe.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="94"/>
+        <location filename="../modules/settings_window.cpp" line="95"/>
         <source>Reset all audio sandbox settings</source>
         <translation>Reimposta tutte le impostazioni dell&apos;audio sandbox</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="308"/>
+        <location filename="../modules/settings_window.cpp" line="309"/>
         <source>Show or hide the -10s / -5s / +5s / +10s skip buttons on
 every channel (existing channels + those created later).</source>
         <translation>Mostra o nasconde i pulsanti skip -10s / -5s / +5s / +10s
 su ogni canale (esistenti + quelli creati in seguito).</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="318"/>
+        <location filename="../modules/settings_window.cpp" line="319"/>
         <source>Nothing</source>
         <translation>Niente</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="319"/>
+        <location filename="../modules/settings_window.cpp" line="320"/>
         <source>Format only (FLAC, MP3, ...)</source>
         <translation>Solo formato (FLAC, MP3, ...)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="320"/>
+        <location filename="../modules/settings_window.cpp" line="321"/>
         <source>Quality only (16bit/44.1kHz)</source>
         <translation>Solo qualità (16bit/44.1kHz)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="321"/>
+        <location filename="../modules/settings_window.cpp" line="322"/>
         <source>Format + quality</source>
         <translation>Formato + qualità</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="322"/>
+        <location filename="../modules/settings_window.cpp" line="323"/>
         <source>Coloured pills before a LOCAL file&apos;s name - the counterpart of
 the WEB badge an internet stream gets. The format pill is
 coloured by format (FLAC green, MP3 orange, OGG purple, ...),
@@ -5648,24 +5653,24 @@ verde lossless, teal bitrate alto, ambra medio, rosso basso). I
 colori sfumano verso l&apos;accento del tuo tema quando ne è attivo uno.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="331"/>
+        <location filename="../modules/settings_window.cpp" line="332"/>
         <source>File badge before the file name:</source>
         <translation>Badge del file prima del nome:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="335"/>
+        <location filename="../modules/settings_window.cpp" line="336"/>
         <source>Show WEB / LIVE badge on stream titles</source>
         <translation>Mostra il badge WEB / LIVE sui titoli degli stream</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="336"/>
+        <location filename="../modules/settings_window.cpp" line="337"/>
         <source>The azure WEB pill (or pulsing red LIVE pill) before an internet
 stream&apos;s title. OFF = the plain title only.</source>
         <translation>La pillola azzurra WEB (o quella rossa pulsante LIVE) prima del
 titolo di uno stream internet. OFF = solo il titolo semplice.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="344"/>
+        <location filename="../modules/settings_window.cpp" line="345"/>
         <source>Switch the per-channel waveform to a spectrogram-style heatmap.
 Uses a warm/cool gradient per column derived from the audio
 magnitude - a compact energy view.</source>
@@ -5674,36 +5679,36 @@ Usa un gradiente caldo/freddo per colonna derivato dall&apos;ampiezza
 audio - una vista compatta dell&apos;energia.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="391"/>
+        <location filename="../modules/settings_window.cpp" line="392"/>
         <source>Show &quot;+ Add channel&quot; button</source>
         <translation>Mostra il pulsante &quot;+ Aggiungi canale&quot;</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="392"/>
+        <location filename="../modules/settings_window.cpp" line="393"/>
         <source>Hide it if you use a fixed set of channels (or the multi-channel
 infinity mode, which already hides it).</source>
         <translation>Nascondilo se usi un numero fisso di canali (o la modalità
 infinity multi-canale, che già lo nasconde).</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="395"/>
+        <location filename="../modules/settings_window.cpp" line="396"/>
         <source>Show mute / preview checkboxes</source>
         <translation>Mostra le caselle muto / anteprima</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="396"/>
+        <location filename="../modules/settings_window.cpp" line="397"/>
         <source>The &apos;Mute locally&apos; / &apos;Mute myself&apos; / &apos;Preview only&apos; trio in the
 toolbar. The states keep working when hidden.</source>
         <translation>Il trio &apos;Muta localmente&apos; / &apos;Muta me stesso&apos; / &apos;Solo anteprima&apos;
 nella barra. Gli stati continuano a funzionare da nascosti.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="399"/>
+        <location filename="../modules/settings_window.cpp" line="400"/>
         <source>Show the &quot;Voice&quot; indicator</source>
         <translation>Mostra l&apos;indicatore &quot;Voce&quot;</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="400"/>
+        <location filename="../modules/settings_window.cpp" line="401"/>
         <source>The LED next to the mute checkboxes that lights up when your own
 voice is detected (green when it reaches the server, amber when
 something is blocking it). Detection keeps running when hidden.</source>
@@ -5712,37 +5717,37 @@ rilevata la tua voce (verde se arriva al server, ambra se qualcosa
 la sta bloccando). Il rilevamento continua anche da nascosto.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="404"/>
+        <location filename="../modules/settings_window.cpp" line="405"/>
         <source>Show profile buttons (P1-P4)</source>
         <translation>Mostra i pulsanti profilo (P1-P4)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="405"/>
+        <location filename="../modules/settings_window.cpp" line="406"/>
         <source>Hide them if you only ever use one grid profile.</source>
         <translation>Nascondili se usi sempre un solo profilo della griglia.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="407"/>
+        <location filename="../modules/settings_window.cpp" line="408"/>
         <source>Show Rows / Cols grid-size selectors</source>
         <translation>Mostra i selettori Righe / Colonne della griglia</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="408"/>
+        <location filename="../modules/settings_window.cpp" line="409"/>
         <source>Hide them once your grid has the size you want.</source>
         <translation>Nascondili quando la griglia ha la dimensione che vuoi.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="416"/>
+        <location filename="../modules/settings_window.cpp" line="417"/>
         <source>Layout</source>
         <translation>Disposizione</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="418"/>
+        <location filename="../modules/settings_window.cpp" line="419"/>
         <source>Restore default proportions</source>
         <translation>Ripristina proporzioni predefinite</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="419"/>
+        <location filename="../modules/settings_window.cpp" line="420"/>
         <source>Put the divider between the sound-button grid and the channels
 back where it is on a fresh install, and forget the saved
 position. Nothing else is touched.</source>
@@ -5751,42 +5756,42 @@ dov&apos;è su un&apos;installazione appena fatta, e dimentica la
 posizione salvata. Nient&apos;altro viene toccato.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="439"/>
+        <location filename="../modules/settings_window.cpp" line="440"/>
         <source>Rows</source>
         <translation>Righe</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="440"/>
+        <location filename="../modules/settings_window.cpp" line="441"/>
         <source>Columns</source>
         <translation>Colonne</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="446"/>
+        <location filename="../modules/settings_window.cpp" line="447"/>
         <source>Render the bound hotkey on top of each button.</source>
         <translation>Mostra la scorciatoia su ogni pulsante.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="448"/>
+        <location filename="../modules/settings_window.cpp" line="449"/>
         <source>Globally suppress hotkey handling.</source>
         <translation>Sopprime globalmente le scorciatoie.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="513"/>
+        <location filename="../modules/settings_window.cpp" line="514"/>
         <source>Default 3D HRTF engine for new channels:</source>
         <translation>Engine HRTF 3D predefinito per nuovi canali:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="515"/>
+        <location filename="../modules/settings_window.cpp" line="516"/>
         <source>Leia (measured HRTF) - recommended</source>
         <translation>Leia (HRTF misurato) - consigliato</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="516"/>
+        <location filename="../modules/settings_window.cpp" line="517"/>
         <source>Classic (parametric, deprecated)</source>
         <translation>Classic (parametrico, deprecato)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="526"/>
+        <location filename="../modules/settings_window.cpp" line="527"/>
         <source>Leia uses measured-HRTF convolution with image-source room
 reflections - correct front/back localisation and a far more
 convincing sense of space. Classic is the older parametric
@@ -5801,83 +5806,83 @@ suo carattere più leggero. La scelta si applica ai nuovi canali;
 i canali esistenti mantengono l&apos;engine salvato per-cella.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="537"/>
-        <location filename="../modules/settings_window.cpp" line="555"/>
+        <location filename="../modules/settings_window.cpp" line="538"/>
+        <location filename="../modules/settings_window.cpp" line="556"/>
         <source>(using bundled default)</source>
         <translation>(usando dataset predefinito)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="538"/>
+        <location filename="../modules/settings_window.cpp" line="539"/>
         <source>Pick custom SOFA...</source>
         <translation>Scegli SOFA personalizzato...</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="539"/>
+        <location filename="../modules/settings_window.cpp" line="540"/>
         <source>Use default</source>
         <translation>Usa predefinito</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="543"/>
+        <location filename="../modules/settings_window.cpp" line="544"/>
         <source>HRTF dataset:</source>
         <translation>Dataset HRTF:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="556"/>
+        <location filename="../modules/settings_window.cpp" line="557"/>
         <source>Custom: %1</source>
         <translation>Personalizzato: %1</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="561"/>
+        <location filename="../modules/settings_window.cpp" line="562"/>
         <source>Pick a SOFA HRTF dataset</source>
         <translation>Scegli un dataset HRTF SOFA</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="562"/>
+        <location filename="../modules/settings_window.cpp" line="563"/>
         <source>SOFA datasets (*.sofa);;All files (*.*)</source>
         <translation>Dataset SOFA (*.sofa);;Tutti i file (*.*)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="568"/>
+        <location filename="../modules/settings_window.cpp" line="569"/>
         <source>Custom HRTF</source>
         <translation>HRTF personalizzato</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="569"/>
+        <location filename="../modules/settings_window.cpp" line="570"/>
         <source>Reopen the soundboard to apply the new dataset.</source>
         <translation>Riapri la soundboard per applicare il nuovo dataset.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="461"/>
+        <location filename="../modules/settings_window.cpp" line="462"/>
         <source>Writes a debug log file (rpsb_debug.log) inside your TeamSpeak config folder.</source>
         <translation>Scrive un log debug (rpsb_debug.log) nella cartella config di TeamSpeak.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="471"/>
+        <location filename="../modules/settings_window.cpp" line="472"/>
         <source>Show real-time log...</source>
         <translation>Mostra log in tempo reale...</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="479"/>
+        <location filename="../modules/settings_window.cpp" line="480"/>
         <source>Copy sandbox debug snapshot</source>
         <translation>Copia snapshot debug sandbox</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="500"/>
+        <location filename="../modules/settings_window.cpp" line="501"/>
         <source>Master switch for the per-channel Audio Sandbox button.</source>
         <translation>Interruttore principale del pulsante Audio Sandbox per canale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="298"/>
+        <location filename="../modules/settings_window.cpp" line="299"/>
         <source>Render the dual L/R peak meter on each channel.</source>
         <translation>Mostra il misuratore di picco L/R su ogni canale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="306"/>
+        <location filename="../modules/settings_window.cpp" line="307"/>
         <source>Show an Export button on each channel.</source>
         <translation>Mostra un pulsante Esporta su ogni canale.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="625"/>
+        <location filename="../modules/settings_window.cpp" line="626"/>
         <source>Profile %1</source>
         <translation>Profilo %1</translation>
     </message>
@@ -5886,67 +5891,67 @@ i canali esistenti mantengono l&apos;engine salvato per-cella.</translation>
         <translation type="vanished">Attivo:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="664"/>
+        <location filename="../modules/settings_window.cpp" line="665"/>
         <source>Enable custom theme</source>
         <translation>Abilita tema pers.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="670"/>
+        <location filename="../modules/settings_window.cpp" line="671"/>
         <source>Background:</source>
         <translation>Sfondo:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="674"/>
+        <location filename="../modules/settings_window.cpp" line="675"/>
         <source>Accent:</source>
         <translation>Accento:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="678"/>
+        <location filename="../modules/settings_window.cpp" line="679"/>
         <source>Waveform:</source>
         <translation>Forma d&apos;onda:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="682"/>
+        <location filename="../modules/settings_window.cpp" line="683"/>
         <source>Text:</source>
         <translation>Testo:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="689"/>
+        <location filename="../modules/settings_window.cpp" line="690"/>
         <source>Buttons:</source>
         <translation>Pulsanti:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="701"/>
+        <location filename="../modules/settings_window.cpp" line="702"/>
         <source>Contrast:</source>
         <translation>Contrasto:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="777"/>
+        <location filename="../modules/settings_window.cpp" line="778"/>
         <source>Pick a color</source>
         <translation>Scegli un colore</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="818"/>
+        <location filename="../modules/settings_window.cpp" line="819"/>
         <source>Per-channel reset button resets:</source>
         <translation>Il reset per canale azzera:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="824"/>
+        <location filename="../modules/settings_window.cpp" line="825"/>
         <source>&quot;Reset channels&quot; button resets:</source>
         <translation>Il pulsante &quot;Reset canali&quot; azzera:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="219"/>
+        <location filename="../modules/settings_window.cpp" line="220"/>
         <source>Interface language:</source>
         <translation>Lingua interfaccia:</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="221"/>
+        <location filename="../modules/settings_window.cpp" line="222"/>
         <source>Automatic (system language)</source>
         <translation>Automatica (lingua di sistema)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="229"/>
+        <location filename="../modules/settings_window.cpp" line="230"/>
         <source>Italian is selected automatically when the system language is Italian. A change here is applied the next time the plugin loads (reload the plugin or restart TeamSpeak).</source>
         <translation>L&apos;italiano è scelto in automatico se il sistema è in italiano. Una modifica qui si applica al prossimo caricamento del plugin (ricarica il plugin o riavvia TeamSpeak).</translation>
     </message>
@@ -5955,12 +5960,12 @@ i canali esistenti mantengono l&apos;engine salvato per-cella.</translation>
         <translation type="vanished">Lingua</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="242"/>
+        <location filename="../modules/settings_window.cpp" line="243"/>
         <source>Audio</source>
         <translation>Audio</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="939"/>
+        <location filename="../modules/settings_window.cpp" line="949"/>
         <source>Channels</source>
         <translation>Canali</translation>
     </message>
@@ -5969,7 +5974,7 @@ i canali esistenti mantengono l&apos;engine salvato per-cella.</translation>
         <translation type="vanished">Griglia pulsanti</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="947"/>
+        <location filename="../modules/settings_window.cpp" line="957"/>
         <source>Hotkeys</source>
         <translation>Scorciatoie</translation>
     </message>
@@ -5994,7 +5999,7 @@ i canali esistenti mantengono l&apos;engine salvato per-cella.</translation>
         <translation type="vanished">Tema pers.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="950"/>
+        <location filename="../modules/settings_window.cpp" line="960"/>
         <source>Reset behaviour</source>
         <translation>Comportamento reset</translation>
     </message>
@@ -6003,12 +6008,12 @@ i canali esistenti mantengono l&apos;engine salvato per-cella.</translation>
         <translation type="vanished">Importa / Esporta</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="88"/>
+        <location filename="../modules/settings_window.cpp" line="89"/>
         <source>Extreme logging (verbose, every value + calc + action)</source>
         <translation>Logging estremo (dettagliato, ogni valore + calcolo + azione)</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="463"/>
+        <location filename="../modules/settings_window.cpp" line="464"/>
         <source>Verbose tracing: every slider tick, every seek, every loop
 transition, every DSP block boundary is logged. Off has zero
 overhead. Lines are tagged with [XLOG] so they are easy to grep.</source>
@@ -6017,12 +6022,12 @@ transizione di loop, ogni confine di blocco DSP viene loggato. Disattivato
 ha overhead zero. Le righe sono taggate [XLOG] per facilità di ricerca.</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="89"/>
+        <location filename="../modules/settings_window.cpp" line="90"/>
         <source>Right-click drag on the waveform proposes a loop area</source>
         <translation>Trascinamento col tasto destro sulla waveform propone un&apos;area di loop</translation>
     </message>
     <message>
-        <location filename="../modules/settings_window.cpp" line="356"/>
+        <location filename="../modules/settings_window.cpp" line="357"/>
         <source>Hold the right mouse button on a waveform and drag to propose
 a loop area. A confirmation bubble appears above the cursor;
 accept it to place Start + End markers and turn Loop ON.
@@ -6231,82 +6236,105 @@ Il click destro singolo apre comunque il menu contestuale di taglio.</translatio
 <context>
     <name>StreamResolver</name>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="259"/>
+        <location filename="../modules/stream_resolver.cpp" line="160"/>
+        <source>This video needs a signed-in YouTube account (age-restricted,
+members-only, private, or a &quot;confirm you&apos;re not a bot&quot; check).
+Connect your account in Settings › Streaming › YouTube account.</source>
+        <translation>Questo video richiede un account YouTube collegato (limite di età,
+solo membri, privato o verifica &quot;conferma di non essere un bot&quot;).
+Collega il tuo account in Impostazioni › Streaming › Account YouTube.</translation>
+    </message>
+    <message>
+        <location filename="../modules/stream_resolver.cpp" line="164"/>
+        <source>YouTube refused this even with your account%1.
+If the account was signed out, reconnect it in
+Settings › Streaming › YouTube account.</source>
+        <translation>YouTube lo ha rifiutato anche con il tuo account%1.
+Se l&apos;account è stato disconnesso, ricollegalo in
+Impostazioni › Streaming › Account YouTube.</translation>
+    </message>
+    <message>
+        <location filename="../modules/stream_resolver.cpp" line="370"/>
         <source>Update postponed.</source>
         <translation>Aggiornamento rinviato.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="320"/>
-        <location filename="../modules/stream_resolver.cpp" line="686"/>
+        <location filename="../modules/stream_resolver.cpp" line="431"/>
+        <location filename="../modules/stream_resolver.cpp" line="813"/>
         <source>Not a valid link.</source>
         <translation>Link non valido.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="345"/>
+        <location filename="../modules/stream_resolver.cpp" line="456"/>
         <source>Finishing a stream engine update…</source>
         <translation>Completamento aggiornamento del motore stream…</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="405"/>
+        <location filename="../modules/stream_resolver.cpp" line="520"/>
         <source>Contacting the site…</source>
         <translation>Connessione al sito…</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="425"/>
+        <location filename="../modules/stream_resolver.cpp" line="540"/>
         <source>Extracting the audio track info…</source>
         <translation>Estrazione delle info della traccia audio…</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="446"/>
-        <location filename="../modules/stream_resolver.cpp" line="658"/>
-        <location filename="../modules/stream_resolver.cpp" line="713"/>
-        <location filename="../modules/stream_resolver.cpp" line="798"/>
+        <location filename="../modules/stream_resolver.cpp" line="562"/>
+        <location filename="../modules/stream_resolver.cpp" line="785"/>
+        <location filename="../modules/stream_resolver.cpp" line="855"/>
+        <location filename="../modules/stream_resolver.cpp" line="966"/>
         <source>Streaming engine unavailable.</source>
         <translation>Motore di streaming non disponibile.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="456"/>
+        <location filename="../modules/stream_resolver.cpp" line="572"/>
         <source>Starting the stream engine…</source>
         <translation>Avvio del motore stream…</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="571"/>
+        <location filename="../modules/stream_resolver.cpp" line="690"/>
+        <source>Retrying with your YouTube account…</source>
+        <translation>Riprovo con il tuo account YouTube…</translation>
+    </message>
+    <message>
+        <location filename="../modules/stream_resolver.cpp" line="699"/>
         <source>Couldn&apos;t load this link.</source>
         <translation>Impossibile caricare questo link.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="635"/>
+        <location filename="../modules/stream_resolver.cpp" line="762"/>
         <source>Checking for updates…</source>
         <translation>Ricerca aggiornamenti…</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="672"/>
+        <location filename="../modules/stream_resolver.cpp" line="799"/>
         <source>Up to date.</source>
         <translation>Già aggiornato.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="674"/>
+        <location filename="../modules/stream_resolver.cpp" line="801"/>
         <source>Update failed.</source>
         <translation>Aggiornamento non riuscito.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="723"/>
-        <location filename="../modules/stream_resolver.cpp" line="748"/>
+        <location filename="../modules/stream_resolver.cpp" line="881"/>
+        <location filename="../modules/stream_resolver.cpp" line="907"/>
         <source>Couldn&apos;t load this playlist.</source>
         <translation>Impossibile caricare questa playlist.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="761"/>
+        <location filename="../modules/stream_resolver.cpp" line="920"/>
         <source>A download is already in progress.</source>
         <translation>È già in corso un download.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="809"/>
+        <location filename="../modules/stream_resolver.cpp" line="988"/>
         <source>Download complete.</source>
         <translation>Download completato.</translation>
     </message>
     <message>
-        <location filename="../modules/stream_resolver.cpp" line="809"/>
+        <location filename="../modules/stream_resolver.cpp" line="989"/>
         <source>Download failed.</source>
         <translation>Download non riuscito.</translation>
     </message>
@@ -6738,6 +6766,328 @@ L&apos;etichetta a destra mostra: trascorso / totale.</translation>
         <location filename="../modules/whats_new_dialog.cpp" line="83"/>
         <source>(no release notes were bundled for this version)</source>
         <translation>(nessuna release note inclusa per questa versione)</translation>
+    </message>
+</context>
+<context>
+    <name>YouTubeAccountPanel</name>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="54"/>
+        <source>Opens Google&apos;s own sign-in page in %1, in a separate private window.
+You sign in there as usual (passkey, 2-step verification...):
+the soundboard never sees your password.</source>
+        <translation>Apre la pagina di accesso ufficiale di Google in %1, in una finestra separata.
+Accedi lì come al solito (passkey, verifica in due passaggi...):
+la soundboard non vede mai la tua password.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="57"/>
+        <source>No Chrome, Edge or Brave browser was found: use &quot;Other ways&quot;.</source>
+        <translation>Nessun browser Chrome, Edge o Brave trovato: usa &quot;Altri metodi&quot;.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="64"/>
+        <source>Cancel</source>
+        <translation>Annulla</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="68"/>
+        <source>Disconnect</source>
+        <translation>Disconnetti</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="69"/>
+        <source>Delete the saved YouTube session from this computer.</source>
+        <translation>Elimina da questo computer la sessione YouTube salvata.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="74"/>
+        <source>Other ways</source>
+        <translation>Altri metodi</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="78"/>
+        <source>Use a browser where I&apos;m already signed in to YouTube</source>
+        <translation>Usa un browser in cui ho già fatto l&apos;accesso a YouTube</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="87"/>
+        <source>Import a cookies.txt file...</source>
+        <translation>Importa un file cookies.txt...</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="91"/>
+        <source>How the YouTube sign-in works:
+- Google&apos;s real sign-in page opens in your own browser (Chrome, Edge...),
+  in a fresh, separate window. You sign in there exactly as usual.
+- The soundboard never sees your password. As soon as the sign-in
+  completes it keeps ONLY the YouTube session and closes that window.
+- The session stays on this computer only: encrypted with your Windows
+  account (on macOS / Linux: a file only your user can read). It
+  survives restarts and updates - you sign in once.
+- Disconnect deletes it. To also end it on Google&apos;s side:
+  myaccount.google.com &gt; Security &gt; Your devices.
+
+It is only needed for videos YouTube won&apos;t show to anonymous visitors:
+age-restricted, members-only, private, your Watch Later / Liked
+playlists, and the &quot;confirm you&apos;re not a bot&quot; check.</source>
+        <translation>Come funziona l&apos;accesso a YouTube:
+- La vera pagina di accesso di Google si apre nel tuo browser (Chrome, Edge...),
+  in una finestra nuova e separata. Accedi lì esattamente come sempre.
+- La soundboard non vede mai la tua password. Appena l&apos;accesso è
+  completato conserva SOLO la sessione YouTube e chiude quella finestra.
+- La sessione resta solo su questo computer: cifrata con il tuo account
+  Windows (su macOS / Linux: un file leggibile solo dal tuo utente).
+  Sopravvive a riavvii e aggiornamenti: accedi una volta sola.
+- Disconnetti la elimina. Per chiuderla anche lato Google:
+  myaccount.google.com &gt; Sicurezza &gt; I tuoi dispositivi.
+
+Serve solo per i video che YouTube non mostra ai visitatori anonimi:
+con limite di età, solo membri, privati, le tue playlist Guarda più tardi /
+Video piaciuti e la verifica &quot;conferma di non essere un bot&quot;.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="109"/>
+        <source>Use the account for every YouTube video</source>
+        <translation>Usa l&apos;account per tutti i video YouTube</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="120"/>
+        <source>OFF (recommended): links load anonymously first; the account is used
+automatically ONLY when YouTube asks for a sign-in (age-restricted,
+members-only, private, &quot;confirm you&apos;re not a bot&quot;).
+ON: every YouTube link is loaded with your account.</source>
+        <translation>OFF (consigliato): i link vengono caricati prima in forma anonima; l&apos;account
+viene usato automaticamente SOLO quando YouTube chiede l&apos;accesso (limite di
+età, solo membri, privati, &quot;conferma di non essere un bot&quot;).
+ON: ogni link YouTube viene caricato con il tuo account.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="157"/>
+        <source>Signing in...</source>
+        <translation>Accesso in corso...</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="172"/>
+        <source>⚠ YouTube no longer accepts the saved session</source>
+        <translation>⚠ YouTube non accetta più la sessione salvata</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="173"/>
+        <source>Reconnect</source>
+        <translation>Ricollega</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="175"/>
+        <source>✓ YouTube account connected</source>
+        <translation>✓ Account YouTube collegato</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="176"/>
+        <source>✓ Connected as %1</source>
+        <translation>✓ Collegato come %1</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="177"/>
+        <source>Switch account</source>
+        <translation>Cambia account</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="184"/>
+        <source>since %1</source>
+        <translation>dal %1</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="188"/>
+        <source>It expired or was signed out (e.g. from Google&apos;s &quot;Your devices&quot; page).
+Reconnect to keep loading videos that need a sign-in.</source>
+        <translation>È scaduta o è stata disconnessa (es. dalla pagina &quot;I tuoi dispositivi&quot; di Google).
+Ricollega l&apos;account per continuare a caricare i video che richiedono l&apos;accesso.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="198"/>
+        <source>Sign in with Google</source>
+        <translation>Accedi con Google</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="199"/>
+        <source>Not connected</source>
+        <translation>Non collegato</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="200"/>
+        <source>Only needed for age-restricted, members-only or private videos, your
+Watch Later / Liked playlists, and YouTube&apos;s &quot;confirm you&apos;re not a bot&quot; check.</source>
+        <translation>Serve solo per video con limite di età, solo membri o privati, le tue playlist
+Guarda più tardi / Video piaciuti e la verifica &quot;conferma di non essere un bot&quot;.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="218"/>
+        <source>Disconnect YouTube account</source>
+        <translation>Disconnetti account YouTube</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="219"/>
+        <source>Delete the saved YouTube session from this computer?
+
+Videos that need a sign-in will stop loading until you connect again.</source>
+        <translation>Eliminare da questo computer la sessione YouTube salvata?
+
+I video che richiedono l&apos;accesso non si caricheranno finché non ricolleghi l&apos;account.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="230"/>
+        <source>Import cookies.txt</source>
+        <translation>Importa cookies.txt</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="231"/>
+        <source>Cookie files (*.txt);;All files (*)</source>
+        <translation>File cookie (*.txt);;Tutti i file (*)</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_account_panel.cpp" line="236"/>
+        <source>YouTube account connected.</source>
+        <translation>Account YouTube collegato.</translation>
+    </message>
+</context>
+<context>
+    <name>YouTubeAuth</name>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="427"/>
+        <source>Sign-in timed out. Try again when you&apos;re ready.</source>
+        <translation>Tempo scaduto per l&apos;accesso. Riprova quando sei pronto.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="530"/>
+        <source>signed in with Google in %1</source>
+        <translation>accesso con Google in %1</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="532"/>
+        <source>session imported from %1</source>
+        <translation>sessione importata da %1</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="534"/>
+        <source>imported from a cookies.txt file</source>
+        <translation>importata da un file cookies.txt</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="754"/>
+        <source>No Chrome, Edge or Brave browser was found on this computer.
+Use &quot;Other ways&quot; to take the session from Firefox or a cookies.txt file.</source>
+        <translation>Nessun browser Chrome, Edge o Brave trovato su questo computer.
+Usa &quot;Altri metodi&quot; per prendere la sessione da Firefox o da un file cookies.txt.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="780"/>
+        <source>Couldn&apos;t start %1.</source>
+        <translation>Impossibile avviare %1.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="785"/>
+        <source>The browser window was closed before the sign-in was completed.</source>
+        <translation>La finestra del browser è stata chiusa prima di completare l&apos;accesso.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="805"/>
+        <source>Sign in to Google in the %1 window that just opened…</source>
+        <translation>Accedi a Google nella finestra di %1 appena aperta…</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="880"/>
+        <source>Lost contact with the sign-in browser.</source>
+        <translation>Persa la comunicazione con il browser di accesso.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="910"/>
+        <source>Signed in! Saving your YouTube session…</source>
+        <translation>Accesso effettuato! Salvo la tua sessione YouTube…</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="993"/>
+        <source>Couldn&apos;t read the YouTube session from the browser. Please try again.</source>
+        <translation>Impossibile leggere la sessione YouTube dal browser. Riprova.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="998"/>
+        <source>Signed in, but the session couldn&apos;t be saved on this computer.</source>
+        <translation>Accesso effettuato, ma non è stato possibile salvare la sessione su questo computer.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="1003"/>
+        <source>YouTube account connected.</source>
+        <translation>Account YouTube collegato.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="1004"/>
+        <source>Connected as %1.</source>
+        <translation>Collegato come %1.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="1109"/>
+        <location filename="../modules/youtube_auth.cpp" line="1112"/>
+        <source>Sign-in cancelled.</source>
+        <translation>Accesso annullato.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="1154"/>
+        <source>Streaming engine unavailable.</source>
+        <translation>Motore di streaming non disponibile.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="1171"/>
+        <source>No signed-in YouTube session was found in %1.
+Open youtube.com in %1, sign in, then try again.</source>
+        <translation>Nessuna sessione YouTube attiva trovata in %1.
+Apri youtube.com in %1, accedi e riprova.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="1174"/>
+        <source>Couldn&apos;t read the session from %1:
+%2</source>
+        <translation>Impossibile leggere la sessione da %1:
+%2</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="1179"/>
+        <source>On Windows, Chrome-based browsers lock their sign-in data:
+use &quot;Sign in with Google&quot; instead, or Firefox.</source>
+        <translation>Su Windows i browser basati su Chrome bloccano i dati di accesso:
+usa invece &quot;Accedi con Google&quot;, oppure Firefox.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="1186"/>
+        <location filename="../modules/youtube_auth.cpp" line="1218"/>
+        <source>The session couldn&apos;t be saved on this computer.</source>
+        <translation>Impossibile salvare la sessione su questo computer.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="1189"/>
+        <source>YouTube account connected (from %1).</source>
+        <translation>Account YouTube collegato (da %1).</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="1195"/>
+        <source>Reading the YouTube session from %1…</source>
+        <translation>Leggo la sessione YouTube da %1…</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="1203"/>
+        <source>Couldn&apos;t open the file.</source>
+        <translation>Impossibile aprire il file.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="1207"/>
+        <source>That file is too big to be a cookies.txt export.</source>
+        <translation>Il file è troppo grande per essere un export cookies.txt.</translation>
+    </message>
+    <message>
+        <location filename="../modules/youtube_auth.cpp" line="1213"/>
+        <source>This file doesn&apos;t contain a signed-in YouTube session
+(expected a Netscape-format cookies.txt exported while signed in to youtube.com).</source>
+        <translation>Questo file non contiene una sessione YouTube attiva
+(serve un cookies.txt in formato Netscape esportato mentre eri connesso a youtube.com).</translation>
     </message>
 </context>
 <context>

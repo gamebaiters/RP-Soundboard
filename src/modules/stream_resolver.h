@@ -77,6 +77,14 @@ public:
 	// http:// or https:// prefix (cheap gate before offering to resolve).
 	static bool looksLikeUrl(const QString &s);
 
+	// youtube.com / youtu.be / youtube-nocookie.com host.
+	static bool isYouTubeUrl(const QString &s);
+
+	// yt-dlp stderr says the video/playlist needs a signed-in account (age
+	// gate, "confirm you're not a bot", members-only, private, ...). Such a
+	// failure is retried once with the saved YouTube session (YouTubeAuth).
+	static bool looksLikeAuthError(const QString &stderrText);
+
 	// True if the URL points at a playlist (a "list=" query item, or a
 	// youtube.com/playlist path). A bare watch?v=...&list=... counts too so the
 	// caller can offer "whole playlist or just this video".
@@ -189,7 +197,19 @@ signals:
 
 private:
 	explicit StreamResolver(QObject *parent = nullptr);
-	void startProcess(const QString &pageUrl);
+	// withAuth: hand the saved YouTube session to this run (see applyAuth).
+	void startProcess(const QString &pageUrl, bool withAuth);
+	void startPlaylistProcess(const QString &url, bool withAuth);
+	void startDownload(const QString &pageUrl, const QString &destFile, bool withAuth);
+	// --cookies <private per-process copy>; false if no session is saved.
+	static bool applyAuth(QProcess *proc, QStringList &args);
+	static bool usedAuth(const QProcess *proc);
+	static void dropAuthFile(QProcess *proc);   // delete that copy (process gone)
+	static void noteAuthOutcome(const QString &stderrText, bool failedForAuth);
+	// User-facing failure text: yt-dlp's own ERROR line, or - for a sign-in
+	// wall - where to connect / reconnect the YouTube account.
+	static QString explainFailure(const QByteArray &err, bool withAuth,
+	                              const QString &pageUrl, const QString &fallback);
 	void finishProcess(QProcess *proc, const QString &pageUrl);
 	// Parse whatever the resolve has printed SO FAR. Returns true once a
 	// complete, usable JSON object is in `out` — the resolve is then answered

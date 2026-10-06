@@ -123,6 +123,10 @@ set(sources
 	src/modules/main_page_wiring.cpp
 	src/modules/stream_resolver.h
 	src/modules/stream_resolver.cpp
+	src/modules/youtube_auth.h
+	src/modules/youtube_auth.cpp
+	src/modules/youtube_account_panel.h
+	src/modules/youtube_account_panel.cpp
 
 	# --- Audio sandbox DSP (per-channel HRTF / paulstretch / EQ / reverb) ---
 	src/dsp/SandboxState.h

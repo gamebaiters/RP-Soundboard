@@ -150,6 +150,10 @@ if [[ "${delete_config}" == "Y" ]]; then
     [[ -d "${TS3_BASE}/rp_soundboard_configs" ]] && { rm -rf "${TS3_BASE}/rp_soundboard_configs"; echo "  [OK] Removed rp_soundboard_configs/"; }
 fi
 
+# Step 8: saved YouTube sign-in (always: it is a credential, not config)
+YT_SESSION="${HOME}/Library/Application Support/GameBaiters/Soundboard/youtube_session.dat"
+[[ -f "${YT_SESSION}" ]] && { rm -f "${YT_SESSION}"; echo "  [OK] Removed the saved YouTube sign-in."; }
+
 echo
 echo "  ============================================"
 if (( errors == 0 )); then

@@ -35,6 +35,7 @@
 #include "../common.h"   // TS3 SDK typedefs, ts3Functions, PATH_BUFSIZE
 #include "../plugin.h"   // getPluginID()
 #include "../ts3log.h"   // logInfo / logWarning / extremeLog
+#include "youtube_auth.h"
 
 //----------------------------------------------------------------
 StreamResolver &StreamResolver::instance()
@@ -67,6 +68,116 @@ bool StreamResolver::looksLikePlaylist(const QString &s)
 	if (list.isEmpty()) return false;
 	if (list.startsWith("RD") || list.startsWith("UL")) return false;
 	return true;
+}
+
+//----------------------------------------------------------------
+bool StreamResolver::isYouTubeUrl(const QString &s)
+{
+	const QString host = QUrl(s.trimmed()).host().toLower();
+	return host == "youtu.be" || host.endsWith(".youtu.be")
+	    || host == "youtube.com" || host.endsWith(".youtube.com")
+	    || host.endsWith("youtube-nocookie.com");
+}
+
+//----------------------------------------------------------------
+// yt-dlp's wording for "this needs a signed-in account": age gate, bot wall,
+// members-only, private, and its generic "use --cookies" hint.
+bool StreamResolver::looksLikeAuthError(const QString &stderrText)
+{
+	static const char *const needles[] = {
+		"sign in to confirm", "confirm your age", "age-restricted", "age restricted",
+		"inappropriate for some users", "not a bot", "members-only", "members only",
+		"join this channel", "private video", "video is private", "playlist is private",
+		"login required", "requires authentication", "use --cookies",
+		"cookies-from-browser", "account cookies", "sign in to view", "please sign in",
+	};
+	const QString t = stderrText.toLower();
+	for (const char *n : needles)
+		if (t.contains(QLatin1String(n))) return true;
+	return false;
+}
+
+//----------------------------------------------------------------
+// Give ONE yt-dlp process its own private copy of the saved YouTube session.
+// Per-process because yt-dlp rewrites its --cookies file on exit: parallel
+// resolves sharing one file would race and could truncate it. The copy is
+// removed by dropAuthFile() once the process is gone (and by the scratch-dir
+// wipe at start/shutdown whatever happens).
+bool StreamResolver::applyAuth(QProcess *proc, QStringList &args)
+{
+	const QString ck = YouTubeAuth::instance().materializeCookieFile(workDir());
+	if (ck.isEmpty()) return false;
+	args << "--cookies" << ck;
+	proc->setProperty("gbsbCookieFile", ck);
+	return true;
+}
+
+bool StreamResolver::usedAuth(const QProcess *proc)
+{
+	return proc && !proc->property("gbsbCookieFile").toString().isEmpty();
+}
+
+void StreamResolver::dropAuthFile(QProcess *proc)
+{
+	if (!proc) return;
+	const QString ck = proc->property("gbsbCookieFile").toString();
+	if (!ck.isEmpty()) QFile::remove(ck);
+}
+
+//----------------------------------------------------------------
+// After a run that carried the session: tell YouTubeAuth whether YouTube still
+// accepts it (drives the "reconnect" hint in Settings).
+void StreamResolver::noteAuthOutcome(const QString &stderrText, bool failedForAuth)
+{
+	const QString t = stderrText.toLower();
+	if (t.contains(QLatin1String("cookies are no longer valid")) ||
+	    (failedForAuth && (t.contains(QLatin1String("confirm your age")) ||
+	                       t.contains(QLatin1String("not a bot")))))
+		YouTubeAuth::instance().reportSessionRejected(
+			t.contains(QLatin1String("no longer valid")) ? QStringLiteral("cookies no longer valid")
+			                                             : QStringLiteral("sign-in wall with the account"));
+	else if (!failedForAuth)
+		YouTubeAuth::instance().reportSessionWorked();
+}
+
+//----------------------------------------------------------------
+QString StreamResolver::explainFailure(const QByteArray &err, bool withAuth,
+                                       const QString &pageUrl, const QString &fallback)
+{
+	QString detail;
+	const QStringList lines = QString::fromUtf8(err).split('\n');
+	for (const QString &ln : lines) {
+		const QString t = ln.trimmed();
+		if (t.startsWith(QLatin1String("ERROR:"), Qt::CaseInsensitive)) {
+			detail = t.mid(6).trimmed();
+			break;
+		}
+	}
+	if (detail.size() > 140) detail = detail.left(138) + QStringLiteral("…");
+
+	if (isYouTubeUrl(pageUrl) && looksLikeAuthError(QString::fromUtf8(err))) {
+		if (!YouTubeAuth::instance().hasSession())
+			return tr("This video needs a signed-in YouTube account (age-restricted,\n"
+			          "members-only, private, or a \"confirm you're not a bot\" check).\n"
+			          "Connect your account in Settings › Streaming › YouTube account.");
+		if (withAuth)
+			return tr("YouTube refused this even with your account%1.\n"
+			          "If the account was signed out, reconnect it in\n"
+			          "Settings › Streaming › YouTube account.")
+			       .arg(detail.isEmpty() ? QString() : QStringLiteral(": ") + detail);
+	}
+	return detail.isEmpty() ? fallback : detail;
+}
+
+//----------------------------------------------------------------
+// Use the account on the FIRST attempt? Only when the user asked for "every
+// video" — otherwise the anonymous attempt goes first and the account is only
+// used by the automatic retry after a sign-in error.
+static bool authFirstFor(const QString &url)
+{
+	return StreamResolver::isYouTubeUrl(url)
+	    && YouTubeAuth::useForEveryVideo()
+	    && YouTubeAuth::instance().hasSession();
 }
 
 //----------------------------------------------------------------
@@ -352,11 +463,11 @@ void StreamResolver::resolve(const QString &pageUrl)
 		return;
 	}
 
-	startProcess(url);
+	startProcess(url, authFirstFor(url));
 }
 
 //----------------------------------------------------------------
-void StreamResolver::startProcess(const QString &pageUrl)
+void StreamResolver::startProcess(const QString &pageUrl, bool withAuth)
 {
 	QProcess *proc = new QProcess(this);
 
@@ -372,18 +483,22 @@ void StreamResolver::startProcess(const QString &pageUrl)
 	QStringList args = commonArgs();
 	args << "-f" << formatSelector()          // quality from settings
 	     << "--no-playlist"
-	     << "--no-warnings"
 	     << "--no-progress"
 	     << "--skip-download"                 // RESOLVE only — never touch disk
 	     << "--no-write-info-json" << "--no-write-thumbnail"
 	     << "--no-write-playlist-metafiles"
 	     // One line of JSON with exactly the fields we need; url respects -f.
-	     << "--print" << "%(.{title,duration,is_live,url,http_headers})j"
-	     << pageUrl;
+	     << "--print" << "%(.{title,duration,is_live,url,http_headers})j";
+	// With the account, KEEP warnings: "cookies are no longer valid" is how
+	// yt-dlp tells us the saved session died (see noteAuthOutcome).
+	const bool authed = withAuth && applyAuth(proc, args);
+	if (!authed) args << "--no-warnings";
+	args << pageUrl;
 
 	proc->setWorkingDirectory(workDir());   // contain any stray write
 
-	logInfo("[stream] resolving: %s", pageUrl.toUtf8().constData());
+	logInfo("[stream] resolving%s: %s", authed ? " (with YouTube account)" : "",
+	        pageUrl.toUtf8().constData());
 	extremeLog("[stream] yt-dlp %s \"%s\"", args.mid(0, args.size() - 1).join(' ').toUtf8().constData(),
 	           pageUrl.toUtf8().constData());
 
@@ -442,6 +557,7 @@ void StreamResolver::startProcess(const QString &pageUrl)
 				if (!m_inflight.contains(proc)) return;
 				m_inflight.remove(proc);
 				m_outBuf.remove(proc);
+				dropAuthFile(proc);
 				proc->deleteLater();
 				emit failed(pageUrl, tr("Streaming engine unavailable."));
 			}
@@ -524,6 +640,11 @@ void StreamResolver::finishProcess(QProcess *proc, const QString &pageUrl)
 	// just the reaper.
 	if (!m_inflight.contains(proc)) {
 		m_aux.remove(proc);       // retireProcess() parked it there
+		// Answered early with the account: its stderr (warnings kept on
+		// purpose) says whether YouTube still accepts the saved session.
+		if (usedAuth(proc) && proc->exitStatus() == QProcess::NormalExit)
+			noteAuthOutcome(QString::fromUtf8(proc->readAllStandardError()), false);
+		dropAuthFile(proc);
 		proc->deleteLater();
 		return;
 	}
@@ -533,12 +654,15 @@ void StreamResolver::finishProcess(QProcess *proc, const QString &pageUrl)
 	out += '\n';   // the parser wants a terminated line; the stream is complete
 	const QByteArray err = proc->readAllStandardError();
 	const int code = proc->exitCode();
+	const bool withAuth = usedAuth(proc);
+	dropAuthFile(proc);
 	proc->deleteLater();
 
 	// A non-zero exit with a complete JSON line is still a win (the engine can
 	// fail on a teardown step AFTER printing what we asked for).
 	ResolvedStream s;
 	if (parseResolveJson(out, s)) {
+		if (withAuth) noteAuthOutcome(QString::fromUtf8(err), false);
 		s.resolvedAt = QDateTime::currentDateTime();
 		m_cache.insert(videoKey(pageUrl), s);
 		logInfo("[stream] resolved: '%s' (%.0fs%s) <- %s",
@@ -550,26 +674,29 @@ void StreamResolver::finishProcess(QProcess *proc, const QString &pageUrl)
 		return;
 	}
 
-	logWarning("[stream] resolve failed (exit %d): %s", code,
+	logWarning("[stream] resolve failed (exit %d%s): %s", code,
+	           withAuth ? ", with YouTube account" : "",
 	           pageUrl.toUtf8().constData());
-	QString detail;
-	if (!err.trimmed().isEmpty()) {
+	if (!err.trimmed().isEmpty())
 		extremeLog("[stream] yt-dlp stderr: %s", err.trimmed().constData());
-		// Surface the extractor's own reason (private / deleted video, age
-		// gate, geo block, ...) instead of a blind "couldn't load": yt-dlp
-		// prints an "ERROR:" line on every hard failure.
-		const QStringList lines = QString::fromUtf8(err).split('\n');
-		for (const QString &ln : lines) {
-			const QString t = ln.trimmed();
-			if (t.startsWith(QLatin1String("ERROR:"), Qt::CaseInsensitive)) {
-				detail = t.mid(6).trimmed();
-				break;
-			}
-		}
-		if (detail.size() > 140) detail = detail.left(138) + QStringLiteral("…");
+
+	const QString errText = QString::fromUtf8(err);
+	const bool authErr = isYouTubeUrl(pageUrl) && looksLikeAuthError(errText);
+	// Sign-in wall (age gate / bot check / members-only / private) on the
+	// anonymous attempt and an account is connected: retry ONCE with it,
+	// transparently - the user just sees the link load.
+	if (authErr && !withAuth && YouTubeAuth::instance().hasSession()) {
+		logInfo("[stream] sign-in required, retrying with the YouTube account");
+		emit resolveProgress(pageUrl, tr("Retrying with your YouTube account…"));
+		startProcess(pageUrl, true);
+		return;
 	}
-	emit failed(pageUrl, detail.isEmpty() ? tr("Couldn't load this link.")
-	                                      : detail);
+	if (withAuth) noteAuthOutcome(errText, authErr);
+
+	// Surface the extractor's own reason (private / deleted video, age gate,
+	// geo block, ...) instead of a blind "couldn't load" - or, for a sign-in
+	// wall, tell the user exactly where to connect the account.
+	emit failed(pageUrl, explainFailure(err, withAuth, pageUrl, tr("Couldn't load this link.")));
 }
 
 //----------------------------------------------------------------
@@ -685,6 +812,17 @@ void StreamResolver::resolvePlaylist(const QString &pageUrl)
 	const QString url = pageUrl.trimmed();
 	if (!looksLikeUrl(url)) { emit failed(url, tr("Not a valid link.")); return; }
 
+	// Account-only lists (Watch Later, Liked videos, Liked music) can't be
+	// read anonymously at all: go straight to the account when one is there.
+	const QString list = QUrlQuery(QUrl(url)).queryItemValue("list");
+	const bool personal = list == "WL" || list == "LL" || list == "LM";
+	startPlaylistProcess(url, authFirstFor(url) ||
+	                          (personal && YouTubeAuth::instance().hasSession()));
+}
+
+//----------------------------------------------------------------
+void StreamResolver::startPlaylistProcess(const QString &url, bool withAuth)
+{
 	QProcess *proc = makeHidden(this);
 	m_aux.insert(proc);
 	m_playlistInflight.insert(proc, url);   // for cancelResolve(url)
@@ -693,12 +831,14 @@ void StreamResolver::resolvePlaylist(const QString &pageUrl)
 	QStringList args = commonArgs();
 	args << "--flat-playlist"
 	     << "--skip-download"           // enumerate only — never download
-	     << "--no-warnings"
 	     << "--no-progress"
 	     << "--no-write-info-json" << "--no-write-playlist-metafiles"
-	     << "--print" << "%(.{id,title,url,webpage_url,playlist_title})j"
-	     << url;
-	logInfo("[stream] resolving playlist: %s", url.toUtf8().constData());
+	     << "--print" << "%(.{id,title,url,webpage_url,playlist_title})j";
+	const bool authed = withAuth && applyAuth(proc, args);
+	if (!authed) args << "--no-warnings";
+	args << url;
+	logInfo("[stream] resolving playlist%s: %s", authed ? " (with YouTube account)" : "",
+	        url.toUtf8().constData());
 
 	QTimer *wd = new QTimer(proc);
 	wd->setSingleShot(true);
@@ -709,7 +849,9 @@ void StreamResolver::resolvePlaylist(const QString &pageUrl)
 
 	connect(proc, &QProcess::errorOccurred, this, [this, proc, url](QProcess::ProcessError e){
 		if (e == QProcess::FailedToStart) {
-			m_aux.remove(proc); m_playlistInflight.remove(proc); proc->deleteLater();
+			m_aux.remove(proc); m_playlistInflight.remove(proc);
+			dropAuthFile(proc);
+			proc->deleteLater();
 			emit failed(url, tr("Streaming engine unavailable."));
 		}
 	});
@@ -718,11 +860,28 @@ void StreamResolver::resolvePlaylist(const QString &pageUrl)
 			m_aux.remove(proc);
 			m_playlistInflight.remove(proc);
 			const QByteArray out = proc->readAllStandardOutput();
+			const QByteArray err = proc->readAllStandardError();
+			const bool withAuth = usedAuth(proc);
+			dropAuthFile(proc);
 			proc->deleteLater();
 			if (code != 0 || out.trimmed().isEmpty()) {
-				emit failed(url, tr("Couldn't load this playlist."));
+				if (!err.trimmed().isEmpty())
+					extremeLog("[stream] playlist stderr: %s", err.trimmed().constData());
+				const QString errText = QString::fromUtf8(err);
+				// Anonymous, a private playlist reads as "does not exist".
+				const bool authErr = isYouTubeUrl(url) &&
+					(looksLikeAuthError(errText) ||
+					 errText.contains(QLatin1String("does not exist"), Qt::CaseInsensitive));
+				if (authErr && !withAuth && YouTubeAuth::instance().hasSession()) {
+					logInfo("[stream] playlist needs sign-in, retrying with the YouTube account");
+					startPlaylistProcess(url, true);
+					return;
+				}
+				if (withAuth) noteAuthOutcome(errText, authErr && looksLikeAuthError(errText));
+				emit failed(url, explainFailure(err, withAuth, url, tr("Couldn't load this playlist.")));
 				return;
 			}
+			if (withAuth) noteAuthOutcome(QString::fromUtf8(err), false);
 			QVector<PlaylistEntry> entries;
 			QString playlistTitle;
 			const QList<QByteArray> lines = out.split('\n');
@@ -761,6 +920,12 @@ void StreamResolver::downloadAudio(const QString &pageUrl, const QString &destFi
 		emit downloadFinished(false, tr("A download is already in progress."), destFile);
 		return;
 	}
+	startDownload(pageUrl, destFile, authFirstFor(pageUrl));
+}
+
+//----------------------------------------------------------------
+void StreamResolver::startDownload(const QString &pageUrl, const QString &destFile, bool withAuth)
+{
 	QProcess *proc = makeHidden(this);
 	m_download = proc;
 
@@ -771,13 +936,15 @@ void StreamResolver::downloadAudio(const QString &pageUrl, const QString &destFi
 	QStringList args = commonArgs();
 	args << "-f" << formatSelector()
 	     << "--no-playlist"
-	     << "--no-warnings"
 	     << "--no-part"
 	     << "--newline"              // one progress line per update (parseable)
 	     << "-o" << destFile
-	     << "--force-overwrites"
-	     << pageUrl;
-	logInfo("[stream] download start -> %s", destFile.toUtf8().constData());
+	     << "--force-overwrites";
+	const bool authed = withAuth && applyAuth(proc, args);
+	if (!authed) args << "--no-warnings";
+	args << pageUrl;
+	logInfo("[stream] download start%s -> %s", authed ? " (with YouTube account)" : "",
+	        destFile.toUtf8().constData());
 	emit downloadProgress(pageUrl, -1);
 
 	connect(proc, &QProcess::readyReadStandardOutput, this, [this, proc, pageUrl]{
@@ -794,19 +961,33 @@ void StreamResolver::downloadAudio(const QString &pageUrl, const QString &destFi
 	connect(proc, &QProcess::errorOccurred, this, [this, proc, destFile](QProcess::ProcessError e){
 		if (e == QProcess::FailedToStart) {
 			if (m_download == proc) m_download = nullptr;
+			dropAuthFile(proc);
 			proc->deleteLater();
 			emit downloadFinished(false, tr("Streaming engine unavailable."), destFile);
 		}
 	});
 	connect(proc, static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished),
-		this, [this, proc, destFile](int code, QProcess::ExitStatus){
+		this, [this, proc, pageUrl, destFile](int code, QProcess::ExitStatus){
 			if (m_download == proc) m_download = nullptr;
-			const QString er = QString::fromUtf8(proc->readAllStandardError()).trimmed();
+			const QByteArray err = proc->readAllStandardError();
+			const bool withAuth = usedAuth(proc);
+			dropAuthFile(proc);
 			proc->deleteLater();
 			const bool ok = (code == 0);
 			logInfo("[stream] download finished (exit %d) -> %s", code, destFile.toUtf8().constData());
-			if (!ok && !er.isEmpty()) extremeLog("[stream] dl stderr: %s", er.toUtf8().constData());
-			emit downloadFinished(ok, ok ? tr("Download complete.") : tr("Download failed."), destFile);
+			if (!ok && !err.trimmed().isEmpty())
+				extremeLog("[stream] dl stderr: %s", err.trimmed().constData());
+			const QString errText = QString::fromUtf8(err);
+			const bool authErr = !ok && isYouTubeUrl(pageUrl) && looksLikeAuthError(errText);
+			if (authErr && !withAuth && YouTubeAuth::instance().hasSession() && !m_download) {
+				logInfo("[stream] download needs sign-in, retrying with the YouTube account");
+				startDownload(pageUrl, destFile, true);
+				return;
+			}
+			if (withAuth) noteAuthOutcome(errText, authErr);
+			emit downloadFinished(ok, ok ? tr("Download complete.")
+			                             : explainFailure(err, withAuth, pageUrl, tr("Download failed.")),
+			                      destFile);
 		});
 
 	proc->start(ytDlpPath(), args);
@@ -827,6 +1008,7 @@ void StreamResolver::cancelResolve(const QString &pageUrl)
 				if (p) {
 					p->disconnect();   // its finished lambda must not run now
 					if (p->state() != QProcess::NotRunning) { p->kill(); p->waitForFinished(1500); }
+					dropAuthFile(p);
 					p->deleteLater();
 				}
 			} else {
@@ -847,6 +1029,7 @@ void StreamResolver::cancelDownload()
 	m_download = nullptr;
 	p->disconnect();
 	if (p->state() != QProcess::NotRunning) { p->kill(); p->waitForFinished(1500); }
+	dropAuthFile(p);
 	p->deleteLater();
 	logInfo("[stream] download cancelled");
 }
@@ -854,6 +1037,10 @@ void StreamResolver::cancelDownload()
 //----------------------------------------------------------------
 void StreamResolver::shutdown()
 {
+	// The Google sign-in browser / session import live in the scratch dir
+	// too: stop them first so the wipe below can remove their files.
+	YouTubeAuth::instance().shutdown();
+
 	logInfo("[stream] shutdown: killing %d resolve + %d aux process(es)%s",
 	        (int)m_inflight.size(), (int)m_aux.size(),
 	        m_download ? " + 1 download" : "");

@@ -1,5 +1,6 @@
 #include "settings_window.h"
 #include "help_bubble.h"
+#include "youtube_account_panel.h"
 #include "../style_helper.h"
 #include "../ExpandableSection.h"
 #include "theme.h"
@@ -879,6 +880,15 @@ SettingsWindow::SettingsWindow(QWidget *parent)
             "version/update controls live in the About dialog."), this);
         note->setStyleSheet("color: palette(mid);");
         streamLay->addWidget(note);
+    }
+    // Google sign-in for age-restricted / members-only / bot-checked videos.
+    // Self-contained panel: it persists through YouTubeAuth on its own.
+    streamLay->addWidget(subHeader(tr("YouTube account"), this));
+    {
+        auto *yl = new QHBoxLayout;
+        yl->setContentsMargins(0, 0, 0, 0);
+        yl->addWidget(new YouTubeAccountPanel(this), 1);
+        streamLay->addLayout(indented(yl));
     }
 
     // ============== Voice & transmission section ==============

@@ -212,6 +212,13 @@ if /I "!DELETE_CONFIG!"=="Y" (
     )
 )
 
+REM --- Step 8: saved YouTube sign-in (always: it is a credential, not config) ---
+if exist "%LOCALAPPDATA%\GameBaiters\Soundboard\youtube_session.dat" (
+    del /F /Q "%LOCALAPPDATA%\GameBaiters\Soundboard\youtube_session.dat" >nul 2>&1
+    echo  [OK] Removed the saved YouTube sign-in.
+)
+reg delete "HKCU\Software\GameBaiters\Soundboard\youtube" /f >nul 2>&1
+
 :end
 echo.
 echo  ====================================

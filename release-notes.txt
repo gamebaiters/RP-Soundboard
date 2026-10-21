@@ -1,5 +1,26 @@
-GameBaiters Soundboard v2.4.3
+GameBaiters Soundboard v2.4.4
 ==============================================================
+
+Fixes a reverb engine glitch on playback: a new sound could play for
+a moment with the previous reverb engine before switching to the
+chosen one.
+
+* FIX - Playing a sound with a sandboxed channel opened the file with
+  the legacy decoder reverb as well, so the first moments used the
+  classic engine before the chosen one took over. The slot's reverb
+  is now routed into the DSP before the file opens, like pitch and
+  speed already were. The same applies when toggling reverse.
+* FIX - The global reverb slider also wrote into the decoder of
+  sandboxed channels, stacking two reverbs. Sandboxed channels now keep
+  their reverb in the DSP chain only.
+* FIX - Convolution reverb reset could be skipped while its impulse
+  response was being rebuilt, letting the previous sound's tail carry
+  into the next one. The reset is now applied on the next audio block.
+* FIX - The decoder-side reverb kept its comb tails frozen when the mix
+  was set to zero, and replayed a stale tail when re-enabled. The tails
+  are now cleared when the wet path closes.
+
+GameBaiters Soundboard v2.4.3
 
 Defensive fix: the microphone can no longer be held silent by the
 GameBaiters TTS plugin (when both are installed) for longer than a

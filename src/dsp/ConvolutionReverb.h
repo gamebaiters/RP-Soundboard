@@ -75,10 +75,16 @@ private:
     void normalizeIr(std::vector<float> &outL,
                      std::vector<float> &outR) const;
     void processBlockLocked();
+    // Zeroes histories, tails and staging. Caller holds m_lock.
+    void clearStateLocked();
 
     double m_fs = 48000.0;
     std::atomic<float> m_wet{0.0f};
     std::atomic<bool>  m_ready{false};
+    // reset() that found m_lock busy (IR rebuild in flight) parks here;
+    // the audio side applies it at the next block boundary instead of
+    // dropping it, so the previous sound's tail can never survive a reset.
+    std::atomic<bool>  m_resetPending{false};
 
     // IR + streaming state, guarded by m_lock (audio side try-locks).
     std::mutex m_lock;

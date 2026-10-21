@@ -452,6 +452,8 @@ void ConvolutionReverb::process(float &l, float &r) {
         // Never block the audio thread: if a rebuild holds the lock,
         // emit silence for this wet block instead of waiting.
         if (m_lock.try_lock()) {
+            if (m_resetPending.exchange(false, std::memory_order_acq_rel))
+                clearStateLocked();
             processBlockLocked();
             m_lock.unlock();
         } else {
@@ -464,8 +466,7 @@ void ConvolutionReverb::process(float &l, float &r) {
     r += wet * wr;
 }
 
-void ConvolutionReverb::reset() {
-    if (!m_lock.try_lock()) return;   // rebuild in progress - skip
+void ConvolutionReverb::clearStateLocked() {
     for (auto &v : m_histL) std::fill(v.begin(), v.end(), 0.0f);
     for (auto &v : m_histR) std::fill(v.begin(), v.end(), 0.0f);
     std::fill(m_tailL.begin(), m_tailL.end(), 0.0f);
@@ -475,5 +476,17 @@ void ConvolutionReverb::reset() {
     std::memset(m_outL, 0, sizeof(m_outL));
     std::memset(m_outR, 0, sizeof(m_outR));
     m_pos = 0;
+}
+
+void ConvolutionReverb::reset() {
+    // Never skip: the old version returned silently while prepare() held
+    // m_lock, so the previous sound's convolution tail survived into the
+    // next file. Busy lock -> defer to the audio side's next block wrap.
+    if (!m_lock.try_lock()) {
+        m_resetPending.store(true, std::memory_order_release);
+        return;
+    }
+    m_resetPending.store(false, std::memory_order_relaxed);
+    clearStateLocked();
     m_lock.unlock();
 }

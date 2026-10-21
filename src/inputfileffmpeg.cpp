@@ -333,7 +333,14 @@ public:
 	// Final = dry * (1 - mix) + wet * mix   →  unity gain guaranteed.
 	void process(short *samples, int numFrames, float mix)
 	{
-		if (mix < 0.001f) return;
+		// Wet path closed: clear the comb/allpass tails once, on the
+		// transition. Returning without touching them (the old code) froze
+		// the tails, and reopening the mix replayed a stale reverb tail.
+		if (mix < 0.001f) {
+			if (m_wasWet) { mute(); m_wasWet = false; }
+			return;
+		}
+		m_wasWet = true;
 		if (mix > 1.0f) mix = 1.0f;
 
 		// Scale room/damp with the slider for the slowed+reverb vibe
@@ -397,6 +404,7 @@ private:
 	AllPassFilter m_allPassL[4], m_allPassR[4];
 	float m_roomSize, m_damp;
 	int   m_sampleRate, m_numChannels;
+	bool  m_wasWet = false;   // last process() call had the wet path open
 };
 
 

@@ -198,6 +198,12 @@ void Sampler::setSlotReverse(int slot, bool on)
 			speedFactor = m_speedFactor;
 		}
 		reverbMix = (s.fxReverbWet > 0.0f) ? s.fxReverbWet : m_reverbMix;
+		// Sandbox DSP attached: the wet is applied in its end-stage, so
+		// the decoder must not add its legacy reverb on top of it.
+		if (s.dsp && reverbMix > 0.0f) {
+			s.dsp->setFxReverbWet(reverbMix);
+			reverbMix = 0.0f;
+		}
 
 		// Tell any in-flight worker to give up — it shares the OLD
 		// cancel token, will see the flag flip on its next 64-packet
@@ -1945,8 +1951,17 @@ void Sampler::setReverbMix(float mix)
 	for (int i = 0; i < MAX_SLOTS; i++)
 	{
 		PlaybackSlot &slot = m_slots[i];
-		if (slot.inputFile)
+		// Same routing as setSlotReverbMix: a sandboxed slot keeps its
+		// reverb in the DSP end-stage (the per-slot FxPanel value still
+		// wins). Writing the decoder too stacked two reverbs.
+		if (slot.dsp) {
+			if (slot.fxReverbWet <= 0.0f)
+				slot.dsp->setFxReverbWet(mix);
+			if (slot.inputFile)
+				slot.inputFile->setReverbMix(0.0f);
+		} else if (slot.inputFile) {
 			slot.inputFile->setReverbMix(mix);
+		}
 	}
 }
 
@@ -2167,7 +2182,18 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 		            ? s.lastSlotPitchFactor : m_pitchFactor;
 		speedFactor = (s.lastSlotSpeedFactor > 0.01f)
 		            ? s.lastSlotSpeedFactor : m_speedFactor;
-		reverbMix   = m_reverbMix;
+		// Same rule as the reverse path: the slot's own FxPanel reverb
+		// wins, the global one is only the fallback. Opening with the
+		// global value played the legacy decoder reverb for the first
+		// moments of every new sound before the wiring re-pushed the
+		// slot value into the DSP (audible engine switch on each play).
+		reverbMix   = (s.fxReverbWet > 0.0f) ? s.fxReverbWet : m_reverbMix;
+		// Sandbox DSP attached: the wet belongs in its end-stage, not in
+		// the decoder. Route it now and keep the decoder dry.
+		if (s.dsp && reverbMix > 0.0f) {
+			s.dsp->setFxReverbWet(reverbMix);
+			reverbMix = 0.0f;
+		}
 	}
 
 	// ===== Phase 2: heavy work OUTSIDE the audio lock. Close the old

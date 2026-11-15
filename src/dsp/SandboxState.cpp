@@ -311,14 +311,14 @@ SandboxState SandboxState::fromJson(const QJsonObject &o)
     s.chorusDepth      = static_cast<float>(o.value("chorusDepth").toDouble(3.0));
     s.chorusBaseDelay  = static_cast<float>(o.value("chorusBaseDelay").toDouble(10.0));
     s.chorusVoices     = o.value("chorusVoices").toInt(2);
-    s.chorusMix        = static_cast<float>(o.value("chorusMix").toDouble(0.0));
+    s.chorusMix        = static_cast<float>(o.value("chorusMix").toDouble(0.5));
 
     s.flangerEnabled   = o.value("flangerEnabled").toBool(false);
     s.flangerRate      = static_cast<float>(o.value("flangerRate").toDouble(0.5));
     s.flangerDepth     = static_cast<float>(o.value("flangerDepth").toDouble(0.7));
     s.flangerFeedback  = static_cast<float>(o.value("flangerFeedback").toDouble(0.5));
     s.flangerBaseDelay = static_cast<float>(o.value("flangerBaseDelay").toDouble(2.0));
-    s.flangerMix       = static_cast<float>(o.value("flangerMix").toDouble(0.0));
+    s.flangerMix       = static_cast<float>(o.value("flangerMix").toDouble(0.5));
 
     s.flangusEnabled   = o.value("flangusEnabled").toBool(false);
     s.flangusRate      = static_cast<float>(o.value("flangusRate").toDouble(0.8));
@@ -326,25 +326,25 @@ SandboxState SandboxState::fromJson(const QJsonObject &o)
     s.flangusFeedback  = static_cast<float>(o.value("flangusFeedback").toDouble(0.3));
     s.flangusVoices    = o.value("flangusVoices").toInt(3);
     s.flangusSpread    = static_cast<float>(o.value("flangusSpread").toDouble(0.5));
-    s.flangusMix       = static_cast<float>(o.value("flangusMix").toDouble(0.0));
+    s.flangusMix       = static_cast<float>(o.value("flangusMix").toDouble(0.5));
 
     s.phaserEnabled    = o.value("phaserEnabled").toBool(false);
     s.phaserRate       = static_cast<float>(o.value("phaserRate").toDouble(0.5));
     s.phaserDepth      = static_cast<float>(o.value("phaserDepth").toDouble(0.7));
     s.phaserFeedback   = static_cast<float>(o.value("phaserFeedback").toDouble(0.3));
     s.phaserStages     = o.value("phaserStages").toInt(6);
-    s.phaserMix        = static_cast<float>(o.value("phaserMix").toDouble(0.0));
+    s.phaserMix        = static_cast<float>(o.value("phaserMix").toDouble(0.5));
 
     s.saturatorEnabled = o.value("saturatorEnabled").toBool(false);
     s.saturatorDrive   = static_cast<float>(o.value("saturatorDrive").toDouble(2.0));
-    s.saturatorMix     = static_cast<float>(o.value("saturatorMix").toDouble(0.0));
+    s.saturatorMix     = static_cast<float>(o.value("saturatorMix").toDouble(0.5));
     s.saturatorTone    = static_cast<float>(o.value("saturatorTone").toDouble(8000.0));
     s.saturatorMode    = o.value("saturatorMode").toInt(0);
 
     s.delayEnabled     = o.value("delayEnabled").toBool(false);
     s.delayTimeMs      = static_cast<float>(o.value("delayTimeMs").toDouble(300.0));
     s.delayFeedback    = static_cast<float>(o.value("delayFeedback").toDouble(0.4));
-    s.delayMix         = static_cast<float>(o.value("delayMix").toDouble(0.0));
+    s.delayMix         = static_cast<float>(o.value("delayMix").toDouble(0.5));
     s.delayDamping     = static_cast<float>(o.value("delayDamping").toDouble(5000.0));
     s.delayPingPong    = o.value("delayPingPong").toBool(false);
 
@@ -441,7 +441,7 @@ SandboxState SandboxState::fromJson(const QJsonObject &o)
     s.vfxVocPitchHz   = static_cast<float>(o.value("vfxVocPitchHz").toDouble(110.0));
     s.vfxVocMix       = static_cast<float>(o.value("vfxVocMix").toDouble(1.0));
     s.vfxFormEnabled  = o.value("vfxFormEnabled").toBool(false);
-    s.vfxFormShift    = static_cast<float>(o.value("vfxFormShift").toDouble(0.0));
+    s.vfxFormShift    = static_cast<float>(o.value("vfxFormShift").toDouble(4.0));
     s.vfxFormMix      = static_cast<float>(o.value("vfxFormMix").toDouble(1.0));
     s.vfxShimEnabled  = o.value("vfxShimEnabled").toBool(false);
     s.vfxShimMix      = static_cast<float>(o.value("vfxShimMix").toDouble(0.3));

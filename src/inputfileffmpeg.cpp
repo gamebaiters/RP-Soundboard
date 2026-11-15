@@ -503,6 +503,17 @@ private:
 	// new value here and lets the worker re-read it on its next chunk.
 	std::atomic<float> m_pitchFactor{1.0f};
 	std::atomic<float> m_speedFactor{1.0f};
+	// Lock-free pending rebuild flag for the forward path: setPitchFactor /
+	// setSpeedFactor update the atomics and raise this flag instead of
+	// calling _seek(m_filePosition) synchronously on the GUI thread. The
+	// producer thread drains any frames queued in the old filter graph and
+	// rebuilds AVFilterGraph in place at the exact current decode position —
+	// zero position jump, zero reverb tail mute, zero network reconnect, and
+	// natural coalescing across rapid slider drags or file switches.
+	std::atomic<bool>  m_filterRebuildPending{false};
+	// Speed baked into the current filter graph (written by buildFilterGraph,
+	// read by the in-place drain in readSamples; same thread / under m_mutex).
+	double m_graphSpeed = 1.0;
 	// Streaming-reverse: speed-factor the chunk currently being drained
 	// was decoded with. Updated by readSamples whenever a new chunk
 	// becomes the queue head. Sampler::fetchInputSamples reads this for
@@ -737,6 +748,7 @@ void InputFileFFmpeg::reset()
 	m_filePosition = 0.0;
 	m_cachedLengthSec = -1.0;
 	m_abufferDeclaredRate = 0;
+	m_filterRebuildPending.store(false, std::memory_order_relaxed);
 	m_maxFilePosition = 0.0;
 	m_nextSeekTimestamp = 0;
 	m_skipSamples = 0;
@@ -781,6 +793,9 @@ int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
 	double speed = m_speedFactor.load(std::memory_order_relaxed);
 	if (pitch < 0.01) pitch = 1.0;
 	if (speed < 0.01) speed = 1.0;
+	// Speed the graph being built actually applies (producer-thread only;
+	// readSamples uses it to account frames drained from the OLD graph).
+	m_graphSpeed = speed;
 
 	// Source of truth for the source PCM parameters is AVCodecParameters
 	// on the stream, NOT m_codecCtx. For containers where the container
@@ -1329,6 +1344,10 @@ int InputFileFFmpeg::open(const char *filename, double startPosSeconds /*= 0.0*/
 		return -1;
 	}
 
+	// Clear BEFORE building: the graph reads pitch/speed at build time, so a
+	// change raised by the lock-free setters afterwards re-sets the flag and
+	// is picked up by readSamples (clearing after would swallow it).
+	m_filterRebuildPending.store(false, std::memory_order_release);
 	ret = buildFilterGraph();
 	dbgLog("  buildFilterGraph returned %d", ret);
 	if(LogFFmpegError(ret, "Cannot build filter graph") < 0)
@@ -2345,7 +2364,10 @@ int InputFileFFmpeg::_seek( double seconds )
 		return -1;
 	avcodec_flush_buffers(m_codecCtx);
 
-	// Rebuild graph to flush filter buffers
+	// Rebuild graph to flush filter buffers. The rebuild reads the current
+	// pitch/speed, so a pending in-place rebuild is redundant: clear it BEFORE
+	// building so a setter racing with the build re-raises it (not lost).
+	m_filterRebuildPending.store(false, std::memory_order_release);
 	int graphRet = buildFilterGraph();
 	dbgLog("  _seek: buildFilterGraph returned %d (src=%p sink=%p)", graphRet, m_bufSrcCtx, m_bufSinkCtx);
 	if (graphRet < 0) {
@@ -2542,8 +2564,84 @@ int InputFileFFmpeg::readSamples(SampleProducer *sampleBuffer)
 	AVFrame *filt_frame = av_frame_alloc();
 	AVPacket *packet = av_packet_alloc();
 	int written = 0; //samples read
-
 	int properFrames = 0;
+
+	if (m_filterRebuildPending.exchange(false, std::memory_order_acq_rel))
+	{
+		// Drain remaining buffered samples from the outgoing filter graph so
+		// pitch/speed changes happen smoothly in-place without seeking or muting reverb.
+		if (m_bufSrcCtx && m_bufSinkCtx &&
+		    av_buffersrc_add_frame_flags(m_bufSrcCtx, NULL, 0) >= 0)
+		{
+			// Frames still queued in the old graph were produced with the OLD
+			// speed (m_graphSpeed), not the new m_speedFactor.
+			const double drainSpeed = (m_graphSpeed > 0.0) ? m_graphSpeed : 1.0;
+			while (1)
+			{
+				int drainRet = av_buffersink_get_frame(m_bufSinkCtx, filt_frame);
+				if (drainRet < 0) break;
+				int outSamples = filt_frame->nb_samples;
+				int skippedSamples = 0;
+				if (m_skipSamples > 0)
+				{
+					skippedSamples = std::min((int64_t)outSamples, m_skipSamples);
+					m_skipSamples -= skippedSamples;
+					outSamples -= skippedSamples;
+				}
+				if (outSamples > 0 && m_maxFilePosition > 0.0)
+				{
+					double remainSec = m_maxFilePosition - m_filePosition;
+					if (remainSec <= 0.0) outSamples = 0;
+					else {
+						int64_t maxOut = (int64_t)(remainSec * m_outputSamplerate / drainSpeed) + 1;
+						if (outSamples > maxOut) outSamples = (int)maxOut;
+					}
+				}
+				if (outSamples > 0 && m_netScanToSec >= 0.0)
+				{
+					if (m_filePosition < m_netScanToSec)
+					{
+						// discard but keep position/sample counters advancing
+						// (same as the main decode path)
+						m_filePosition = m_filePosition + (double)outSamples * drainSpeed / (double)m_outputSamplerate;
+						m_convertedSamples += outSamples;
+						outSamples = 0;
+					}
+					else { m_netScanToSec = -1.0; m_netBuffering.store(false, std::memory_order_relaxed); }
+				}
+				if (outSamples > 0)
+				{
+					short *outPtr = ((short*)filt_frame->extended_data[0]) + (skippedSamples * m_outputChannels);
+					{
+						std::lock_guard<std::mutex> fl(m_freeverbMutex);
+						m_freeverb.process(outPtr, outSamples,
+						                   m_reverbMix.load(std::memory_order_relaxed));
+					}
+					sampleBuffer->produce(outPtr, outSamples);
+					written += outSamples;
+					m_convertedSamples += outSamples;
+					m_filePosition = m_filePosition + (double)outSamples * drainSpeed / (double)m_outputSamplerate;
+					properFrames++;
+				}
+				av_frame_unref(filt_frame);
+			}
+		}
+		int gRet = buildFilterGraph();
+		if (gRet < 0 || !m_bufSrcCtx || !m_bufSinkCtx)
+		{
+			dbgLog("readSamples(): in-place filter rebuild failed ret=%d - ending slot", gRet);
+			// Unrecoverable: without a graph every later call would return -1
+			// forever with the slot silently dead. Mark finished (like the
+			// other give-up paths) so the sampler ends it normally.
+			m_netBuffering.store(false, std::memory_order_relaxed);
+			m_done = true;
+			av_frame_free(&frame);
+			av_frame_free(&filt_frame);
+			av_packet_free(&packet);
+			return -1;
+		}
+	}
+
 	while(properFrames == 0)
 	{
 		int rfr = av_read_frame(m_fmtCtx, packet);
@@ -3062,16 +3160,14 @@ void InputFileFFmpeg::setPitchFactor(float factor)
 		m_chunkCv.notify_all();
 		return;
 	}
-	// Forward path: filter graph rebuild needs m_mutex.
-	Lock lock(m_mutex);
-	float old = m_pitchFactor.load(std::memory_order_relaxed);
+	// Forward path: lock-free atomic store + pending filter-graph rebuild on
+	// the producer thread inside readSamples(). Avoids _seek(m_filePosition)
+	// which used to block the GUI thread on m_mutex, jump compressed file
+	// offsets, mute active reverb tails, and break network streams on drags.
+	float old = m_pitchFactor.exchange(factor, std::memory_order_relaxed);
 	if (old != factor) {
-		dbgLog("setPitchFactor(%.4f -> %.4f) pos=%.3f opened=%d", old, factor, m_filePosition.load(), m_opened);
-		m_pitchFactor.store(factor, std::memory_order_relaxed);
-		if (m_opened) {
-			int ret = _seek(m_filePosition);
-			dbgLog("  setPitchFactor _seek returned %d (src=%p sink=%p)", ret, m_bufSrcCtx, m_bufSinkCtx);
-		}
+		dbgLog("setPitchFactor(%.4f -> %.4f) pending rebuild (streamingReverse=0)", old, factor);
+		m_filterRebuildPending.store(true, std::memory_order_release);
 	}
 }
 
@@ -3091,15 +3187,10 @@ void InputFileFFmpeg::setSpeedFactor(float factor)
 		m_chunkCv.notify_all();
 		return;
 	}
-	Lock lock(m_mutex);
-	float old = m_speedFactor.load(std::memory_order_relaxed);
+	float old = m_speedFactor.exchange(factor, std::memory_order_relaxed);
 	if (old != factor) {
-		dbgLog("setSpeedFactor(%.4f -> %.4f) pos=%.3f opened=%d", old, factor, m_filePosition.load(), m_opened);
-		m_speedFactor.store(factor, std::memory_order_relaxed);
-		if (m_opened) {
-			int ret = _seek(m_filePosition);
-			dbgLog("  setSpeedFactor _seek returned %d (src=%p sink=%p)", ret, m_bufSrcCtx, m_bufSinkCtx);
-		}
+		dbgLog("setSpeedFactor(%.4f -> %.4f) pending rebuild (streamingReverse=0)", old, factor);
+		m_filterRebuildPending.store(true, std::memory_order_release);
 	}
 }
 

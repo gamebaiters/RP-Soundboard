@@ -1854,27 +1854,17 @@ void connectGrid(MainPage *page, ConfigModel *model, Sampler *sampler) {
                     pf, sf, rv, applyFx, /*autoPlay*/true);
                 return;
             }
-            // Push the FX factors BEFORE opening the file: the decoder
-            // builds its filter graph at open() time, so anything set
-            // afterwards only affects audio decoded from that point on
-            // - the already-buffered start would keep the old rate.
-            sampler->setSlotPitchFactor(slot, applyFx ? pf : 1.0f);
-            sampler->setSlotSpeedFactor(slot, applyFx ? sf : 1.0f);
+            // Push ALL FX factors BEFORE opening the file without touching
+            // the outgoing decoder: frame 0 decodes at exact pitch/speed/reverb,
+            // zero redundant rebuilds, and random jitter stays intact.
+            sampler->setSlotPreFx(slot,
+                                  applyFx ? pf : 1.0f,
+                                  applyFx ? sf : 1.0f,
+                                  applyFx ? rv : 0.0f);
             if (!sampler->playSoundInSlot(slot, snd, false))
                 return;
             sampler->setSlotVolumeLocal (slot, ch->volume()->local());
             sampler->setSlotVolumeRemote(slot, ch->volume()->remote());
-            if (applyFx) {
-                sampler->setSlotPitchFactor(slot, pf);
-                sampler->setSlotSpeedFactor(slot, sf);
-                sampler->setSlotReverbMix  (slot, rv);
-            } else {
-                // Master FX off: force neutral so any inherited slot state
-                // from playSoundInSlot is wiped.
-                sampler->setSlotPitchFactor(slot, 1.0f);
-                sampler->setSlotSpeedFactor(slot, 1.0f);
-                sampler->setSlotReverbMix  (slot, 0.0f);
-            }
             (void)syncChannelToSlot;
         };
 
@@ -2351,32 +2341,30 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             }
             // Non-stream drop restores the channel name if the slot was a stream.
             clearSlotStream(page, slot);
-            sampler->stopPlayback(slot);
-            // Error dialog comes from onPlaybackError handler.
-            if (!sampler->playSoundInSlot(slot, *info, false))
-                return;
-            s_slotToBtnIdx[slot] = btnIdx;
             auto *target = page->channels().at(slot);
-            sampler->setSlotVolumeLocal (slot, target->volume()->local());
-            sampler->setSlotVolumeRemote(slot, target->volume()->remote());
             const bool globalFx = model->getGlobalFxEnabled();
+            float pf = 1.0f, sf = 1.0f, rv = 0.0f;
             if (globalFx && info->fxRemember) {
-                sampler->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(info->fxPitch ));
-                sampler->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(info->fxSpeed ));
-                sampler->setSlotReverbMix  (slot, info->fxReverb / 100.0f);
+                pf = AudioUtils::sliderToPitchFactor(info->fxPitch);
+                sf = AudioUtils::sliderToPitchFactor(info->fxSpeed);
+                rv = info->fxReverb / 100.0f;
                 target->fx()->setPitch(info->fxPitch);
                 target->fx()->setSpeed(info->fxSpeed);
                 target->fx()->setReverb(info->fxReverb);
                 target->fx()->setSync (info->fxSyncPitchSpeed);
             } else if (globalFx) {
-                sampler->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(target->fx()->pitch() ));
-                sampler->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(target->fx()->speed() ));
-                sampler->setSlotReverbMix  (slot, target->fx()->reverb() / 100.0f);
-            } else {
-                sampler->setSlotPitchFactor(slot, 1.0f);
-                sampler->setSlotSpeedFactor(slot, 1.0f);
-                sampler->setSlotReverbMix  (slot, 0.0f);
+                pf = AudioUtils::sliderToPitchFactor(target->fx()->pitch());
+                sf = AudioUtils::sliderToPitchFactor(target->fx()->speed());
+                rv = target->fx()->reverb() / 100.0f;
             }
+            sampler->stopPlayback(slot);
+            sampler->setSlotPreFx(slot, pf, sf, rv);
+            // Error dialog comes from onPlaybackError handler.
+            if (!sampler->playSoundInSlot(slot, *info, false))
+                return;
+            s_slotToBtnIdx[slot] = btnIdx;
+            sampler->setSlotVolumeLocal (slot, target->volume()->local());
+            sampler->setSlotVolumeRemote(slot, target->volume()->remote());
             sampler->pausePlayback(slot);
         });
         QObject::connect(ch, &Channel::titleChanged, page, [page, sampler, model](int id, const QString &t){
@@ -3034,7 +3022,12 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             // Live-stream slot genuinely stopped (a stream RELOAD leaves the
             // slot playing/paused and already returned above). Restore the
             // channel's real name + unlock reverse/vinyl.
-            if (!s_slotStreamLoading.contains(slot) && s_slotStreamTitle.contains(slot))
+            // A stop that arrives while the slot is flagged "loading" but no async
+            // open is in flight any more = the load was cancelled (stopPlayback
+            // invalidated it): clear the loading state or the marquee stays up.
+            if (s_slotStreamTitle.contains(slot)
+                && (!s_slotStreamLoading.contains(slot)
+                    || (sampler && !sampler->isAsyncPlayPending(slot))))
                 clearSlotStream(page, slot);
             auto *wave = page->channels().at(slot)->waveform();
 
@@ -3454,30 +3447,25 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
             if (seekFrac > endFrac - 0.005) seekFrac = startFrac; // wrap from end
             const double seekSec = seekFrac * totalLen;
 
+            const bool globalFx = model->getGlobalFxEnabled();
+            float pf = 1.0f, sf = 1.0f, rv = 0.0f;
+            if (globalFx && info->fxRemember) {
+                pf = AudioUtils::sliderToPitchFactor(info->fxPitch);
+                sf = AudioUtils::sliderToPitchFactor(info->fxSpeed);
+                rv = info->fxReverb / 100.0f;
+            } else if (globalFx) {
+                pf = AudioUtils::sliderToPitchFactor(ch->fx()->pitch());
+                sf = AudioUtils::sliderToPitchFactor(ch->fx()->speed());
+                rv = ch->fx()->reverb() / 100.0f;
+            }
             sampler->stopPlayback(slot);  // belt and braces; should be no-op
+            sampler->setSlotPreFx(slot, pf, sf, rv);
             if (!sampler->playSoundInSlot(slot, *info, false))
                 return;
             s_slotToBtnIdx[slot] = btnIdx;
 
-            // Mirror the buttonClicked path's volume + FX setup so the
-            // replay honours the channel's current sliders + per-button
-            // FX state.
             sampler->setSlotVolumeLocal (slot, ch->volume()->local());
             sampler->setSlotVolumeRemote(slot, ch->volume()->remote());
-            const bool globalFx = model->getGlobalFxEnabled();
-            if (globalFx && info->fxRemember) {
-                sampler->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(info->fxPitch));
-                sampler->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(info->fxSpeed));
-                sampler->setSlotReverbMix  (slot, info->fxReverb / 100.0f);
-            } else if (globalFx) {
-                sampler->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(ch->fx()->pitch()));
-                sampler->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(ch->fx()->speed()));
-                sampler->setSlotReverbMix  (slot, ch->fx()->reverb() / 100.0f);
-            } else {
-                sampler->setSlotPitchFactor(slot, 1.0f);
-                sampler->setSlotSpeedFactor(slot, 1.0f);
-                sampler->setSlotReverbMix  (slot, 0.0f);
-            }
 
             // Honour the parked cursor unless it would land at the very
             // start of the crop region (in which case the natural play
@@ -4022,26 +4010,24 @@ void wire(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 const SoundInfo *info = model->getSoundInfo(btnIdx);
                 if (!info || info->filename.isEmpty()
                     || info->filename != it->filename) continue;
+                auto *ch = page->channels().at(slot);
+                const bool globalFx = model->getGlobalFxEnabled();
+                float pf = 1.0f, sf = 1.0f, rv = 0.0f;
+                if (globalFx && info->fxRemember) {
+                    pf = AudioUtils::sliderToPitchFactor(info->fxPitch);
+                    sf = AudioUtils::sliderToPitchFactor(info->fxSpeed);
+                    rv = info->fxReverb / 100.0f;
+                } else if (globalFx) {
+                    pf = AudioUtils::sliderToPitchFactor(ch->fx()->pitch());
+                    sf = AudioUtils::sliderToPitchFactor(ch->fx()->speed());
+                    rv = ch->fx()->reverb() / 100.0f;
+                }
                 sampler->stopPlayback(slot);
+                sampler->setSlotPreFx(slot, pf, sf, rv);
                 if (!sampler->playSoundInSlot(slot, *info, false)) continue;
                 s_slotToBtnIdx[slot] = btnIdx;
-                auto *ch = page->channels().at(slot);
                 sampler->setSlotVolumeLocal (slot, ch->volume()->local());
                 sampler->setSlotVolumeRemote(slot, ch->volume()->remote());
-                const bool globalFx = model->getGlobalFxEnabled();
-                if (globalFx && info->fxRemember) {
-                    sampler->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(info->fxPitch));
-                    sampler->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(info->fxSpeed));
-                    sampler->setSlotReverbMix  (slot, info->fxReverb / 100.0f);
-                } else if (globalFx) {
-                    sampler->setSlotPitchFactor(slot, AudioUtils::sliderToPitchFactor(ch->fx()->pitch()));
-                    sampler->setSlotSpeedFactor(slot, AudioUtils::sliderToPitchFactor(ch->fx()->speed()));
-                    sampler->setSlotReverbMix  (slot, ch->fx()->reverb() / 100.0f);
-                } else {
-                    sampler->setSlotPitchFactor(slot, 1.0f);
-                    sampler->setSlotSpeedFactor(slot, 1.0f);
-                    sampler->setSlotReverbMix  (slot, 0.0f);
-                }
             }
             break;
         case PauseAllMode::Idle:

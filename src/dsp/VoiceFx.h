@@ -18,19 +18,12 @@ class SimpleFFT;
 //   Tremolo -> Exciter -> ReverseDelay -> Shimmer
 //
 // (pitch first, then spectral rewrites, then modulators, then space.)
-//
-// The three "voice-centric" processors (Autotune / Formant / Vocoder)
-// fold the signal to mono internally - they are voice effects, voice
-// is mono, and running dual FFT chains per sample would double the
-// cost for no audible benefit. Everything else is true stereo.
 class VoiceFx {
 public:
     VoiceFx();
     ~VoiceFx();
 
     void setSampleRate(double sr);
-    // Copies the vfx* fields out of the sandbox state and refreshes
-    // derived coefficients. Cheap; call from applyState.
     void setParams(const SandboxState &s);
     void processStereo(float &l, float &r);
     void reset();
@@ -40,24 +33,24 @@ public:
     // LFO-matrix live modulation hooks (audio-thread, cheap setters;
     // values re-baselined from setParams on every state push).
     void modRingFreq(float hz)   { m_liveRingFreq = hz; }
-    void modWahBias(float bias)  { m_liveWahBias = bias; }   // -1..+1 sweep offset
+    void modWahBias(float bias)  { m_liveWahBias = bias; }
     void modTremRate(float hz)   { m_liveTremRate = hz; }
     void modVibDepth(float d)    { m_liveVibDepth = d; }
 
 private:
-    // ---- Autotune ----
+    // ---- Autotune (YIN + Real-Time TD-PSOLA) ----
     void  processTune(float &m);
     float detectPitch();                  // Hz, <= 0 when unvoiced
-    float nearestScaleMidi(float midi) const;   // snapped MIDI note
+    float nearestScaleMidi(float midi) const;
 
-    // ---- Formant (FFT OLA) ----
+    // ---- Formant (Cepstral Envelope FFT OLA) ----
     void  processFormantSample(float &m);
     void  formantFrame();
 
-    // ---- Vocoder ----
+    // ---- Vocoder (20-band 4th-order BPF + AGC + Unvoiced Sibilance) ----
     void  processVocoder(float &m);
 
-    // Cheap per-sample subs.
+    // ---- Per-sample stereo subs ----
     void  processRing(float &l, float &r);
     void  processTrem(float &l, float &r);
     void  processVib(float &l, float &r);
@@ -67,9 +60,9 @@ private:
     void  processShimmer(float &l, float &r);
 
     double m_fs = 48000.0;
-    SandboxState m_p;      // only the vfx* fields are read
+    SandboxState m_p;
 
-    // Live LFO-matrix overrides (NaN-free: seeded from params).
+    // Live LFO-matrix overrides.
     float m_liveRingFreq = 440.0f;
     float m_liveWahBias  = 0.0f;
     float m_liveTremRate = 5.0f;
@@ -81,9 +74,10 @@ private:
     // ---- Tremolo ----
     double m_tremPhase = 0.0;
     float  m_tremGainSm = 1.0f;
+    float  m_tremSmCoeff = 0.02f;
 
     // ---- Vibrato ----
-    static constexpr int kVibMax = 1024;   // ~21 ms at 48 kHz
+    static constexpr int kVibMax = 2048;   // ~42 ms at 48 kHz
     float  m_vibBufL[kVibMax] = {};
     float  m_vibBufR[kVibMax] = {};
     int    m_vibW = 0;
@@ -92,7 +86,6 @@ private:
     // ---- Auto-wah ----
     float m_wahEnv = 0.0f;
     float m_wahEnvAtk = 0.0f, m_wahEnvRel = 0.0f;
-    // RBJ bandpass state (stereo shares coeffs, separate state).
     float m_wahB0 = 0, m_wahB1 = 0, m_wahB2 = 0, m_wahA1 = 0, m_wahA2 = 0;
     float m_wahX1L = 0, m_wahX2L = 0, m_wahY1L = 0, m_wahY2L = 0;
     float m_wahX1R = 0, m_wahX2R = 0, m_wahY1R = 0, m_wahY2R = 0;
@@ -100,60 +93,108 @@ private:
     void  wahRecalc(float centerHz);
 
     // ---- Exciter ----
-    float m_excHpL = 0.0f, m_excHpR = 0.0f;   // 1-pole HP state
+    float m_excHpL = 0.0f, m_excHpR = 0.0f;
     float m_excHpCoeff = 0.0f;
-    // 2x oversample memory for the shaper (hqOversampling).
     float m_excPrevL = 0.0f, m_excPrevR = 0.0f;
 
-    // ---- Autotune ----
-    static constexpr int kTuneBuf   = 2048;   // detection window (~43 ms)
-    static constexpr int kTuneDecim = 4;      // YIN runs at fs/4 (12 kHz)
-    static constexpr int kTuneYinW  = 288;    // YIN integration window (24 ms)
+    // ---- Stereo image preservation for Tune/Formant (mid processed, side delayed by the same latency) ----
+    static constexpr int kSideRing = 4096;          // > kPsolaDelay + kFormN
+    static constexpr int kSideRingMask = kSideRing - 1;
+    float    m_sideRing[kSideRing] = {};
+    uint32_t m_sideW = 0;
+
+    // ---- Autotune (TD-PSOLA + Octave-Locked YIN) ----
+    static constexpr int kTuneBuf    = 2048;
+    static constexpr int kTuneDecim  = 4;
+    static constexpr int kTuneYinW   = 288;
+    static constexpr int kPsolaBuf   = 4096;
+    static constexpr int kPsolaMask  = kPsolaBuf - 1;
+    static constexpr int kPsolaDelay = 1280;
     float  m_tuneRing[kTuneBuf] = {};
     int    m_tuneW = 0;
     int    m_tuneHopCounter = 0;
     float  m_tuneRatioTarget = 1.0f;
     float  m_tuneRatioSm = 1.0f;
     float  m_tuneSmCoeff = 0.05f;
-    float  m_tuneHeldMidi = -1.0f;   // scale note currently held (-1 = none)
-    int    m_tuneUnvoiced = 0;       // consecutive unvoiced detection hops
-    PitchShiftGrain m_tuneShift;
+    float  m_tuneHeldMidi = -1.0f;
+    float  m_tunePrevHz = -1.0f;
+    float  m_tunePeriodSm = 240.0f;   // detected period in samples
+    int    m_tuneUnvoiced = 0;
+    float  m_psolaIn[kPsolaBuf]   = {};
+    float  m_psolaOut[kPsolaBuf]  = {};
+    float  m_psolaNorm[kPsolaBuf] = {};
+    uint32_t m_psolaW    = kPsolaDelay;
+    uint32_t m_psolaOutR = 0;
+    float    m_psolaNextSynth = 0.0f;
+    float    m_psolaWetMix = 0.0f;
 
-    // ---- Formant ----
+    // ---- Formant (Cepstral OLA + matched dry latency) ----
     static constexpr int kFormN   = 1024;
     static constexpr int kFormHop = 256;
     std::unique_ptr<SimpleFFT> m_formFft;
-    std::vector<float> m_formIn;       // input accumulation (kFormN)
-    std::vector<float> m_formOut;      // OLA output (kFormN + kFormHop)
-    std::vector<float> m_formWin;      // Hann
-    std::vector<float> m_formFreq;     // kFormN+2
+    std::vector<float> m_formIn;
+    std::vector<float> m_formOut;
+    std::vector<float> m_formWin;
+    std::vector<float> m_formFreq;
+    std::vector<float> m_formCepFreq;
     std::vector<float> m_formEnv, m_formEnvW;
     std::vector<float> m_formTime;
+    std::vector<float> m_formDryRing;
+    int   m_formDryIdx = 0;
     int   m_formFill = 0;
-    int   m_formInW = 0;       // ring write index into m_formIn
+    int   m_formInW = 0;
     int   m_formReadIdx = 0;
     bool  m_formPrimed = false;
 
-    // ---- Vocoder ----
-    static constexpr int kVocBands = 16;
-    struct VocBand {
-        // Bandpass coeffs (shared carrier/mod per band) + two states.
-        float b0 = 0, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
-        float mx1 = 0, mx2 = 0, my1 = 0, my2 = 0;   // modulator state
-        float cx1 = 0, cx2 = 0, cy1 = 0, cy2 = 0;   // carrier state
-        float env = 0.0f;
+    // ---- Vocoder (20-band 4th-order BPF) ----
+    static constexpr int kVocBands = 20;
+    struct VocBiquad {
+        float x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+        float process(float x, float b0, float b1, float b2, float a1, float a2) {
+            float y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+            if (y < 1e-15f && y > -1e-15f) y = 0.0f; // anti-denormal flush (modulator is exactly 0 under the gate)
+            x2 = x1; x1 = x;
+            y2 = y1; y1 = y;
+            return y;
+        }
+        void reset() { x1 = x2 = y1 = y2 = 0.0f; }
     };
-    VocBand m_voc[kVocBands];
-    double  m_vocSawPhase = 0.0;
+    struct VocBand {
+        float b0 = 0, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
+        VocBiquad mod1, mod2;
+        VocBiquad car1, car2;
+        float env = 0.0f;
+        float bandGain = 1.0f;
+    };
+    VocBand  m_voc[kVocBands];
+    double   m_vocSawPhase = 0.0;
+    double   m_vocSubPhase = 0.0;
     uint32_t m_vocNoise = 0x12345678u;
-    float   m_vocAtk = 0.0f, m_vocRel = 0.0f;
-    float   m_vocLastPitch = -1.0f;
-    void    vocRebuild();
+    float    m_vocAtk = 0.0f, m_vocRel = 0.0f;
+    float    m_vocRmsAtk = 0.0f, m_vocRmsRel = 0.0f;   // modulator AGC envelope (5 ms / 180 ms)
+    float    m_vocLfC = 0.0f, m_vocHfC = 0.0f;          // 1 kHz / 3.2 kHz one-pole coefficients
+    float    m_vocModRms = 0.1f;
+    float    m_vocHfEnv = 0.0f, m_vocLfEnv = 0.0f;
+    float    m_vocHpState = 0.0f, m_vocLpState = 0.0f;
+    float    m_vocSibHpState = 0.0f;
+    float    m_vocOutLp = 0.0f;
+    float    m_vocLastPitch = -1.0f;
+    void     vocRebuild();
 
-    // ---- Reverse delay ----
-    std::vector<float> m_revBufL, m_revBufR;
-    int   m_revN = 0;          // active grain length (samples)
-    int   m_revIdx = 0;        // position within current grain
+    // ---- Reverse delay (50% staggered Hann-windowed reversed grains, read straight from a ring) ----
+    // The ring (2 * max grain length) is allocated ONCE in setSampleRate. Every grain starts at the
+    // current write position and plays the preceding m_revN samples backwards; its length is
+    // latched at its start, so a Time slider change only affects grains that start afterwards:
+    // no buffer clearing, no copying, no discontinuity (every grain starts and ends at window 0).
+    static constexpr int kRevGrains = 4;
+    struct RevGrain { int start = 0; int len = 0; int pos = 0; bool active = false; };
+    std::vector<float> m_revCapL, m_revCapR;   // rings
+    RevGrain m_revG[kRevGrains];
+    int   m_revN = 0;          // active grain length (samples), <= m_revMax
+    int   m_revMax = 0;        // 2000 ms at the current sample rate (even)
+    int   m_revRing = 0;       // ring size = 2 * m_revMax
+    int   m_revW = 0;          // ring write position
+    int   m_revLast = -1;      // slot of the most recently started grain (-1: none)
     float m_revLastTimeMs = -1.0f;
     void  revRebuild();
 
@@ -162,7 +203,6 @@ private:
     int   m_shimWL = 0, m_shimWR = 0;
     float m_shimLpL = 0.0f, m_shimLpR = 0.0f;
     PitchShiftGrain m_shimShiftL, m_shimShiftR;
-    // Small input diffusion allpasses.
     std::vector<float> m_shimApL, m_shimApR;
     int   m_shimApWL = 0, m_shimApWR = 0;
 };

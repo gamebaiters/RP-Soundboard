@@ -146,7 +146,7 @@ struct SandboxState
     float chorusDepth     = 3.0f;
     float chorusBaseDelay = 10.0f;
     int   chorusVoices    = 2;
-    float chorusMix       = 0.0f;
+    float chorusMix       = 0.5f;
 
     // ---- Flanger ----
     bool  flangerEnabled   = false;
@@ -154,7 +154,7 @@ struct SandboxState
     float flangerDepth     = 0.7f;
     float flangerFeedback  = 0.5f;
     float flangerBaseDelay = 2.0f;
-    float flangerMix       = 0.0f;
+    float flangerMix       = 0.5f;
 
     // ---- Flangus (Flanger-Chorus hybrid) ----
     bool  flangusEnabled   = false;
@@ -163,7 +163,7 @@ struct SandboxState
     float flangusFeedback  = 0.3f;
     int   flangusVoices    = 3;
     float flangusSpread    = 0.5f;
-    float flangusMix       = 0.0f;
+    float flangusMix       = 0.5f;
 
     // ---- Phaser ----
     bool  phaserEnabled    = false;
@@ -171,12 +171,12 @@ struct SandboxState
     float phaserDepth      = 0.7f;
     float phaserFeedback   = 0.3f;
     int   phaserStages     = 6;
-    float phaserMix        = 0.0f;
+    float phaserMix        = 0.5f;
 
     // ---- Saturator ----
     bool  saturatorEnabled = false;
     float saturatorDrive   = 2.0f;
-    float saturatorMix     = 0.0f;
+    float saturatorMix     = 0.5f;
     float saturatorTone    = 8000.0f;
     int   saturatorMode    = 0;        // 0=Soft
 
@@ -184,7 +184,7 @@ struct SandboxState
     bool  delayEnabled     = false;
     float delayTimeMs      = 300.0f;
     float delayFeedback    = 0.4f;
-    float delayMix         = 0.0f;
+    float delayMix         = 0.5f;
     float delayDamping     = 5000.0f;
     bool  delayPingPong    = false;
 

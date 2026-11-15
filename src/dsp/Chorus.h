@@ -24,7 +24,22 @@ private:
     float m_bufL[kMaxBufSize] = {};
     float m_bufR[kMaxBufSize] = {};
     int m_writePos = 0;
-    int m_bufSize = 0;
+    int m_bufSize = 48000;
 
     double m_phase[kMaxVoices] = {};
+    float m_wetLpL = 0.0f;
+    float m_wetLpR = 0.0f;
+    float m_wetHpL = 0.0f;
+    float m_wetHpR = 0.0f;
+
+    // Wet-path filter coefficients (8.5 kHz LP, 110 Hz HP), precomputed in setSampleRate.
+    float m_lpC = 0.6715f;
+    float m_hpC = 0.0143f;
+
+    // Smoothed copies (one-pole, ~30 ms) of depth/base delay/mix: no clicks on slider drags.
+    float m_depthS = 3.0f;
+    float m_baseDelayS = 10.0f;
+    float m_mixS = 0.5f;
+    float m_smCoeff = 0.0007f;
+    bool m_primed = false; // first setParams snaps the smoothed values (no ramp from defaults)
 };

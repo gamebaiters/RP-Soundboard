@@ -92,6 +92,13 @@ public:
 	double getLength(int slot = 0);
 	void seek(double seconds, int slot = 0);
 	state_e getState(int slot = 0) const;
+	// True while a playSoundInSlotAsync worker for this slot is still opening
+	// (lock-free). Used by the GUI to recognise a cancelled stream load.
+	bool isAsyncPlayPending(int slot) const
+	{
+		return slot >= 0 && slot < MAX_SLOTS
+		    && m_slots[slot].asyncPending.load(std::memory_order_acquire) > 0;
+	}
 	void setMultiMode(bool enabled);
 	bool isMultiMode() const { return m_multiMode; }
 	void setSlotVolumeLocal(int slot, int vol);
@@ -99,6 +106,10 @@ public:
 	void setSlotPitchFactor(int slot, float factor);
 	void setSlotSpeedFactor(int slot, float factor);
 	void setSlotReverbMix(int slot, float mix);
+	// Pre-configure pitch/speed/reverb for the NEXT playback on this slot
+	// BEFORE playSoundInSlot() opens the file, without touching or rebuilding
+	// the outgoing decoder that is about to be stopped.
+	void setSlotPreFx(int slot, float pitchFactor, float speedFactor, float reverbMix);
 	// Replace the per-sound dB modifier mid-playback (used by the preview
 	// dialog so the volume slider takes effect immediately).
 	void setSlotSoundDb(int slot, double db);
@@ -265,6 +276,15 @@ private:
 		// the routing decision (decoder vs end-of-DSP reverb) can be
 		// re-applied whenever the slot's dsp is created/cleared.
 		float fxReverbWet = 0.0f;
+		bool  fxReverbSet = false;
+		// Monotonic sequence bumped on every stop/play/async-launch so a stale
+		// playSoundInSlotAsync worker never stomps a newer sound on the slot.
+		std::atomic<uint64_t> asyncPlaySeq{0};
+		// Async plays launched on this slot whose worker has not finished yet
+		// (open() in flight). Lets stopPlayback tell the GUI that a loading
+		// slot was cancelled, and the GUI tell that apart from the stop of the
+		// OLD sound that every load emits.
+		std::atomic<int> asyncPending{0};
 		bool loop = false;
 		// Anti-glitch loop-rate guard. The streaming-reverse decoder can
 		// occasionally produce a chunk that covers far less than the
@@ -456,6 +476,12 @@ private:
 	// emitting Qt signals while holding m_mutex is a latent deadlock for
 	// any direct-connection slot that calls back into the Sampler).
 	InputFile *stopSlotInternal(int slot, bool &emitStop);
+	// Per-slot FX handed over by playSoundInSlotAsync. Applied under m_mutex in
+	// Phase 1 AFTER the previous sound is stopped, so the old sound (still
+	// audible while open() runs) never sees the new pitch/speed/reverb.
+	struct AsyncPreFx { float pitch; float speed; float reverb; };
+	bool playSoundInSlotInternal(int slot, const SoundInfo &soundOrig, bool preview, uint64_t expectedAsyncSeq,
+	                             const AsyncPreFx *preFx = nullptr);
 	// Async reverse-toggle worker body. Runs on a detachable std::thread
 	// spawned by setSlotReverse. Builds a fresh InputFile (heavy
 	// pre-decode for reverse, plain open for forward), then takes

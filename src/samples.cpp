@@ -197,7 +197,7 @@ void Sampler::setSlotReverse(int slot, bool on)
 		} else {
 			speedFactor = m_speedFactor;
 		}
-		reverbMix = (s.fxReverbWet > 0.0f) ? s.fxReverbWet : m_reverbMix;
+		reverbMix = s.fxReverbSet ? s.fxReverbWet : m_reverbMix;
 		// Sandbox DSP attached: the wet is applied in its end-stage, so
 		// the decoder must not add its legacy reverb on top of it.
 		if (s.dsp && reverbMix > 0.0f) {
@@ -442,23 +442,17 @@ void Sampler::setSlotSandboxState(int slot, const SandboxState &s)
 	// on engine swap.
 	std::lock_guard<std::mutex> Lock(m_mutex);
 	bool wasStretchOn = sl.dsp ? sl.dsp->state().stretchEnabled : false;
-	bool wasDspMissing = false;  // dsp was ensured under Phase 1's lock
 	sl.dsp->applyState(s);
 	// Mirror the ducking flags onto the slot so the audio thread can
 	// read them lock-free in fetchInputSamples. Master sandbox switch
 	// off => duck is OFF too, regardless of the per-feature checkbox.
 	sl.duckSource   = s.enabled && s.duckSource;
 	sl.duckOthersDb = s.duckOthersDb;
-	// Re-route any prior FxPanel reverb into the dsp's end-stage and
-	// disable the libavfilter pre-reverb. Without this, enabling the
-	// sandbox after a reverb was already set would leave the legacy
-	// decoder reverb running while the user expected it at the end.
-	if (wasDspMissing) {
-		sl.dsp->setFxReverbWet(sl.fxReverbWet);
-		if (sl.inputFile) sl.inputFile->setReverbMix(0.0f);
-	} else {
-		sl.dsp->setFxReverbWet(sl.fxReverbWet);
-	}
+	// Route any FxPanel reverb exclusively into the dsp's end-stage and
+	// mute the legacy libavfilter pre-reverb so enabling Sandbox DSP
+	// never produces double reverb on active or future files.
+	sl.dsp->setFxReverbWet(sl.fxReverbWet);
+	if (sl.inputFile) sl.inputFile->setReverbMix(0.0f);
 
 	// On stretch toggle ON, drain whatever the decoder has already
 	// queued in sbPlayback into paulstretch's feed buffer so it has
@@ -696,29 +690,34 @@ void Sampler::playSoundInSlotAsync(int slot, const SoundInfo &sound,
 	float pitchFactor, float speedFactor, float reverbMix,
 	bool applyFx, bool autoPlay)
 {
+	const float preP = applyFx ? pitchFactor : 1.0f;
+	const float preS = applyFx ? speedFactor : 1.0f;
+	const float preR = applyFx ? reverbMix   : 0.0f;
+	uint64_t expectedSeq = 0;
+	if (slot >= 0 && slot < MAX_SLOTS) {
+		expectedSeq = m_slots[slot].asyncPlaySeq.fetch_add(1, std::memory_order_acq_rel) + 1;
+		m_slots[slot].asyncPending.fetch_add(1, std::memory_order_acq_rel);
+	}
 	auto done = std::make_shared<std::atomic<bool>>(false);
+	const AsyncPreFx preFx{preP, preS, preR};
 	std::thread th([this, slot, sound, volLocal, volRemote,
-	                pitchFactor, speedFactor, reverbMix, applyFx, autoPlay,
-	                done]{
+	                autoPlay, expectedSeq, done, preFx]{
 		sbPromoteThreadQoS();   // macOS: the network open() runs on this thread
 		if (!m_shuttingDown.load(std::memory_order_acquire)) {
 			// The heavy network open() happens here, OFF the GUI thread.
-			if (playSoundInSlot(slot, sound, false) &&
+			if (playSoundInSlotInternal(slot, sound, false, expectedSeq, &preFx) &&
 			    !m_shuttingDown.load(std::memory_order_acquire)) {
-				setSlotVolumeLocal(slot, volLocal);
-				setSlotVolumeRemote(slot, volRemote);
-				if (applyFx) {
-					setSlotPitchFactor(slot, pitchFactor);
-					setSlotSpeedFactor(slot, speedFactor);
-					setSlotReverbMix  (slot, reverbMix);
-				} else {
-					setSlotPitchFactor(slot, 1.0f);
-					setSlotSpeedFactor(slot, 1.0f);
-					setSlotReverbMix  (slot, 0.0f);
+				const bool stillMine = (slot < 0 || slot >= MAX_SLOTS)
+				    || (m_slots[slot].asyncPlaySeq.load(std::memory_order_acquire) == expectedSeq);
+				if (stillMine) {
+					setSlotVolumeLocal(slot, volLocal);
+					setSlotVolumeRemote(slot, volRemote);
+					if (!autoPlay) pausePlayback(slot);
 				}
-				if (!autoPlay) pausePlayback(slot);
 			}
 		}
+		if (slot >= 0 && slot < MAX_SLOTS)
+			m_slots[slot].asyncPending.fetch_sub(1, std::memory_order_acq_rel);
 		done->store(true, std::memory_order_release);
 	});
 	// Track it like the reverse workers: shutdown bounded-joins these, so a
@@ -1518,6 +1517,7 @@ int Sampler::fetchInputSamples(short *samples, int count, int channels, bool *fi
 				} else {
 					sdbgLog("[loopBranch] slot=%d -> eSILENT "
 					        "(natural end, loop off)", s);
+					slot.producerThread.setSource(NULL);
 					slot.state = eSILENT;
 					slot.peakL.store(0.0f);
 					slot.peakR.store(0.0f);
@@ -1672,6 +1672,7 @@ int Sampler::fetchOutputSamples(short *samples, int count, int channels, const u
 			SampleBuffer::Lock sbl(slot.sbPlayback.getMutex());
 			if (slot.sbPlayback.avail() == 0)
 			{
+				slot.producerThread.setSource(NULL);
 				slot.state = eSILENT;
 				slot.peakL.store(0.0f);
 				slot.peakR.store(0.0f);
@@ -1721,15 +1722,21 @@ void Sampler::stopPlayback(int slot)
 		{
 			for (int s = 0; s < MAX_SLOTS; s++)
 			{
+				m_slots[s].asyncPlaySeq.fetch_add(1, std::memory_order_acq_rel);
 				bool e = false;
 				InputFile *f = stopSlotInternal(s, e);
+				// A still-opening async play was just invalidated: tell the GUI
+				// (it clears the "loading" state on the stop signal).
+				if (m_slots[s].asyncPending.load(std::memory_order_acquire) > 0) e = true;
 				if (f || e) stopped.push_back({f, s, e});
 			}
 		}
 		else if (slot >= 0 && slot < MAX_SLOTS)
 		{
+			m_slots[slot].asyncPlaySeq.fetch_add(1, std::memory_order_acq_rel);
 			bool e = false;
 			InputFile *f = stopSlotInternal(slot, e);
+			if (m_slots[slot].asyncPending.load(std::memory_order_acquire) > 0) e = true;
 			if (f || e) stopped.push_back({f, slot, e});
 		}
 	}
@@ -1846,6 +1853,7 @@ void Sampler::setSlotReverbMix(int slot, float mix)
 	extremeLog("Sampler::setSlotReverbMix slot=%d mix=%.4f", slot, mix);
 	auto &s = m_slots[slot];
 	s.fxReverbWet = mix;
+	s.fxReverbSet = true;
 	if (s.dsp) {
 		// Sandbox active on this slot - route the FxPanel reverb to
 		// the END of the DSP pipeline (sandbox Reverb stage). User
@@ -1858,6 +1866,20 @@ void Sampler::setSlotReverbMix(int slot, float mix)
 		// No sandbox -> existing legacy path (libavfilter at decode).
 		s.inputFile->setReverbMix(mix);
 	}
+}
+
+
+void Sampler::setSlotPreFx(int slot, float pitchFactor, float speedFactor, float reverbMix)
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	if (slot < 0 || slot >= MAX_SLOTS) return;
+	PlaybackSlot &s = m_slots[slot];
+	s.lastSlotPitchFactor = pitchFactor;
+	s.lastSlotSpeedFactor = speedFactor;
+	s.fxReverbWet = reverbMix;
+	s.fxReverbSet = true;
+	if (s.dsp)
+		s.dsp->setFxReverbWet(reverbMix);
 }
 
 
@@ -1955,7 +1977,7 @@ void Sampler::setReverbMix(float mix)
 		// reverb in the DSP end-stage (the per-slot FxPanel value still
 		// wins). Writing the decoder too stacked two reverbs.
 		if (slot.dsp) {
-			if (slot.fxReverbWet <= 0.0f)
+			if (!slot.fxReverbSet)
 				slot.dsp->setFxReverbWet(mix);
 			if (slot.inputFile)
 				slot.inputFile->setReverbMix(0.0f);
@@ -2091,6 +2113,13 @@ int Sampler::findFreeSlot() const
 //---------------------------------------------------------------
 bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview)
 {
+	return playSoundInSlotInternal(slot, soundOrig, preview, 0);
+}
+
+
+bool Sampler::playSoundInSlotInternal(int slot, const SoundInfo &soundOrig, bool preview, uint64_t expectedAsyncSeq,
+                                      const AsyncPreFx *preFx)
+{
 	SoundInfo sound = soundOrig;
 
 	// ===== Phase 1: slot resolution + teardown of the previous sound,
@@ -2111,13 +2140,6 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 	float      reverbMix    = 0.0f;
 	{
 		std::lock_guard<std::mutex> Lock(m_mutex);
-
-		// Reset per-slot DSP state on new playback so EQ biquads + HRTF
-		// smoothers + paulstretch ring don't carry residual state from
-		// the previous sound (which produced a brief robotic transient
-		// on start when the sandbox was already enabled).
-		if (slot >= 0 && slot < MAX_SLOTS && m_slots[slot].dsp)
-			m_slots[slot].dsp->reset();
 
 		sdbgLog("playSoundInSlot: slot=%d file='%s' preview=%d startTime=%.2f playTime=%.2f vol=%.1f",
 			slot, sound.filename.toUtf8().constData(), preview, sound.getStartTime(), sound.getPlayTime(), (double)sound.volume);
@@ -2143,12 +2165,35 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 		if (slot < 0 || slot >= MAX_SLOTS)
 			return false;
 
+		PlaybackSlot &s = m_slots[slot];
+		if (expectedAsyncSeq != 0) {
+			if (s.asyncPlaySeq.load(std::memory_order_acquire) != expectedAsyncSeq)
+				return false;
+		} else {
+			s.asyncPlaySeq.fetch_add(1, std::memory_order_acq_rel);
+		}
+
 		// Stop this slot if it's already playing (detach - close happens
 		// outside the lock in Phase 2).
 		oldFile = stopSlotInternal(slot, oldEmitStop);
 		oldEmitSlot = slot;
 
-		PlaybackSlot &s = m_slots[slot];
+		// Unconditionally reset per-slot DSP state AFTER resolving `slot`
+		// (even when `slot == -1` or when the previous sound ended naturally
+		// and `s.inputFile` was already dead) so reverb tails / delay / EQ /
+		// FFT buffers never bleed into the new playback.
+		if (s.dsp) s.dsp->reset();
+
+		// Async play: the slot FX travelled with the worker; commit them now
+		// that the old sound is stopped (same effect as the sync caller's
+		// setSlotPreFx, minus the window where the old sound was affected).
+		if (preFx && slot >= 0) {
+			s.lastSlotPitchFactor = preFx->pitch;
+			s.lastSlotSpeedFactor = preFx->speed;
+			s.fxReverbWet = preFx->reverb;
+			s.fxReverbSet = true;
+			if (s.dsp) s.dsp->setFxReverbWet(preFx->reverb);
+		}
 
 		// Claim the slot for THIS playback. Any stop / replay / reverse
 		// toggle that lands while we are opening the file bumps the
@@ -2183,14 +2228,12 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 		speedFactor = (s.lastSlotSpeedFactor > 0.01f)
 		            ? s.lastSlotSpeedFactor : m_speedFactor;
 		// Same rule as the reverse path: the slot's own FxPanel reverb
-		// wins, the global one is only the fallback. Opening with the
-		// global value played the legacy decoder reverb for the first
-		// moments of every new sound before the wiring re-pushed the
-		// slot value into the DSP (audible engine switch on each play).
-		reverbMix   = (s.fxReverbWet > 0.0f) ? s.fxReverbWet : m_reverbMix;
-		// Sandbox DSP attached: the wet belongs in its end-stage, not in
-		// the decoder. Route it now and keep the decoder dry.
-		if (s.dsp && reverbMix > 0.0f) {
+		// wins whenever explicitly configured (even at 0.0f); the global
+		// one is only a fallback before any per-slot FX is set.
+		reverbMix   = s.fxReverbSet ? s.fxReverbWet : m_reverbMix;
+		// Sandbox DSP attached: the wet belongs strictly in its end-stage,
+		// not in the decoder (and clear stale fxReverbWet when 0).
+		if (s.dsp) {
 			s.dsp->setFxReverbWet(reverbMix);
 			reverbMix = 0.0f;
 		}
@@ -2271,12 +2314,28 @@ bool Sampler::playSoundInSlot(int slot, const SoundInfo &soundOrig, bool preview
 		std::lock_guard<std::mutex> Lock(m_mutex);
 		PlaybackSlot &s = m_slots[slot];
 		if (s.reverseEpoch.load(std::memory_order_relaxed) != epoch ||
+		    (expectedAsyncSeq != 0 && s.asyncPlaySeq.load(std::memory_order_acquire) != expectedAsyncSeq) ||
 		    m_shuttingDown.load(std::memory_order_relaxed))
 		{
 			discarded = true;
 		}
 		else
 		{
+			// Sync any slider drags that arrived during Phase 2 open() before handing to producerThread.
+			{
+				const float postPitch = ((s.lastSlotPitchFactor > 0.01f) ? s.lastSlotPitchFactor : m_pitchFactor)
+				                      * static_cast<float>(randPitchMul);
+				const float postSpeed = (s.lastSlotSpeedFactor > 0.01f) ? s.lastSlotSpeedFactor : m_speedFactor;
+				const float postRev   = s.fxReverbSet ? s.fxReverbWet : m_reverbMix;
+				newFile->setPitchFactor(postPitch);
+				newFile->setSpeedFactor(postSpeed);
+				if (s.dsp) {
+					s.dsp->setFxReverbWet(postRev);
+					newFile->setReverbMix(0.0f);
+				} else {
+					newFile->setReverbMix(postRev);
+				}
+			}
 			s.inputFile = newFile;
 			s.soundDbSetting = (double)sound.volume;
 			s.stretchBaseTime = 0.0;
@@ -2770,7 +2829,7 @@ void Sampler::backfillBegin(int slot)
 	// Match the live FxPanel pitch + reverb so backfilled history is not
 	// dry / un-pitched relative to the forward stream.
 	sl.backfillPitch.store(sl.lastSlotPitchFactor, std::memory_order_relaxed);
-	sl.backfillReverb.store(sl.fxReverbWet, std::memory_order_relaxed);
+	sl.backfillReverb.store(sl.fxReverbSet ? sl.fxReverbWet : m_reverbMix, std::memory_order_relaxed);
 	sl.backfillChunkN.store(0, std::memory_order_relaxed);
 	sl.backfillAtStart.store(false, std::memory_order_relaxed);
 	sl.backfillActive.store(true, std::memory_order_relaxed);

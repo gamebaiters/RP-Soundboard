@@ -24,6 +24,11 @@ private:
     std::vector<float> m_bufR;
     int m_writePos = 0;
     int m_delaySamples = 0;
+    float m_curDelaySamples = 0.0f;
+    float m_targetDelaySamples = 0.0f;
+    float m_xfadeTarget = 0.0f;
+    float m_xfade = 0.0f;
+    float m_xfadeStep = 0.0f;
 
     float m_dampCoeff = 0.0f;
     float m_dampStateL = 0.0f;

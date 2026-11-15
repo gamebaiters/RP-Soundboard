@@ -1,3 +1,53 @@
+GameBaiters Soundboard v2.4.5
+==============================================================
+
+Fixes audio glitches under rapid sound switching and live pitch/speed/reverb
+changes, and completely rebuilds modulation and Voice FX processors.
+
+Playback Pipeline & Stability
+--------------------
+* FIX - Changing Pitch or Speed mid-playback no longer acquires the decoder
+  mutex or triggers an immediate seek on the GUI thread. Filter graphs are now
+  drained and rebuilt cleanly inside the decoder loop without position jumps
+  or Freeverb tail muting.
+* FIX - Playing or rapidly triggering/dragging many sounds routes Pitch, Speed,
+  and Reverb atomically via pre-open slot FX before the decoder starts, removes
+  stale async sequence races, detaches finished sources cleanly on natural EOF,
+  and eliminates double-reverb stacking when Audio Sandbox DSP is active.
+* FIX - SlotDsp full-reset now resets ConvolutionReverb, VoiceFx, DynEq,
+  DeEsser, Gate, TransientShaper, GenerationLoss, BassEnhancer, Binaural,
+  LfoMatrix, and Leia state when switching modes/files.
+
+Rebuilt DSP & Voice FX Suite
+--------------------
+* NEW - Autotune rebuilt with octave-continuity-protected YIN + full-rate
+  sub-sample refinement and real-time pitch-synchronous TD-PSOLA (epoch-aligned
+  Hann overlap-add grains and clean unity crossfade when on-pitch or unvoiced).
+* NEW - Formant Shifter rebuilt with cepstral liftering spectral envelope
+  estimation and latency-matched dry delay alignment.
+* NEW - Vocoder rebuilt with 20-band 4th-order Butterworth analysis/synthesis,
+  modulator AGC, voiced/unvoiced consonant sibilance injection, and PolyBLEP
+  saw+sub+pulse carrier.
+* NEW - Reverse Delay rebuilt with dual 50%-staggered Hann-windowed reversed
+  grains promoted cleanly without boundary clicks; AutoWah updated with log-dB
+  envelope sweeping; Vibrato/Tremolo/Shimmer smoothed and stabilized.
+* NEW - Chorus, Flanger, Flangus, and Phaser rebuilt with Hermite cubic
+  interpolation, stereo quadrature modulation, active live spread control in
+  Flangus, and proper dry+wet comb/notch mixing up to 100% wet. Delay now uses
+  smooth dual-tap raised-cosine crossfading on delay-time jumps.
+* FIX - Usable default mix values (50%) when enabling modulation/delay/saturator
+  stages and consistent +4.0 st default for Formant Shifter.
+* FIX - Phaser was inaudible: its notches sat near 20 kHz instead of sweeping
+  200-4000 Hz. Shimmer no longer self-oscillates at high feedback, and Flangus
+  no longer blows up with several voices and high feedback.
+* FIX - Autotune and Formant Shifter keep the stereo image instead of folding
+  the sound to mono. Dragging Chorus/Flanger/Flangus/Phaser sliders or the
+  Reverse Delay time no longer clicks, and the Vocoder no longer keeps the CPU
+  busy after the voice stops.
+* FIX - Stopping a channel while a stream is still opening no longer leaves it
+  stuck on "Opening...". A channel reverb explicitly set to 0 is no longer
+  overridden by the global reverb when toggling reverse.
+
 GameBaiters Soundboard v2.4.4
 ==============================================================
 

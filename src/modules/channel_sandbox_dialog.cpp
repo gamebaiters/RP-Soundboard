@@ -1856,9 +1856,9 @@ void ChannelSandboxDialog::buildUi()
                 "speed: + = helium/child, - = giant. Combine with pitch\n"
                 "for full voice-character redesign."));
             bl->addWidget(m_vfxFormEnable);
-            auto *r = buildSliderRow(nullptr, tr("Shift"), -120, 120, 0, "", s, lbl);
+            auto *r = buildSliderRow(nullptr, tr("Shift"), -120, 120, 40, "", s, lbl);
             m_vfxFormShift = s; m_vfxFormShiftLabel = lbl;
-            m_vfxFormShiftLabel->setText("0.0 st");
+            m_vfxFormShiftLabel->setText("4.0 st");
             bl->addWidget(r);
             r = buildSliderRow(nullptr, tr("Mix"), 0, 100, 100, "%", s, lbl);
             m_vfxFormMix = s; m_vfxFormMixLabel = lbl; bl->addWidget(r);

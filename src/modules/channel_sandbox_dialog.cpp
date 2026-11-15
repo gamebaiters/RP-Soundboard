@@ -1726,20 +1726,29 @@ void ChannelSandboxDialog::buildUi()
             auto *bl = new QVBoxLayout(box);
             m_vfxTuneEnable = new QCheckBox(tr("Enable"));
             m_vfxTuneEnable->setToolTip(tr(
-                "Pitch correction: snaps the detected pitch to the\n"
-                "nearest note of the chosen scale. Strength 100% +\n"
-                "fast retune = the classic hard T-Pain snap."));
+                "Pitch correction: 0 ms retune + 100% Strength = classic hard\n"
+                "song-style snap. Scale and Key choose the allowed notes.\n"
+                "Works on a single voice, not polyphonic music or chords."));
             bl->addWidget(m_vfxTuneEnable);
             auto *r = buildSliderRow(nullptr, tr("Strength"), 0, 100, 100, "%", s, lbl);
             m_vfxTuneStrength = s; m_vfxTuneStrengthLabel = lbl; bl->addWidget(r);
-            r = buildSliderRow(nullptr, tr("Retune"), 1, 200, 20, " ms", s, lbl);
-            m_vfxTuneSpeed = s; m_vfxTuneSpeedLabel = lbl; bl->addWidget(r);
+            r = buildSliderRow(nullptr, tr("Retune"), 0, 200, 0, " ms", s, lbl);
+            m_vfxTuneSpeed = s; m_vfxTuneSpeedLabel = lbl;
+            m_vfxTuneSpeedLabel->setMinimumWidth(78);
+            m_vfxTuneSpeedLabel->setText(tr("0 ms (hard)"));
+            bl->addWidget(r);
             auto *sc = new QHBoxLayout;
             sc->addWidget(new QLabel(tr("Scale:")));
             m_vfxTuneScale = new QComboBox;
             m_vfxTuneScale->addItem(tr("Chromatic"));
             m_vfxTuneScale->addItem(tr("Major"));
             m_vfxTuneScale->addItem(tr("Minor"));
+            m_vfxTuneScale->addItem(tr("Major pentatonic"));
+            m_vfxTuneScale->addItem(tr("Minor pentatonic"));
+            m_vfxTuneScale->addItem(tr("Blues"));
+            m_vfxTuneScale->addItem(tr("Harmonic minor"));
+            m_vfxTuneScale->addItem(tr("Dorian"));
+            m_vfxTuneScale->addItem(tr("Mixolydian"));
             sc->addWidget(m_vfxTuneScale);
             sc->addWidget(new QLabel(tr("Key:")));
             m_vfxTuneKey = new QComboBox;
@@ -2912,7 +2921,7 @@ void ChannelSandboxDialog::buildUi()
     });
     if (m_vfxTuneSpeed) connect(m_vfxTuneSpeed, &QSlider::valueChanged, this, [this](int v){
         m_state.vfxTuneSpeedMs = static_cast<float>(v);
-        m_vfxTuneSpeedLabel->setText(QString::number(v) + " ms");
+        m_vfxTuneSpeedLabel->setText(v == 0 ? tr("0 ms (hard)") : (QString::number(v) + " ms"));
         pushChange();
     });
     if (m_vfxTuneScale) connect(m_vfxTuneScale, qOverload<int>(&QComboBox::currentIndexChanged),
@@ -3625,8 +3634,11 @@ void ChannelSandboxDialog::pushStateToWidgets()
     if (m_vfxTuneEnable) m_vfxTuneEnable->setChecked(m_state.vfxTuneEnabled);
     if (m_vfxTuneStrength) { m_vfxTuneStrength->setValue(static_cast<int>(m_state.vfxTuneStrength * 100.0f));
         m_vfxTuneStrengthLabel->setText(QString::number(static_cast<int>(m_state.vfxTuneStrength * 100.0f)) + "%"); }
-    if (m_vfxTuneSpeed) { m_vfxTuneSpeed->setValue(static_cast<int>(m_state.vfxTuneSpeedMs));
-        m_vfxTuneSpeedLabel->setText(QString::number(static_cast<int>(m_state.vfxTuneSpeedMs)) + " ms"); }
+    if (m_vfxTuneSpeed) {
+        int spd = static_cast<int>(m_state.vfxTuneSpeedMs);
+        m_vfxTuneSpeed->setValue(spd);
+        m_vfxTuneSpeedLabel->setText(spd == 0 ? tr("0 ms (hard)") : (QString::number(spd) + " ms"));
+    }
     if (m_vfxTuneScale) { QSignalBlocker b(m_vfxTuneScale); m_vfxTuneScale->setCurrentIndex(m_state.vfxTuneScale); }
     if (m_vfxTuneKey)   { QSignalBlocker b(m_vfxTuneKey);   m_vfxTuneKey->setCurrentIndex(m_state.vfxTuneKey); }
     if (m_vfxVocEnable) m_vfxVocEnable->setChecked(m_state.vfxVocEnabled);

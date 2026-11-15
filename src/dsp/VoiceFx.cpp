@@ -75,6 +75,7 @@ void VoiceFx::setSampleRate(double sr) {
     m_shimShiftR.setSampleRate(m_fs);
     m_shimShiftL.setWindowMs(60.0f);
     m_shimShiftR.setWindowMs(60.0f);
+    m_autoTune.setSampleRate(m_fs);
 
     if (!m_formFft) m_formFft.reset(new SimpleFFT(kFormN));
     m_formIn.assign(kFormN, 0.0f);
@@ -135,8 +136,7 @@ void VoiceFx::setParams(const SandboxState &s) {
     float f = std::min(8000.0f, std::max(1000.0f, s.vfxExcFreq));
     m_excHpCoeff = static_cast<float>(1.0 - std::exp(-kTwoPi * f / m_fs));
 
-    // Autotune speed: 1 ms -> ~0.98 instant T-Pain snap; 200 ms -> gentle glide.
-    m_tuneSmCoeff = onePoleCoeff(std::max(1.0f, s.vfxTuneSpeedMs), m_fs);
+    m_autoTune.setParams(s.vfxTuneStrength, s.vfxTuneSpeedMs, s.vfxTuneScale, s.vfxTuneKey);
 
     if (std::fabs(s.vfxVocPitchHz - m_vocLastPitch) > 0.01f) {
         vocRebuild();
@@ -184,22 +184,7 @@ void VoiceFx::reset() {
     std::memset(m_sideRing, 0, sizeof(m_sideRing));
     m_sideW = 0;
 
-    std::memset(m_tuneRing, 0, sizeof(m_tuneRing));
-    m_tuneW = 0;
-    m_tuneHopCounter = 0;
-    m_tuneRatioTarget = 1.0f;
-    m_tuneRatioSm = 1.0f;
-    m_tuneHeldMidi = -1.0f;
-    m_tunePrevHz = -1.0f;
-    m_tunePeriodSm = static_cast<float>(m_fs / 200.0);
-    m_tuneUnvoiced = 0;
-    std::memset(m_psolaIn, 0, sizeof(m_psolaIn));
-    std::memset(m_psolaOut, 0, sizeof(m_psolaOut));
-    std::memset(m_psolaNorm, 0, sizeof(m_psolaNorm));
-    m_psolaW = kPsolaDelay;
-    m_psolaOutR = 0;
-    m_psolaNextSynth = 0.0f;
-    m_psolaWetMix = 0.0f;
+    m_autoTune.reset();
 
     std::fill(m_formIn.begin(), m_formIn.end(), 0.0f);
     std::fill(m_formOut.begin(), m_formOut.end(), 0.0f);
@@ -244,14 +229,14 @@ void VoiceFx::processStereo(float &l, float &r) {
 
     if (s.vfxTuneEnabled || s.vfxFormEnabled || s.vfxVocEnabled) {
         // Mid is processed; the side (stereo image) is re-added delayed by the same latency
-        // (Tune: kPsolaDelay, Formant: kFormN, Vocoder: 0) so it stays time-aligned with the mid.
+        // (Tune: m_autoTune.latencySamples(), Formant: kFormN, Vocoder: 0) so it stays time-aligned with the mid.
         float m = 0.5f * (l + r);
         float side = 0.5f * (l - r);
-        if (s.vfxTuneEnabled) processTune(m);
+        if (s.vfxTuneEnabled) m = m_autoTune.process(m);
         if (s.vfxFormEnabled) processFormantSample(m);
         if (s.vfxVocEnabled)  processVocoder(m);
 
-        const int latency = (s.vfxTuneEnabled ? static_cast<int>(kPsolaDelay) : 0) + (s.vfxFormEnabled ? static_cast<int>(kFormN) : 0);
+        const int latency = (s.vfxTuneEnabled ? m_autoTune.latencySamples() : 0) + (s.vfxFormEnabled ? static_cast<int>(kFormN) : 0);
         m_sideRing[m_sideW & kSideRingMask] = side;
         float sideOut = m_sideRing[(m_sideW - static_cast<uint32_t>(latency)) & kSideRingMask];
         ++m_sideW;
@@ -268,239 +253,6 @@ void VoiceFx::processStereo(float &l, float &r) {
     if (s.vfxExcEnabled)  processExciter(l, r);
     if (s.vfxRevEnabled)  processRevDelay(l, r);
     if (s.vfxShimEnabled) processShimmer(l, r);
-}
-
-// --------------------------------------------------------------------
-// Autotune (YIN + Real-Time TD-PSOLA)
-// --------------------------------------------------------------------
-
-float VoiceFx::detectPitch() {
-    constexpr int D  = kTuneDecim;
-    constexpr int DW = kTuneBuf / D;
-    const double dfs = m_fs / D;
-
-    float x[DW];
-    float meanSq = 0.0f;
-    for (int i = 0; i < DW; ++i) {
-        int base = (m_tuneW + i * D) % kTuneBuf;
-        float acc = m_tuneRing[base];
-        for (int j = 1; j < D; ++j)
-            acc += m_tuneRing[(base + j) % kTuneBuf];
-        x[i] = acc * (1.0f / D);
-        meanSq += x[i] * x[i];
-    }
-    meanSq /= static_cast<float>(DW);
-    if (meanSq < 1e-6f) return -1.0f;
-
-    const int tauMin = std::max(2, static_cast<int>(dfs / 900.0));
-    const int tauMax = std::min(DW - kTuneYinW - 1, static_cast<int>(dfs / 60.0));
-    if (tauMax <= tauMin) return -1.0f;
-
-    // tauMax <= DW - kTuneYinW - 1 < DW: fixed-size stack array, no allocation on the audio thread.
-    float dp[DW];
-    std::fill(dp, dp + tauMax + 1, 1.0f);
-    double cum = 0.0;
-    for (int tau = 1; tau <= tauMax; ++tau) {
-        double s = 0.0;
-        for (int i = 0; i < kTuneYinW; ++i) {
-            float diff = x[i] - x[i + tau];
-            s += diff * diff;
-        }
-        cum += s;
-        dp[tau] = (cum > 1e-12) ? static_cast<float>(s * tau / cum) : 1.0f;
-    }
-
-    int tauPick = -1;
-    // Octave-continuity check: if previous valid pitch period still has a strong
-    // YIN valley near expectedTau (+-15%), prefer it over spurious half/double dips.
-    if (m_tunePrevHz > 60.0f) {
-        int expTau = static_cast<int>(std::lround(dfs / m_tunePrevHz));
-        int lo = std::max(tauMin, static_cast<int>(expTau * 0.85f));
-        int hi = std::min(tauMax, static_cast<int>(expTau * 1.15f));
-        int bestLocal = -1;
-        float bestVal = 1.0f;
-        for (int t = lo; t <= hi; ++t) {
-            if (dp[t] < bestVal) { bestVal = dp[t]; bestLocal = t; }
-        }
-        if (bestLocal >= 0 && bestVal < 0.22f) {
-            tauPick = bestLocal;
-        }
-    }
-
-    if (tauPick < 0) {
-        for (int tau = tauMin; tau <= tauMax; ++tau) {
-            if (dp[tau] < 0.18f) {
-                while (tau + 1 <= tauMax && dp[tau + 1] < dp[tau]) ++tau;
-                tauPick = tau;
-                break;
-            }
-        }
-    }
-    if (tauPick < 0) {
-        float best = 1e9f;
-        for (int tau = tauMin; tau <= tauMax; ++tau)
-            if (dp[tau] < best) { best = dp[tau]; tauPick = tau; }
-        if (tauPick < 0 || best > 0.34f) return -1.0f;
-    }
-
-    float tauF = static_cast<float>(tauPick);
-    if (tauPick > tauMin && tauPick < tauMax) {
-        float a = dp[tauPick - 1], b = dp[tauPick], c = dp[tauPick + 1];
-        float den = a - 2.0f * b + c;
-        if (std::fabs(den) > 1e-9f)
-            tauF += std::max(-0.5f, std::min(0.5f, 0.5f * (a - c) / den));
-    }
-    // Full-rate sub-sample refinement in [-1, +1] sample around D * tauF removes decimation quantization.
-    int centerLag = static_cast<int>(std::lround(tauF * D));
-    const int fullW = std::min(kTuneBuf / 2 - 4, 256);
-    if (centerLag >= 20 && centerLag + fullW + 2 < kTuneBuf) {
-        float e[3] = {0.0f, 0.0f, 0.0f};
-        for (int k = -1; k <= 1; ++k) {
-            int lag = centerLag + k;
-            double acc = 0.0;
-            for (int i = 0; i < fullW; ++i) {
-                float d = m_tuneRing[(m_tuneW + i) % kTuneBuf]
-                        - m_tuneRing[(m_tuneW + i + lag) % kTuneBuf];
-                acc += d * d;
-            }
-            e[k + 1] = static_cast<float>(acc);
-        }
-        float refinedLag = static_cast<float>(centerLag);
-        float den = e[0] - 2.0f * e[1] + e[2];
-        if (den > 1e-9f && e[1] <= e[0] && e[1] <= e[2])
-            refinedLag += std::max(-0.5f, std::min(0.5f, 0.5f * (e[0] - e[2]) / den));
-        float hz = static_cast<float>(m_fs / refinedLag);
-        return (hz >= 60.0f && hz <= 900.0f) ? hz : -1.0f;
-    }
-    float hz = static_cast<float>(dfs / tauF);
-    return (hz >= 60.0f && hz <= 900.0f) ? hz : -1.0f;
-}
-
-float VoiceFx::nearestScaleMidi(float midi) const {
-    static const int kMajor[7] = { 0, 2, 4, 5, 7, 9, 11 };
-    static const int kMinor[7] = { 0, 2, 3, 5, 7, 8, 10 };
-
-    int centre = static_cast<int>(std::lround(midi));
-    int bestNote = centre;
-    float bestDist = 1e9f;
-    for (int n = centre - 6; n <= centre + 6; ++n) {
-        int pc = ((n - m_p.vfxTuneKey) % 12 + 12) % 12;
-        bool inScale = true;
-        if (m_p.vfxTuneScale == 1) {
-            inScale = false;
-            for (int j = 0; j < 7; ++j) if (kMajor[j] == pc) { inScale = true; break; }
-        } else if (m_p.vfxTuneScale == 2) {
-            inScale = false;
-            for (int j = 0; j < 7; ++j) if (kMinor[j] == pc) { inScale = true; break; }
-        }
-        if (!inScale) continue;
-        float d = std::fabs(midi - n);
-        if (d < bestDist) { bestDist = d; bestNote = n; }
-    }
-    return static_cast<float>(bestNote);
-}
-
-void VoiceFx::processTune(float &m) {
-    m_tuneRing[m_tuneW] = m;
-    m_tuneW = (m_tuneW + 1) % kTuneBuf;
-
-    m_psolaIn[m_psolaW & kPsolaMask] = m;
-
-    if (++m_tuneHopCounter >= 192) {
-        m_tuneHopCounter = 0;
-        float hz = detectPitch();
-        if (hz > 0.0f) {
-            m_tuneUnvoiced = 0;
-            m_tunePrevHz = hz;
-            float targetPeriod = static_cast<float>(m_fs / hz);
-            m_tunePeriodSm += (targetPeriod - m_tunePeriodSm) * 0.45f;
-
-            float midi = 69.0f + 12.0f * std::log2(hz / 440.0f);
-            float nearest = nearestScaleMidi(midi);
-            if (m_tuneHeldMidi < 0.0f) {
-                m_tuneHeldMidi = nearest;
-            } else if (nearest != m_tuneHeldMidi) {
-                float dHeld = std::fabs(midi - m_tuneHeldMidi);
-                float dNew  = std::fabs(midi - nearest);
-                if (dNew + 0.35f < dHeld || dHeld > 2.0f)
-                    m_tuneHeldMidi = nearest;
-            }
-            float targetHz = 440.0f * std::pow(2.0f, (m_tuneHeldMidi - 69.0f) / 12.0f);
-            float ratio = targetHz / hz;
-            if (ratio < 0.5f) ratio = 0.5f;
-            if (ratio > 2.0f) ratio = 2.0f;
-            float st = clamp01(m_p.vfxTuneStrength);
-            m_tuneRatioTarget = std::exp(std::log(ratio) * st);
-        } else if (++m_tuneUnvoiced >= 32) {
-            m_tuneHeldMidi = -1.0f;
-            m_tunePrevHz = -1.0f;
-            m_tuneRatioTarget = 1.0f;
-        }
-    }
-
-    m_tuneRatioSm += (m_tuneRatioTarget - m_tuneRatioSm) * m_tuneSmCoeff;
-
-    // Schedule TD-PSOLA synthesis grains aligned to pitch epochs.
-    m_psolaNextSynth -= 1.0f;
-    if (m_psolaNextSynth <= 0.0f) {
-        float T0 = std::max(54.0f, std::min(768.0f, m_tunePeriodSm));
-        float ratio = std::max(0.5f, std::min(2.0f, m_tuneRatioSm));
-        float Ts = T0 / ratio;
-
-        // Pick glottal epoch peak near nominal delay center for phase-coherent grains.
-        uint32_t nominal = m_psolaW - kPsolaDelay;
-        int searchHalf = std::max(16, static_cast<int>(0.5f * T0));
-        int W = std::max(48, std::min(800, static_cast<int>(std::ceil(std::max(T0, Ts * 0.72f)))));
-
-        // Clamp search window so [center - W .. center + W] stays safely in written history.
-        uint32_t peakCenter = nominal;
-        float bestPeak = -1e9f;
-        int maxFwd = std::min(searchHalf, kPsolaDelay - W - 2);
-        int maxBack = std::min(searchHalf, static_cast<int>(kPsolaBuf - kPsolaDelay - W - 2));
-        for (int off = -maxBack; off <= maxFwd; ++off) {
-            float v = m_psolaIn[(nominal + static_cast<uint32_t>(off)) & kPsolaMask];
-            if (v > bestPeak) {
-                bestPeak = v;
-                peakCenter = nominal + static_cast<uint32_t>(off);
-            }
-        }
-
-        // Write Hann-windowed grain [peakCenter - W .. peakCenter + W] into synthesis ring
-        // centered at m_psolaOutR + W so left fade-in begins cleanly at current read position.
-        const int grainLen = 2 * W + 1;
-        const float invTwoW = 1.0f / static_cast<float>(grainLen - 1);
-        uint32_t outCenter = m_psolaOutR + static_cast<uint32_t>(W);
-        for (int j = -W; j <= W; ++j) {
-            float x = static_cast<float>(j + W) * invTwoW;
-            float w = 0.5f * (1.0f - std::cos(2.0f * kPi * x));
-            float s = m_psolaIn[(peakCenter + static_cast<uint32_t>(j)) & kPsolaMask];
-            uint32_t dst = (outCenter + static_cast<uint32_t>(j)) & kPsolaMask;
-            m_psolaOut[dst]  += s * w;
-            m_psolaNorm[dst] += w;
-        }
-
-        m_psolaNextSynth += Ts;
-        if (m_psolaNextSynth < 1.0f) m_psolaNextSynth = 1.0f;
-    }
-
-    uint32_t rSlot = m_psolaOutR & kPsolaMask;
-    float dryAligned = m_psolaIn[(m_psolaW - kPsolaDelay) & kPsolaMask];
-    float psolaWet = (m_psolaNorm[rSlot] > 1e-4f)
-        ? (m_psolaOut[rSlot] / m_psolaNorm[rSlot])
-        : dryAligned;
-    m_psolaOut[rSlot]  = 0.0f;
-    m_psolaNorm[rSlot] = 0.0f;
-
-    // Bypass cleanly to exact time-aligned dry when unvoiced, strength=0, or on-pitch (|ratio-1| < 0.002).
-    bool wantShift = (m_tuneHeldMidi >= 0.0f) &&
-                     (m_p.vfxTuneStrength > 0.01f) &&
-                     (std::fabs(m_tuneRatioSm - 1.0f) > 0.002f);
-    m_psolaWetMix += ((wantShift ? 1.0f : 0.0f) - m_psolaWetMix) * 0.004f;
-
-    m = (1.0f - m_psolaWetMix) * dryAligned + m_psolaWetMix * psolaWet;
-
-    ++m_psolaW;
-    ++m_psolaOutR;
 }
 
 // --------------------------------------------------------------------

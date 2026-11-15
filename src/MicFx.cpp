@@ -499,7 +499,7 @@ QVector<MicFx::Preset> MicFx::builtinPresets()
         SandboxState s = base();
         s.vfxEnabled = true;
         s.vfxTuneEnabled = true; s.vfxTuneStrength = 1.0f;
-        s.vfxTuneSpeedMs = 1.0f; s.vfxTuneScale = 0;
+        s.vfxTuneSpeedMs = 0.0f; s.vfxTuneScale = 0;
         s.vfxFormEnabled = true; s.vfxFormShift = 4.0f; s.vfxFormMix = 1.0f;
         s.vfxVibEnabled = true; s.vfxVibRate = 6.5f; s.vfxVibDepth = 0.35f;
         p.state = s; out.push_back(p);

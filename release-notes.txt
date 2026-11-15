@@ -20,9 +20,12 @@ Playback Pipeline & Stability
 
 Rebuilt DSP & Voice FX Suite
 --------------------
-* NEW - Autotune rebuilt with octave-continuity-protected YIN + full-rate
-  sub-sample refinement and real-time pitch-synchronous TD-PSOLA (epoch-aligned
-  Hann overlap-add grains and clean unity crossfade when on-pitch or unvoiced).
+* NEW - Autotune completely rewritten (`src/dsp/AutoTune.h`) with 0 ms (hard)
+  retune default ("T-Pain snap"), octave-continuity + harmonic-trap YIN pitch
+  tracking, pitch-synchronous NCC-locked markers, Hermite-interpolated stereo
+  TD-PSOLA preserving formants, 9 musical scales (Chromatic, Major, Natural/Harmonic
+  Minor, Pentatonic Major/Minor, Blues, Dorian, Mixolydian), 150 ms consonant
+  note-hold, and unity-gain bit-transparent OLA on unvoiced/silence passages.
 * NEW - Formant Shifter rebuilt with cepstral liftering spectral envelope
   estimation and latency-matched dry delay alignment.
 * NEW - Vocoder rebuilt with 20-band 4th-order Butterworth analysis/synthesis,

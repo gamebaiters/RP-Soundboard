@@ -432,10 +432,10 @@ SandboxState SandboxState::fromJson(const QJsonObject &o)
     s.vfxExcDrive     = static_cast<float>(o.value("vfxExcDrive").toDouble(2.0));
     s.vfxExcMix       = static_cast<float>(o.value("vfxExcMix").toDouble(0.3));
     s.vfxTuneEnabled  = o.value("vfxTuneEnabled").toBool(false);
-    s.vfxTuneStrength = static_cast<float>(o.value("vfxTuneStrength").toDouble(1.0));
-    s.vfxTuneSpeedMs  = static_cast<float>(o.value("vfxTuneSpeedMs").toDouble(20.0));
-    s.vfxTuneScale    = o.value("vfxTuneScale").toInt(0);
-    s.vfxTuneKey      = o.value("vfxTuneKey").toInt(0);
+    s.vfxTuneStrength = std::max(0.0f, std::min(1.0f, static_cast<float>(o.value("vfxTuneStrength").toDouble(1.0))));
+    s.vfxTuneSpeedMs  = std::max(0.0f, std::min(200.0f, static_cast<float>(o.value("vfxTuneSpeedMs").toDouble(0.0))));
+    s.vfxTuneScale    = std::max(0, std::min(8, o.value("vfxTuneScale").toInt(0)));
+    s.vfxTuneKey      = std::max(0, std::min(11, o.value("vfxTuneKey").toInt(0)));
     s.vfxVocEnabled   = o.value("vfxVocEnabled").toBool(false);
     s.vfxVocCarrier   = o.value("vfxVocCarrier").toInt(0);
     s.vfxVocPitchHz   = static_cast<float>(o.value("vfxVocPitchHz").toDouble(110.0));

@@ -313,11 +313,11 @@ struct SandboxState
     float vfxExcDrive    = 2.0f;     // 1..10
     float vfxExcMix      = 0.3f;     // 0..1
 
-    // Autotune (pitch correction, T-Pain at strength 1 / speed low)
+    // Autotune (pitch correction, T-Pain hard snap at 0 ms)
     bool  vfxTuneEnabled  = false;
     float vfxTuneStrength = 1.0f;    // 0..1
-    float vfxTuneSpeedMs  = 20.0f;   // 1..200 (low = hard snap)
-    int   vfxTuneScale    = 0;       // 0=Chromatic 1=Major 2=Minor
+    float vfxTuneSpeedMs  = 0.0f;    // 0..200 (0 = instant hard snap)
+    int   vfxTuneScale    = 0;       // 0=Chromatic 1=Major 2=Minor 3=MajPent 4=MinPent 5=Blues 6=HarmMin 7=Dorian 8=Mixolydian
     int   vfxTuneKey      = 0;       // 0=C .. 11=B
 
     // Vocoder (internal carrier, input = modulator)

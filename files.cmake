@@ -182,6 +182,7 @@ set(sources
 	src/dsp/DynEq.h
 	src/dsp/DynEq.cpp
 	src/dsp/PitchShiftGrain.h
+	src/dsp/AutoTune.h
 	src/dsp/VoiceFx.h
 	src/dsp/VoiceFx.cpp
 	src/dsp/BassEnhancer.h

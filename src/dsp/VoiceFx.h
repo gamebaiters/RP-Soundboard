@@ -2,6 +2,7 @@
 
 #include "SandboxState.h"
 #include "PitchShiftGrain.h"
+#include "AutoTune.h"
 
 #include <vector>
 #include <memory>
@@ -37,12 +38,9 @@ public:
     void modTremRate(float hz)   { m_liveTremRate = hz; }
     void modVibDepth(float d)    { m_liveVibDepth = d; }
 
-private:
-    // ---- Autotune (YIN + Real-Time TD-PSOLA) ----
-    void  processTune(float &m);
-    float detectPitch();                  // Hz, <= 0 when unvoiced
-    float nearestScaleMidi(float midi) const;
+    const AutoTune &autoTune() const { return m_autoTune; }
 
+private:
     // ---- Formant (Cepstral Envelope FFT OLA) ----
     void  processFormantSample(float &m);
     void  formantFrame();
@@ -98,35 +96,13 @@ private:
     float m_excPrevL = 0.0f, m_excPrevR = 0.0f;
 
     // ---- Stereo image preservation for Tune/Formant (mid processed, side delayed by the same latency) ----
-    static constexpr int kSideRing = 4096;          // > kPsolaDelay + kFormN
+    static constexpr int kSideRing = 8192;          // > AutoTune::latencySamples() + kFormN even @ 96 kHz
     static constexpr int kSideRingMask = kSideRing - 1;
     float    m_sideRing[kSideRing] = {};
     uint32_t m_sideW = 0;
 
-    // ---- Autotune (TD-PSOLA + Octave-Locked YIN) ----
-    static constexpr int kTuneBuf    = 2048;
-    static constexpr int kTuneDecim  = 4;
-    static constexpr int kTuneYinW   = 288;
-    static constexpr int kPsolaBuf   = 4096;
-    static constexpr int kPsolaMask  = kPsolaBuf - 1;
-    static constexpr int kPsolaDelay = 1280;
-    float  m_tuneRing[kTuneBuf] = {};
-    int    m_tuneW = 0;
-    int    m_tuneHopCounter = 0;
-    float  m_tuneRatioTarget = 1.0f;
-    float  m_tuneRatioSm = 1.0f;
-    float  m_tuneSmCoeff = 0.05f;
-    float  m_tuneHeldMidi = -1.0f;
-    float  m_tunePrevHz = -1.0f;
-    float  m_tunePeriodSm = 240.0f;   // detected period in samples
-    int    m_tuneUnvoiced = 0;
-    float  m_psolaIn[kPsolaBuf]   = {};
-    float  m_psolaOut[kPsolaBuf]  = {};
-    float  m_psolaNorm[kPsolaBuf] = {};
-    uint32_t m_psolaW    = kPsolaDelay;
-    uint32_t m_psolaOutR = 0;
-    float    m_psolaNextSynth = 0.0f;
-    float    m_psolaWetMix = 0.0f;
+    // ---- Autotune (YIN + phase-locked TD-PSOLA) ----
+    AutoTune m_autoTune;
 
     // ---- Formant (Cepstral OLA + matched dry latency) ----
     static constexpr int kFormN   = 1024;

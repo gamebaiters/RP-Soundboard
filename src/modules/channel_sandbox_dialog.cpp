@@ -42,6 +42,7 @@
 #include <QMenu>
 #include <QAction>
 #include <cmath>
+#include "settings_scope.h"
 
 namespace {
 // Global preferred sandbox engine. Written by the sandbox dialog when
@@ -54,11 +55,11 @@ constexpr const char *kPreferredEngineKey = "sandbox/preferred_engine";
 
 namespace SandboxEnginePref {
 int load() {
-    QSettings s("GameBaiters", "Soundboard");
+    QSettings s(GbSettings::org(), GbSettings::app());
     return s.value(kPreferredEngineKey, SandboxState::Engine_Leia).toInt();
 }
 void save(int engine) {
-    QSettings s("GameBaiters", "Soundboard");
+    QSettings s(GbSettings::org(), GbSettings::app());
     s.setValue(kPreferredEngineKey, engine);
 }
 } // namespace SandboxEnginePref
@@ -68,7 +69,7 @@ constexpr const char *kModuleMaskKey   = "sandbox_modules/mask";
 constexpr const char *kModuleStagesKey = "sandbox_modules/mask_stages";
 
 void persistModuleMask() {
-    QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+    QSettings st(GbSettings::org(), GbSettings::app());
     st.setValue(QLatin1String(kModuleMaskKey), SlotDsp::globalStageMask());
     // Stamp the stage count so a future stage append can tell which bits
     // this mask actually covers (see loadIntoDsp).
@@ -96,7 +97,7 @@ void setAll(bool on) {
 }
 
 void loadIntoDsp() {
-    QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+    QSettings st(GbSettings::org(), GbSettings::app());
     quint32 m = st.value(QLatin1String(kModuleMaskKey), 0xFFFFFFFFu).toUInt();
     // VERSIONED mask: a mask saved before newer DspStages were appended has
     // ZERO bits for them, which silently hard-disabled every new module

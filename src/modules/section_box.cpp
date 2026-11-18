@@ -7,6 +7,7 @@
 #include <QCheckBox>
 #include <QFrame>
 #include <QSettings>
+#include "settings_scope.h"
 
 SectionBox::SectionBox(const QString &title, QWidget *parent)
     : QWidget(parent)
@@ -99,7 +100,7 @@ void SectionBox::setExpanded(bool on)
     if (m_header) m_header->setArrowType(on ? Qt::DownArrow : Qt::RightArrow);
     if (m_body)   m_body->setVisible(on);
     if (!m_persistKey.isEmpty()) {
-        QSettings s(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        QSettings s(GbSettings::org(), GbSettings::app());
         s.setValue(QStringLiteral("sections/") + m_persistKey, on);
     }
     emit expandedChanged(on);
@@ -109,7 +110,7 @@ void SectionBox::setPersistenceKey(const QString &key)
 {
     m_persistKey = key;
     if (key.isEmpty()) return;
-    QSettings s(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+    QSettings s(GbSettings::org(), GbSettings::app());
     const bool saved =
         s.value(QStringLiteral("sections/") + key, m_expanded).toBool();
     if (saved != m_expanded) setExpanded(saved);

@@ -14,6 +14,7 @@
 #include <QStandardPaths>
 #include <QString>
 #include <QtGlobal>
+#include "settings_scope.h"
 
 #if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__i386__)
   #define SPATIALLEIA_X86 1
@@ -56,8 +57,7 @@ QString resolveSofaPath()
     // the previous once-per-process cache meant changing the key
     // silently required a full TS3 restart.
     {
-        QSettings sset(QStringLiteral("GameBaiters"),
-                       QStringLiteral("Soundboard"));
+        QSettings sset(GbSettings::org(), GbSettings::app());
         QString custom = sset.value(QStringLiteral("leia/custom_sofa_path"))
                              .toString();
         if (!custom.isEmpty() && QFile::exists(custom))

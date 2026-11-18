@@ -79,6 +79,7 @@
 #include <cmath>
 #include <memory>
 #include <functional>
+#include "settings_scope.h"
 
 namespace {
 
@@ -2877,7 +2878,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
     // QSettings one-shot flag so it only ever appears once, and only while the
     // streaming feature is enabled. Deferred so the channel is laid out first.
     if (model && model->getStreamingEnabled()) {
-        QSettings dsc("GameBaiters", "Soundboard");
+        QSettings dsc(GbSettings::org(), GbSettings::app());
         if (!dsc.value("ytDiscoveryShown2", false).toBool() && !page->channels().isEmpty()) {
             QTimer::singleShot(1200, page, [page]{
                 if (page->channels().isEmpty()) return;
@@ -2885,7 +2886,7 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                     ch->showDiscoveryBubble(QObject::tr(
                         "Did you know? You can paste and play a YouTube video "
                         "directly — just paste the link as the channel name. Try it now!"));
-                    QSettings s("GameBaiters", "Soundboard");
+                    QSettings s(GbSettings::org(), GbSettings::app());
                     s.setValue("ytDiscoveryShown2", true);
                 }
             });

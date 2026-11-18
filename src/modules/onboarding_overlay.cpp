@@ -8,10 +8,11 @@
 #include <QPainter>
 #include <QEvent>
 #include <QSettings>
+#include "settings_scope.h"
 
 namespace {
-const char *kOrg = "GameBaiters";
-const char *kApp = "Soundboard";
+const QString kOrg = GbSettings::org();
+const QString kApp = GbSettings::app();
 const char *kKey = "onboardingShown";
 }
 

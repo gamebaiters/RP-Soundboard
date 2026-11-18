@@ -42,6 +42,7 @@
 #endif
 
 #include "../ts3log.h"    // logInfo / logWarning / extremeLog
+#include "settings_scope.h"
 
 namespace {
 
@@ -171,7 +172,7 @@ void after(QObject *owner, int ms, std::function<void()> fn)
 
 QSettings &prefs()
 {
-	static QSettings s("GameBaiters", "Soundboard");
+	static QSettings s(GbSettings::org(), GbSettings::app());
 	return s;
 }
 
@@ -435,7 +436,7 @@ QString YouTubeAuth::storeDir()
 {
 	QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
 	if (base.isEmpty()) base = QDir::homePath();
-	const QString dir = base + "/GameBaiters/Soundboard";
+	const QString dir = base + "/GameBaiters/" + GbSettings::app();
 	QDir().mkpath(dir);
 	return dir;
 }

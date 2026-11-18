@@ -14,6 +14,7 @@
 #include <QCursor>
 #include <QSettings>
 #include <cmath>
+#include "settings_scope.h"
 
 namespace {
 constexpr int kDiscSize = 150;
@@ -63,14 +64,14 @@ VinylPopup::VinylPopup(QWidget *parent)
 
     // Brake duration persists across restarts (global, all channels).
     {
-        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        QSettings st(GbSettings::org(), GbSettings::app());
         int saved = st.value(QStringLiteral("vinyl/brake_ms"), 800).toInt();
         m_brakeSlider->setValue(qBound(100, saved, 3000));
         m_brakeLabel->setText(QString::number(m_brakeSlider->value()) + " ms");
     }
     connect(m_brakeSlider, &QSlider::valueChanged, this, [this](int v){
         m_brakeLabel->setText(QString::number(v) + " ms");
-        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        QSettings st(GbSettings::org(), GbSettings::app());
         st.setValue(QStringLiteral("vinyl/brake_ms"), v);
     });
 

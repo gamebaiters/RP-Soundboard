@@ -36,6 +36,7 @@
 #include "../plugin.h"   // getPluginID()
 #include "../ts3log.h"   // logInfo / logWarning / extremeLog
 #include "youtube_auth.h"
+#include "settings_scope.h"
 
 //----------------------------------------------------------------
 StreamResolver &StreamResolver::instance()
@@ -183,13 +184,13 @@ static bool authFirstFor(const QString &url)
 //----------------------------------------------------------------
 QString StreamResolver::preferredQuality()
 {
-	QSettings s("GameBaiters", "Soundboard");
+	QSettings s(GbSettings::org(), GbSettings::app());
 	return s.value("stream/quality", "balanced").toString();
 }
 
 void StreamResolver::setPreferredQuality(const QString &q)
 {
-	QSettings s("GameBaiters", "Soundboard");
+	QSettings s(GbSettings::org(), GbSettings::app());
 	s.setValue("stream/quality", q);
 }
 
@@ -343,7 +344,7 @@ void StreamResolver::warmUp()
 	// engine binary is rewritten in place by `-U`; on macOS it is a ~40 MB
 	// self-extracting bundle, so an update still running when the user pasted
 	// their first link left the resolve spawning a half-replaced executable.
-	QSettings st("GameBaiters", "Soundboard");
+	QSettings st(GbSettings::org(), GbSettings::app());
 	const qint64 last = st.value("stream/last_engine_update", 0).toLongLong();
 	const qint64 now  = QDateTime::currentSecsSinceEpoch();
 	if (last > 0 && now - last < 24 * 3600) {

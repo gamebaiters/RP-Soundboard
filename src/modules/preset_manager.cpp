@@ -3,8 +3,23 @@
 #include <QFileInfo>
 #include <QDir>
 
+#ifdef GB_LIVE_STANDALONE
+// Soundboard LIVE compiles this file too. It must NEVER write into the
+// TeamSpeak plugin's presets file (%APPDATA%\TS3Client\rp_soundboard_presets.ini):
+// the standalone's "TS3 config path" is its own data dir (ts3_stub.cpp).
+extern "C" const char *getTs3ConfigPath();
+#endif
+
 static QString getConfigDir() {
     QString appData = QDir::homePath();
+#ifdef GB_LIVE_STANDALONE
+    {
+        const char *cfg = getTs3ConfigPath();
+        QString dir = QString::fromUtf8(cfg ? cfg : "");
+        while (dir.endsWith('/') || dir.endsWith('\\')) dir.chop(1);
+        if (!dir.isEmpty()) return dir;
+    }
+#endif
 #ifdef Q_OS_WIN
     appData = QDir::toNativeSeparators(
         QDir::homePath() + "/AppData/Roaming/TS3Client");

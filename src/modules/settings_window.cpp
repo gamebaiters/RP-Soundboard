@@ -26,6 +26,7 @@
 #include <QCoreApplication>
 #include <QShowEvent>
 #include "../common.h"
+#include "settings_scope.h"
 
 namespace {
 QHBoxLayout *checkRow(QCheckBox *cb, const QString &help, QWidget *owner) {
@@ -222,7 +223,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         langCombo->addItem(tr("Automatic (system language)"), QStringLiteral("auto"));
         langCombo->addItem(QStringLiteral("English"),  QStringLiteral("en"));
         langCombo->addItem(QStringLiteral("Italiano"), QStringLiteral("it"));
-        QSettings ls(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        QSettings ls(GbSettings::org(), GbSettings::app());
         int ci = langCombo->findData(ls.value(QStringLiteral("language"),
                                               QStringLiteral("auto")).toString());
         langCombo->setCurrentIndex(ci >= 0 ? ci : 0);
@@ -234,7 +235,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         generalLay->addLayout(row);
         connect(langCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
                 this, [langCombo](int){
-            QSettings s(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+            QSettings s(GbSettings::org(), GbSettings::app());
             s.setValue(QStringLiteral("language"), langCombo->currentData().toString());
             s.sync();
         });
@@ -548,8 +549,7 @@ SettingsWindow::SettingsWindow(QWidget *parent)
         sandboxLay->addLayout(sofaRow);
         sandboxLay->addWidget(sofaPathLbl);
         auto loadSofaPath = [sofaPathLbl, this]{
-            QSettings sset(QStringLiteral("GameBaiters"),
-                           QStringLiteral("Soundboard"));
+            QSettings sset(GbSettings::org(), GbSettings::app());
             QString p = sset.value(QStringLiteral("leia/custom_sofa_path"))
                            .toString();
             sofaPathLbl->setText(p.isEmpty()
@@ -562,16 +562,14 @@ SettingsWindow::SettingsWindow(QWidget *parent)
                 this, tr("Pick a SOFA HRTF dataset"), QString(),
                 tr("SOFA datasets (*.sofa);;All files (*.*)"));
             if (p.isEmpty()) return;
-            QSettings sset(QStringLiteral("GameBaiters"),
-                           QStringLiteral("Soundboard"));
+            QSettings sset(GbSettings::org(), GbSettings::app());
             sset.setValue(QStringLiteral("leia/custom_sofa_path"), p);
             loadSofaPath();
             QMessageBox::information(this, tr("Custom HRTF"),
                 tr("Reopen the soundboard to apply the new dataset."));
         });
         connect(sofaClearBtn, &QPushButton::clicked, this, [this, loadSofaPath]{
-            QSettings sset(QStringLiteral("GameBaiters"),
-                           QStringLiteral("Soundboard"));
+            QSettings sset(GbSettings::org(), GbSettings::app());
             sset.remove(QStringLiteral("leia/custom_sofa_path"));
             loadSofaPath();
         });

@@ -7,6 +7,7 @@
 #include "ExpandableSection.h"
 #include <QPropertyAnimation>
 #include <QSettings>
+#include "settings_scope.h"
 
 ExpandableSection::ExpandableSection(const QString &title, int animationDuration, QWidget *parent) :
 	QWidget(parent),
@@ -76,7 +77,7 @@ void ExpandableSection::setExpanded(bool expanded)
 
 	if (!m_persistKey.isEmpty())
 	{
-		QSettings s(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+		QSettings s(GbSettings::org(), GbSettings::app());
 		s.setValue(QStringLiteral("sections/") + m_persistKey, expanded);
 	}
 }
@@ -86,7 +87,7 @@ void ExpandableSection::setPersistenceKey(const QString &key)
 	m_persistKey = key;
 	if (key.isEmpty())
 		return;
-	QSettings s(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+	QSettings s(GbSettings::org(), GbSettings::app());
 	bool saved = s.value(QStringLiteral("sections/") + key, isExpanded()).toBool();
 	if (saved != isExpanded())
 		setExpanded(saved);

@@ -12,6 +12,7 @@
 #include <QDataStream>
 #include <QUuid>
 #include <QCoreApplication>
+#include "settings_scope.h"
 
 namespace ConfigIO {
 
@@ -213,7 +214,7 @@ bool fullBackupToFile(const QString &path, ConfigModel &model)
 {
     // Flush every pending write so the files on disk are current.
     model.writeConfigImmediate();
-    QSettings live(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+    QSettings live(GbSettings::org(), GbSettings::app());
     live.sync();
 
     QJsonObject root;
@@ -279,7 +280,7 @@ ImportResult fullRestoreFromFile(const QString &path)
     }
 
     // 2. QSettings store: wipe + rewrite so stale keys can't linger.
-    QSettings live(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+    QSettings live(GbSettings::org(), GbSettings::app());
     live.clear();
     const QJsonObject qs = root.value("qsettings").toObject();
     for (auto it = qs.begin(); it != qs.end(); ++it) {

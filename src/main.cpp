@@ -78,6 +78,7 @@
 #include "modules/audio_exporter.h"
 #include "modules/stream_resolver.h"
 #include <QApplication>
+#include "settings_scope.h"
 
 extern "C" void rpsb_close_debug_log();
 
@@ -623,7 +624,7 @@ static QTranslator *uiTranslator = NULL;
 
 static void sb_installTranslation()
 {
-	QSettings s(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+	QSettings s(GbSettings::org(), GbSettings::app());
 	QString lang = s.value(QStringLiteral("language"), QStringLiteral("auto")).toString();
 	if (lang == QLatin1String("auto"))
 		lang = (QLocale::system().language() == QLocale::Italian)

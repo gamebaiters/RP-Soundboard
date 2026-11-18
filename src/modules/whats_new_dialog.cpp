@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QSettings>
 #include <QRegularExpression>
+#include "settings_scope.h"
 
 namespace {
 constexpr const char *kLastSeenKey = "lastSeenVersion";
@@ -94,7 +95,7 @@ WhatsNewDialog::WhatsNewDialog(const QString &versionString,
 
 void WhatsNewDialog::showIfUpdated(QWidget *parent)
 {
-    QSettings s(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+    QSettings s(GbSettings::org(), GbSettings::app());
     int lastSeen = s.value(QString::fromLatin1(kLastSeenKey), 0).toInt();
     const int current = TS3SB_VERSION_BUILD;
 

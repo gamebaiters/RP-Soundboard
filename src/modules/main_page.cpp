@@ -41,6 +41,7 @@
 #include <QSettings>
 #include <QPainter>
 #include <cmath>
+#include "settings_scope.h"
 
 // Own-voice indicator for the bottom bar: LED + "Voice" caption.
 //
@@ -341,12 +342,12 @@ MainPage::MainPage(QWidget *parent)
         "Show / hide the Microphone FX panel (real-time voice changer)."));
     connect(m_micFxBtn, &QPushButton::toggled, this, [this](bool on){
         if (m_micChannel) m_micChannel->setVisible(on && m_micFeatureOn);
-        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        QSettings st(GbSettings::org(), GbSettings::app());
         st.setValue(QStringLiteral("micfx/panel_visible"), on);
     });
     {
         // Restore the user's last panel state.
-        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        QSettings st(GbSettings::org(), GbSettings::app());
         bool vis = st.value(QStringLiteral("micfx/panel_visible"), false).toBool();
         m_micFxBtn->setChecked(vis);
         if (m_micChannel) m_micChannel->setVisible(vis && m_micFeatureOn);
@@ -475,7 +476,7 @@ MainPage::MainPage(QWidget *parent)
     {
         // Restore the user's saved pane split (whole-state restore also
         // brings back the exact handle position across resizes).
-        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        QSettings st(GbSettings::org(), GbSettings::app());
         QByteArray state = st.value(
             QStringLiteral("mainpage/splitter_state")).toByteArray();
         if (!state.isEmpty())
@@ -555,7 +556,7 @@ void MainPage::resetLayoutProportions() {
     // Wipe the saved state FIRST so a failure between here and the save
     // below still leaves the next start on the factory split.
     {
-        QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+        QSettings st(GbSettings::org(), GbSettings::app());
         st.remove(QStringLiteral("mainpage/splitter_state"));
     }
     m_splitter->setSizes(kDefaultSplit);
@@ -566,7 +567,7 @@ void MainPage::resetLayoutProportions() {
 
 void MainPage::saveSplitterState() {
     if (!m_splitter) return;
-    QSettings st(QStringLiteral("GameBaiters"), QStringLiteral("Soundboard"));
+    QSettings st(GbSettings::org(), GbSettings::app());
     st.setValue(QStringLiteral("mainpage/splitter_state"),
                 m_splitter->saveState());
 }

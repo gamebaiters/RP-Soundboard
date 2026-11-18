@@ -6,10 +6,11 @@
 #include <QJsonObject>
 #include <cmath>
 #include <algorithm>
+#include "settings_scope.h"
 
 namespace {
-constexpr const char *kOrg = "GameBaiters";
-constexpr const char *kApp = "Soundboard";
+const QString kOrg = GbSettings::org();
+const QString kApp = GbSettings::app();
 
 inline short clampShort(int v) {
     if (v >  32767) return  32767;

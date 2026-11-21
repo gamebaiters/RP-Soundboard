@@ -117,6 +117,10 @@ public:
     // Load persisted state. Called once at plugin init (after Qt is up).
     void loadSettings();
 
+    // Clear internal DSP caches (conv-reverb IR / Leia SOFA) and re-prepare
+    // cleanly while preserving the user's Mic FX configuration.
+    void resetDspCaches();
+
 signals:
     // Emitted on every master-toggle change (GUI or hotkey). Queued
     // across threads - safe to connect UI directly.

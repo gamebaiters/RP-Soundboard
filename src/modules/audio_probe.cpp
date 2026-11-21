@@ -22,6 +22,9 @@ extern "C" {
 
 namespace {
 
+QMutex                         g_probeMutex;
+QHash<QString, AudioProbeInfo> g_probeCache;
+
 // Cache key includes size + mtime so re-encoding a file in place invalidates
 // the entry instead of showing a stale badge forever.
 QString cacheKey(const QFileInfo &fi)
@@ -157,9 +160,6 @@ QColor AudioProbeInfo::qualityColor() const
 //----------------------------------------------------------------
 AudioProbeInfo AudioProbe::probe(const QString &path)
 {
-	static QMutex                        s_mutex;
-	static QHash<QString, AudioProbeInfo> s_cache;
-
 	AudioProbeInfo info;
 	if (path.isEmpty() || path.contains("://")) return info;   // URL -> WEB badge
 
@@ -168,9 +168,9 @@ AudioProbeInfo AudioProbe::probe(const QString &path)
 
 	const QString key = cacheKey(fi);
 	{
-		QMutexLocker lock(&s_mutex);
-		auto it = s_cache.constFind(key);
-		if (it != s_cache.constEnd()) return *it;
+		QMutexLocker lock(&g_probeMutex);
+		auto it = g_probeCache.constFind(key);
+		if (it != g_probeCache.constEnd()) return *it;
 	}
 
 	AVFormatContext *ctx = nullptr;
@@ -184,8 +184,8 @@ AudioProbeInfo AudioProbe::probe(const QString &path)
 	const QByteArray p = QFile::encodeName(path);
 	if (avformat_open_input(&ctx, p.constData(), nullptr, &opts) < 0) {
 		av_dict_free(&opts);
-		QMutexLocker lock(&s_mutex);
-		s_cache.insert(key, info);   // negative cache: don't retry every load
+		QMutexLocker lock(&g_probeMutex);
+		g_probeCache.insert(key, info);   // negative cache: don't retry every load
 		return info;
 	}
 	av_dict_free(&opts);
@@ -222,7 +222,15 @@ AudioProbeInfo AudioProbe::probe(const QString &path)
 	}
 	avformat_close_input(&ctx);
 
-	QMutexLocker lock(&s_mutex);
-	s_cache.insert(key, info);
+	QMutexLocker lock(&g_probeMutex);
+	g_probeCache.insert(key, info);
 	return info;
+}
+
+int AudioProbe::clearCache()
+{
+	QMutexLocker lock(&g_probeMutex);
+	const int n = g_probeCache.size();
+	g_probeCache.clear();
+	return n;
 }

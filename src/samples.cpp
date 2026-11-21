@@ -502,6 +502,15 @@ void Sampler::clearSlotSandbox(int slot)
 	m_slots[slot].peakR.store(0.0f);
 }
 
+void Sampler::resetDspCaches()
+{
+	std::lock_guard<std::mutex> Lock(m_mutex);
+	for (int i = 0; i < MAX_SLOTS; ++i) {
+		if (m_slots[i].dsp)
+			m_slots[i].dsp->resetCaches();
+	}
+}
+
 void Sampler::getSlotPeak(int slot, float &peakL, float &peakR) const
 {
 	if (slot < 0 || slot >= MAX_SLOTS) {

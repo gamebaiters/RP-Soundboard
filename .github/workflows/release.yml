@@ -62,7 +62,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ffmpeg-static
-          key: ffmpeg-static-msvc-x64-n8.1.1-v7-ffmpeg8-net-schannel
+          key: ffmpeg-static-msvc-x64-n8.1.1-v8-ffmpeg8-net-schannel-loudnorm
 
       - name: Build static FFmpeg with MSVC toolchain
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -108,7 +108,7 @@ jobs:
               --enable-muxer=wav,flac,ogg,ipod,mp4 \
               --enable-protocol=file,http,https,tcp,tls,crypto,httpproxy \
               --enable-parser=mpegaudio,vorbis,opus,flac,aac,ac3 \
-              --enable-filter=aresample,aformat,aeval,anull,silenceremove,atempo,asetrate
+              --enable-filter=aresample,aformat,aeval,anull,silenceremove,atempo,asetrate,loudnorm
           make -j$(nproc) V=0
           make install
           ls -la ../ffmpeg-static/lib

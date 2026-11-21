@@ -490,3 +490,23 @@ void ConvolutionReverb::reset() {
     clearStateLocked();
     m_lock.unlock();
 }
+
+void ConvolutionReverb::invalidateLoaded() {
+    std::lock_guard<std::mutex> g(m_lock);
+    m_ready.store(false, std::memory_order_release);
+    m_resetPending.store(false, std::memory_order_relaxed);
+    m_loadedPreset = -1;
+    m_loadedPath.clear();
+    m_irFreqL.clear();
+    m_irFreqR.clear();
+    m_histL.clear();
+    m_histR.clear();
+    clearStateLocked();
+}
+
+int ConvolutionReverb::clearIrCache() {
+    std::lock_guard<std::mutex> g(g_irCacheMutex);
+    const int n = static_cast<int>(g_irCache.size());
+    g_irCache.clear();
+    return n;
+}

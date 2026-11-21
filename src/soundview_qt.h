@@ -47,6 +47,8 @@ public:
 	// cursor while the channel was stopped.
 	double currentPosition() const { return m_playbackPosition; }
 	void clearPlayback();
+	// Hard-reset the waveform analyser thread, bin cache, and FX preview cache.
+	void resetCache();
 	// Reverse-direction hint for the "played portion" tint: in reverse
 	// the already-played region is to the RIGHT of the cursor.
 	void setReverse(bool on);

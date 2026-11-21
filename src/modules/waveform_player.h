@@ -56,6 +56,7 @@ public slots:
     void setSpectrogramView(bool on);
     void setPlaybackFraction(double f);              // 0..1, paints overlay
     void clearPlayback();
+    void resetCache();
     void setPlaying(bool on);
     void setPaused(bool on);
     // Mark the channel as "stopped but a sound is loaded and ready to

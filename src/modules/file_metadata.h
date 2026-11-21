@@ -18,4 +18,8 @@ QString tooltipFor(const QString &absolutePath);
 // when the user has just replaced the file at this path.
 void invalidate(const QString &absolutePath);
 
+// Drop every cached tooltip entry (including negative-cached errors).
+// Returns the number of entries cleared.
+int clearCache();
+
 } // namespace FileMetadata

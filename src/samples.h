@@ -128,6 +128,9 @@ public:
 	// Drop the slot's DSP block (frees ~few hundred KB). Used by the
 	// "Reset all sandbox" command in Settings.
 	void clearSlotSandbox(int slot);
+	// Resets internal DSP caches (convolution reverb IRs, Leia SOFA state) on
+	// every active slot without wiping user sandbox settings.
+	void resetDspCaches();
 	// Latest peak |L|, |R| (0..1) measured at the slot's DSP output. The
 	// channel meter widget polls these via QTimer at ~25 Hz.
 	void getSlotPeak(int slot, float &peakL, float &peakR) const;

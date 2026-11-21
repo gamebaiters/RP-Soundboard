@@ -52,6 +52,13 @@ public:
     // Clear streaming state (input history, tails). Keeps the IR.
     void reset();
 
+    // Drop the currently loaded IR on this instance so the next prepare()
+    // rebuilds from scratch. GUI thread only.
+    void invalidateLoaded();
+
+    // Clear the process-wide IR partition cache. Returns cleared entry count.
+    static int clearIrCache();
+
 private:
     static constexpr int kBlock = 256;
     static constexpr int kFft   = 512;

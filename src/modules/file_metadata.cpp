@@ -161,4 +161,11 @@ void invalidate(const QString &absolutePath) {
     g_cache.remove(absolutePath);
 }
 
+int clearCache() {
+    QMutexLocker lk(&g_mutex);
+    const int n = g_cache.size();
+    g_cache.clear();
+    return n;
+}
+
 } // namespace FileMetadata

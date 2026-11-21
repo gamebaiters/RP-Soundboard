@@ -462,7 +462,7 @@ private:
 	int _close();
 	void reset();
 	int getAudioStreamNum() const;
-	int buildFilterGraph(bool allowPitch = true);
+	int buildFilterGraph(bool allowPitch = true, bool allowLoudnorm = true);
 	int _seek(double seconds); // Internal seek without locking (caller must hold m_mutex)
 
 	typedef std::lock_guard<std::mutex> Lock;
@@ -787,12 +787,12 @@ InputFileFFmpeg::~InputFileFFmpeg()
 
 
 //---------------------------------------------------------------
-int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
+int InputFileFFmpeg::buildFilterGraph(bool allowPitch, bool allowLoudnorm)
 {
 	double pitch = m_pitchFactor.load(std::memory_order_relaxed);
 	double speed = m_speedFactor.load(std::memory_order_relaxed);
-	if (pitch < 0.01) pitch = 1.0;
-	if (speed < 0.01) speed = 1.0;
+	if (!std::isfinite(pitch) || pitch < 0.01) pitch = 1.0;
+	if (!std::isfinite(speed) || speed < 0.01) speed = 1.0;
 	// Speed the graph being built actually applies (producer-thread only;
 	// readSamples uses it to account frames drained from the OLD graph).
 	m_graphSpeed = speed;
@@ -830,7 +830,10 @@ int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
 
 	const AVFilter *asetrate_check = avfilter_get_by_name("asetrate");
 	const AVFilter *aresample_check = avfilter_get_by_name("aresample");
-	dbgLog("  asetrate=%p aresample=%p", asetrate_check, aresample_check);
+	const AVFilter *atempo_check = avfilter_get_by_name("atempo");
+	const AVFilter *loudnorm_check = avfilter_get_by_name("loudnorm");
+	dbgLog("  asetrate=%p aresample=%p atempo=%p loudnorm=%p",
+	       asetrate_check, aresample_check, atempo_check, loudnorm_check);
 
 	bool usePitch = (pitch != 1.0) && allowPitch && aresample_check;
 	bool useAsetrate = usePitch && asetrate_check;
@@ -1002,10 +1005,16 @@ int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
 	// e.g. max speed (3.0) + min pitch (0.333) produced a single
 	// atempo=9.0 — rejected by avfilter_graph_config(), crashing the plugin.
 	double t = usePitch ? (speed / pitch) : speed;
-	if (!(t > 0.0)) t = 1.0;   // guard against a degenerate / NaN factor
-	while (t < 0.5) { filters += "atempo=0.5,"; t /= 0.5; }
-	while (t > 2.0) { filters += "atempo=2.0,"; t /= 2.0; }
-	if (t != 1.0) { filters += "atempo=" + fmtDbl(t) + ","; }
+	if (!std::isfinite(t) || !(t > 0.0)) t = 1.0;   // guard against a degenerate / NaN / inf factor
+	if (atempo_check) {
+		while (t < 0.5) { filters += "atempo=0.5,"; t /= 0.5; }
+		while (t > 2.0) { filters += "atempo=2.0,"; t /= 2.0; }
+		if (t != 1.0) { filters += "atempo=" + fmtDbl(t) + ","; }
+	} else if (t != 1.0) {
+		static std::atomic<bool> s_warnedNoAtempo{false};
+		if (!s_warnedNoAtempo.exchange(true, std::memory_order_relaxed))
+			logWarning("FFmpeg atempo filter not available in this build; skipping tempo adjustment");
+	}
 
 	// Reverse playback handled OUTSIDE the filter graph: areverse needs
 	// EOF on its input which the streaming readSamples loop never
@@ -1022,7 +1031,18 @@ int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
 	// its convergence at every chunk boundary - audible as loudness
 	// pumping at the chunk cadence. Reverse playback therefore runs
 	// without auto-normalisation.
-	if (m_autoNormalize && !m_reverse) filters += "loudnorm=I=-16:TP=-1:LRA=11,";
+	// Guarded by avfilter_get_by_name("loudnorm") so minimal FFmpeg builds
+	// without loudnorm degrade gracefully instead of failing with
+	// AVERROR_FILTER_NOT_FOUND ("Filter not found").
+	const bool wantLoudnorm = m_autoNormalize && !m_reverse && allowLoudnorm;
+	const bool useLoudnorm = wantLoudnorm && (loudnorm_check != nullptr);
+	if (useLoudnorm) {
+		filters += "loudnorm=I=-16:TP=-1:LRA=11,";
+	} else if (wantLoudnorm && !loudnorm_check) {
+		static std::atomic<bool> s_warnedNoLoudnorm{false};
+		if (!s_warnedNoLoudnorm.exchange(true, std::memory_order_relaxed))
+			logWarning("FFmpeg loudnorm filter not available in this build; skipping loudness normalization");
+	}
 
 	filters += "aformat=sample_fmts=s16:sample_rates=48000";
 
@@ -1061,15 +1081,22 @@ int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
 	avfilter_inout_free(&outputs);
 
 	if (ret < 0) {
+		char errbuf[128]; av_strerror(ret, errbuf, sizeof(errbuf));
 		avfilter_graph_free(&m_filterGraph);
 		m_filterGraph = NULL;
 		m_bufSrcCtx = NULL;
 		m_bufSinkCtx = NULL;
 
+		if (useLoudnorm) {
+			logWarning("Filter graph parse failed with loudnorm (%s); retrying without loudnorm. Chain: %s",
+			           errbuf, filters.c_str());
+			return buildFilterGraph(allowPitch, false);
+		}
 		if (allowPitch && pitch != 1.0) {
 			dbgLog("  >>> RETRYING without asetrate (fallback to speed-only)");
-			return buildFilterGraph(false);
+			return buildFilterGraph(false, allowLoudnorm);
 		}
+		logError("Filter graph parse failed (%s). Chain: %s", errbuf, filters.c_str());
 		return ret;
 	}
 
@@ -1082,10 +1109,16 @@ int InputFileFFmpeg::buildFilterGraph(bool allowPitch)
 		m_bufSrcCtx = NULL;
 		m_bufSinkCtx = NULL;
 
+		if (useLoudnorm) {
+			logWarning("Filter graph config failed with loudnorm (%s); retrying without loudnorm. Chain: %s",
+			           errbuf, filters.c_str());
+			return buildFilterGraph(allowPitch, false);
+		}
 		if (allowPitch && pitch != 1.0) {
 			dbgLog("  >>> RETRYING without asetrate (fallback to speed-only)");
-			return buildFilterGraph(false);
+			return buildFilterGraph(false, allowLoudnorm);
 		}
+		logError("Filter graph config failed (%s). Chain: %s", errbuf, filters.c_str());
 	} else {
 		dbgLog("  avfilter_graph_config OK: %d", ret);
 	}

@@ -57,6 +57,10 @@ namespace AudioProbe {
 // or anything with no audio stream. Result is cached (path + size + mtime).
 AudioProbeInfo probe(const QString &path);
 
+// Drop every memoised probe entry (including negative-cached failures).
+// Returns the number of entries cleared.
+int clearCache();
+
 }
 
 #endif // rpsbsrc__audio_probe_H__

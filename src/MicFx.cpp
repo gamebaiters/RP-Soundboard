@@ -175,6 +175,27 @@ void MicFx::setSandboxState(const SandboxState &s)
     saveSettings();
 }
 
+void MicFx::resetDspCaches()
+{
+    SandboxState cur;
+    {
+        std::lock_guard<std::mutex> g(m_dspMutex);
+        m_dsp.resetCaches();
+        cur = m_state;
+    }
+    if (m_enabled.load(std::memory_order_relaxed)) {
+        bool wantsLeia3D = (cur.spatialEngine == SandboxState::Engine_Leia) &&
+                           (cur.spatialMode == SandboxState::Spatial_3DManual ||
+                            cur.spatialMode == SandboxState::Spatial_3DRotate ||
+                            cur.spatialMode == SandboxState::Spatial_8DPreset);
+        if (wantsLeia3D)
+            m_dsp.prepareLeia(48000.0);
+        std::lock_guard<std::mutex> g(m_dspMutex);
+        m_dsp.prepareConvReverb(cur);
+        m_dsp.applyState(cur);
+    }
+}
+
 bool MicFx::processCapture(short *samples, int sampleCount, int channels)
 {
     if (!m_enabled.load(std::memory_order_relaxed)) return false;

@@ -162,6 +162,9 @@ signals:
     // sandbox state and writes a single indented JSON document to
     // the clipboard so the user can paste it into a bug report.
     void copySandboxDebugRequested();
+    // User clicked "Reset all caches" in the Advanced section: clears every
+    // in-memory and on-disk cache across the soundboard (incl. yt-dlp).
+    void resetAllCachesRequested();
     void audioSandboxEnabledChanged(bool);
     void audioMeterVisibleChanged(bool);
     void audioExportEnabledChanged(bool);
@@ -255,6 +258,7 @@ private:
     // in-app real-time log viewer. Intentionally low-key (small, plain
     // text label) - it's an advanced diagnostic, not a primary control.
     QPushButton *m_logViewerBtn = nullptr;
+    QPushButton *m_resetAllCachesBtn = nullptr;
     QCheckBox   *m_sandboxEnabled = nullptr;
     QCheckBox   *m_meterVisible   = nullptr;
     QCheckBox   *m_exportEnabled  = nullptr;

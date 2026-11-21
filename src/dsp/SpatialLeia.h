@@ -37,6 +37,10 @@ public:
 
     void setSampleRate(double sr);
     void reset();
+    // Mark this instance uninitialized so the next ensureInit() reloads SOFA.
+    void invalidate();
+    // Clear the extracted SOFA cache on disk and the memoised path in memory.
+    static bool clearCache();
 
     // Direction: CW-positive azimuth (0 = front, +90 = right ear),
     // elevation in degrees (+ = up).

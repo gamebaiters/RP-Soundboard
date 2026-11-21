@@ -699,6 +699,19 @@ void SoundView::clearPlayback()
 	update();
 }
 
+void SoundView::resetCache()
+{
+	if (m_vis) {
+		m_vis->stopBounded(200);
+		m_vis.reset();
+	}
+	m_liveStream = false;
+	m_networkNotice = false;
+	m_streamProgressive = false;
+	m_active = true;   // force clearPlayback past its fast-path check
+	clearPlayback();
+}
+
 
 //---------------------------------------------------------------
 // Purpose: crop marker feed (see header)

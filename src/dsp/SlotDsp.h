@@ -83,6 +83,10 @@ public:
     // early-return when the requested IR is already loaded.
     void prepareConvReverb(const SandboxState &s);
 
+    // Clear per-instance DSP caches (convolution IRs, Leia SOFA engine) and
+    // streaming state so the next prepare()/ensureInit() reloads cleanly.
+    void resetCaches();
+
     // ---- Tape stop (vinyl brake) transport effect ----
     // Commands fan out to both paths so local and server listeners
     // hear the same brake. GUI thread; processing is post-chain.

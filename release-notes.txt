@@ -1,3 +1,27 @@
+GameBaiters Soundboard v2.4.6
+==============================================================
+
+Fixes the FFmpeg "Filter not found" playback error when loudness normalization
+is enabled on Windows and adds a one-click full cache reset in Advanced
+settings.
+
+Fixes & Reliability
+--------------------
+* FIX - Fixed "Cannot build filter graph. FFmpeg Error: Filter not found"
+  playback failures when EBU R128 loudness normalization is enabled: Windows
+  static FFmpeg now compiles the `loudnorm` audio filter in, and
+  `InputFileFFmpeg::buildFilterGraph` guards optional filters (`loudnorm`,
+  `atempo`) with runtime availability checks and graceful fallback so a
+  missing filter can never break audio playback.
+* NEW - Added a "Reset all caches (incl. yt-dlp)" button in Settings >
+  Advanced to recover immediately from stuck streams, waveforms, or audio
+  states. Stops active/hung playback and yt-dlp child processes, clears
+  yt-dlp disk & in-memory URL caches, stream temp downloads, daily update
+  throttle, waveform analysers, audio format/tooltip probe caches,
+  Convolution Reverb IR cache, Leia 3D HRTF SOFA cache, and stray temporary
+  files without touching buttons, profiles, hotkeys, settings, or accounts.
+
+
 GameBaiters Soundboard v2.4.5
 ==============================================================
 

@@ -1072,3 +1072,91 @@ void StreamResolver::shutdown()
 	// Wipe any scratch file so nothing survives the session.
 	cleanTempDir();
 }
+
+//----------------------------------------------------------------
+StreamResolver::CacheResetStats StreamResolver::resetAllCaches()
+{
+	CacheResetStats st;
+
+	// Abort any stuck YouTube sign-in / import flow (preserves saved session).
+	YouTubeAuth::instance().cancelSignIn();
+
+	// Kill every running or stuck yt-dlp child process cleanly.
+	QSet<QProcess *> toKill;
+	for (auto it = m_inflight.begin(); it != m_inflight.end(); ++it)
+		if (it.key()) toKill.insert(it.key());
+	for (QProcess *p : m_aux)
+		if (p) toKill.insert(p);
+	if (m_updateProc) toKill.insert(m_updateProc);
+	if (m_download)   toKill.insert(m_download);
+
+	m_inflight.clear();
+	m_outBuf.clear();
+	m_aux.clear();
+	m_playlistInflight.clear();
+	m_queuedResolves.clear();
+	m_updateProc = nullptr;
+	m_updating   = false;
+	m_download   = nullptr;
+	m_warmedUp   = false;
+
+	for (QProcess *p : toKill) {
+		p->disconnect();
+		if (p->state() != QProcess::NotRunning) {
+			p->kill();
+			p->waitForFinished(1500);
+			++st.killedProcesses;
+		}
+		dropAuthFile(p);
+		p->deleteLater();
+	}
+
+	// Clear in-memory resolved direct-URL cache.
+	st.urlEntriesCleared = m_cache.size();
+	m_cache.clear();
+
+	// Helper: remove every item inside dir (recreating dir if keepDir).
+	auto wipeDir = [&st](const QString &path, bool keepDir) {
+		QDir d(path);
+		if (!d.exists()) return;
+		const QFileInfoList entries = d.entryInfoList(
+			QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
+		for (const QFileInfo &fi : entries) {
+			bool ok = fi.isDir()
+				? QDir(fi.absoluteFilePath()).removeRecursively()
+				: QFile::remove(fi.absoluteFilePath());
+			if (ok) ++st.diskItemsRemoved;
+		}
+		if (keepDir) QDir().mkpath(path);
+	};
+
+	// 1) Persistent yt-dlp cache dir (player JS / nsig / extractor caches).
+	wipeDir(cacheDir(), true);
+
+	// 2) Stream scratch / temp dir (downloads, exports, cookie copies, temp profiles).
+	wipeDir(workDir(), true);
+
+	// 3) yt-dlp's own default OS cache directories (never touches config files).
+	const QString genericCache = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation);
+	if (!genericCache.isEmpty())
+		wipeDir(genericCache + "/yt-dlp", false);
+#ifdef _WIN32
+	const QString localAppData = qEnvironmentVariable("LOCALAPPDATA");
+	if (!localAppData.isEmpty()) {
+		wipeDir(localAppData + "/yt-dlp/cache", false);
+		wipeDir(localAppData + "/yt-dlp", false);
+	}
+#endif
+
+	// 4) Reset engine auto-update daily throttle so yt-dlp can refresh immediately.
+	{
+		QSettings qs(GbSettings::org(), GbSettings::app());
+		qs.remove("stream/last_engine_update");
+		qs.remove("stream/engine_latest_seen");
+		qs.sync();
+	}
+
+	logInfo("[stream] resetAllCaches: killed=%d proc(s), cleared=%d URL(s), removed=%d disk item(s)",
+	        st.killedProcesses, st.urlEntriesCleared, st.diskItemsRemoved);
+	return st;
+}

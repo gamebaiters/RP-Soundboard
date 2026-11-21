@@ -345,6 +345,14 @@ void SlotDsp::prepareConvReverb(const SandboxState &s) {
     m_cap.convRev.prepare(s.reverbConvPreset, s.reverbConvIrPath);
 }
 
+void SlotDsp::resetCaches() {
+    reset(false);
+    m_play.convRev.invalidateLoaded();
+    m_cap.convRev.invalidateLoaded();
+    m_play.leia.invalidate();
+    m_cap.leia.invalidate();
+}
+
 void SlotDsp::tapeTrigger(float brakeMs) {
     m_play.tape.trigger(brakeMs);
     m_cap.tape.trigger(brakeMs);

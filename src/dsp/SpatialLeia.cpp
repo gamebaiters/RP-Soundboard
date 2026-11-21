@@ -38,15 +38,16 @@ struct ScopedFtzDaz {
 
 namespace {
 
+QMutex  g_sofaCacheMutex;
+QString g_sofaCachedPath;
+
 // The Leia HRTF dataset is shipped inside the plugin as a Qt resource
 // (qtres.qrc, prefix "leia"). libmysofa needs a real file path, so the
 // resource is extracted once to a per-user cache directory. Returns an
 // empty string on failure.
 QString resolveSofaPath()
 {
-    static QMutex mutex;
-    static QString cached;
-    QMutexLocker lock(&mutex);
+    QMutexLocker lock(&g_sofaCacheMutex);
 
     // Custom-SOFA override: user can point the Leia engine at any
     // personalised HRTF dataset via QSettings("GameBaiters","Soundboard")
@@ -64,8 +65,8 @@ QString resolveSofaPath()
             return custom;
     }
 
-    if (!cached.isEmpty())
-        return cached;
+    if (!g_sofaCachedPath.isEmpty() && QFile::exists(g_sofaCachedPath))
+        return g_sofaCachedPath;
 
     QString cacheDir = QStandardPaths::writableLocation(
         QStandardPaths::CacheLocation);
@@ -84,8 +85,8 @@ QString resolveSofaPath()
 
     QFileInfo ti(target);
     if (ti.exists() && ti.size() == res.size()) {
-        cached = target;
-        return cached;
+        g_sofaCachedPath = target;
+        return g_sofaCachedPath;
     }
 
     if (!res.open(QIODevice::ReadOnly)) {
@@ -103,8 +104,8 @@ QString resolveSofaPath()
     out.write(data);
     out.close();
 
-    cached = target;
-    return cached;
+    g_sofaCachedPath = target;
+    return g_sofaCachedPath;
 }
 
 inline float clampf(float v, float lo, float hi) {
@@ -256,6 +257,31 @@ void SpatialLeia::reset()
     m_outValid = false;
     m_dryPos   = 0;
     m_engage   = 0.0f;
+}
+
+void SpatialLeia::invalidate()
+{
+    m_ready.store(false, std::memory_order_release);
+    m_fs = 0.0;
+    reset();
+}
+
+bool SpatialLeia::clearCache()
+{
+    QMutexLocker lock(&g_sofaCacheMutex);
+    g_sofaCachedPath.clear();
+    bool removed = false;
+    QString cacheDir = QStandardPaths::writableLocation(
+        QStandardPaths::CacheLocation);
+    if (!cacheDir.isEmpty()) {
+        QDir d(cacheDir + "/leia");
+        if (d.exists() && d.removeRecursively())
+            removed = true;
+    }
+    QDir td(QDir::tempPath() + "/leia");
+    if (td.exists() && td.removeRecursively())
+        removed = true;
+    return removed;
 }
 
 void SpatialLeia::setDirection(float azimuthDeg, float elevationDeg)

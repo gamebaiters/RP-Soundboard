@@ -493,6 +493,37 @@ SettingsWindow::SettingsWindow(QWidget *parent)
     connect(copyDebugBtn, &QPushButton::clicked, this,
             &SettingsWindow::copySandboxDebugRequested);
 
+    // ---- Cache & state maintenance ----
+    logLay->addWidget(subHeader(tr("Maintenance"), this));
+    m_resetAllCachesBtn = new QPushButton(tr("Reset all caches (incl. yt-dlp)"), this);
+    m_resetAllCachesBtn->setStyleSheet(
+        "QPushButton { background-color: #c63131; color: white;"
+        " border: 1px solid #7c1c1c; border-radius: 5px; padding: 4px 12px; }"
+        "QPushButton:hover { background-color: #e04141; }");
+    m_resetAllCachesBtn->setToolTip(tr(
+        "Clears every soundboard cache (yt-dlp engine cache, resolved URLs,\n"
+        "temporary stream files, waveforms, audio probes, reverb IRs, Leia HRTF)\n"
+        "and stops any stuck stream or playback process.\n"
+        "Your buttons, profiles, hotkeys, settings and YouTube account are kept."));
+    {
+        auto *cacheRow = new QHBoxLayout;
+        cacheRow->setContentsMargins(0, 0, 0, 0);
+        cacheRow->setSpacing(6);
+        cacheRow->addWidget(m_resetAllCachesBtn);
+        cacheRow->addWidget(new HelpBubble(tr(
+            "Emergency reset when streaming, waveforms or audio get stuck:\n"
+            "- Stops active/hung playback and yt-dlp processes\n"
+            "- Clears yt-dlp disk cache, temp downloads, resolved URLs & update throttle\n"
+            "- Clears waveform analysers, audio format/tooltip probe caches\n"
+            "- Clears Convolution Reverb IR cache and Leia 3D HRTF SOFA cache\n"
+            "- Removes stray soundboard temporary files\n\n"
+            "Does NOT delete your buttons, profiles, hotkeys, settings or YouTube sign-in."), this));
+        cacheRow->addStretch(1);
+        logLay->addLayout(indented(cacheRow));
+    }
+    connect(m_resetAllCachesBtn, &QPushButton::clicked, this,
+            &SettingsWindow::resetAllCachesRequested);
+
     // ============== Audio sandbox & 3D HRTF section ==============
     // Sandbox master switch + default 3D HRTF engine + custom SOFA
     // dataset picker. Previously these lived in three separate

@@ -157,6 +157,18 @@ public:
 	// plugin unload. Safe to call repeatedly.
 	void shutdown();
 
+	// Full reset of every stream / yt-dlp cache and stuck worker process:
+	// kills running resolves/updates/downloads, clears in-memory URL cache,
+	// wipes yt-dlp's persistent cacheDir() + OS yt-dlp cache + temp workDir(),
+	// cancels any stuck YouTube sign-in browser, and clears the daily engine
+	// update throttle. Preserves user settings and saved YouTube account.
+	struct CacheResetStats {
+		int killedProcesses = 0;
+		int urlEntriesCleared = 0;
+		int diskItemsRemoved = 0;
+	};
+	CacheResetStats resetAllCaches();
+
 	// Async: fetch the flat list of a playlist's entries -> playlistResolved().
 	// On failure emits failed(pageUrl, ...). Never downloads media.
 	void resolvePlaylist(const QString &pageUrl);

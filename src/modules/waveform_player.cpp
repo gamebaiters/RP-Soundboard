@@ -563,6 +563,19 @@ void WaveformPlayer::clearPlayback() {
     m_cropEnd   = -1.0;
 }
 
+void WaveformPlayer::resetCache() {
+    m_wave->resetCache();
+    m_timeLabel->setText("0:00 / 0:00");
+    m_totalLen = 0.0;
+    m_cropStart = 0.0;
+    m_cropEnd   = -1.0;
+    setPlaying(false);
+    setReplayReady(false);
+    setStreamMode(false);
+    setLiveStream(false);
+    setFilename(QString());
+}
+
 void WaveformPlayer::setPlaying(bool on) {
     m_playing = on;
     if (on) {

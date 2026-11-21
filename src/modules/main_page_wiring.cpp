@@ -19,14 +19,19 @@
 #include "export_progress_dialog.h"
 #include "vinyl_popup.h"
 #include "stream_resolver.h"
+#include "audio_probe.h"
+#include "file_metadata.h"
 #include "channel_sandbox_dialog.h"   // SandboxModules (global stage mask)
 
 #include "../ConfigModel.h"
 #include "../samples.h"
+#include "../inputfile.h"
 #include "../SoundInfo.h"
 #include "../MicFx.h"
 #include "../TsToolbarButton.h"
 #include "../dsp/SlotDsp.h"
+#include "../dsp/ConvolutionReverb.h"
+#include "../dsp/SpatialLeia.h"
 #include "../config_qt.h"
 #include "../main.h"
 #include "../AudioUtils.h"
@@ -58,6 +63,8 @@
 #include <QTimer>
 #include <QCheckBox>
 #include <QHash>
+#include <QDir>
+#include <QStandardPaths>
 #include <QSet>
 #include <QVector>
 #include <QListWidget>
@@ -1137,6 +1144,111 @@ void connectSettings(MainPage *page, ConfigModel *model, Sampler *sampler) {
         QApplication::clipboard()->setText(
             QString::fromUtf8(QJsonDocument(root)
                 .toJson(QJsonDocument::Indented)));
+    });
+    QObject::connect(w, &SettingsWindow::resetAllCachesRequested, [w, page, sampler]{
+        auto choice = QMessageBox::question(w,
+            QObject::tr("Reset all caches"),
+            QObject::tr("Reset every soundboard cache (including yt-dlp, resolved URLs, "
+                        "temporary stream files, waveforms, audio probes, reverb IRs, "
+                        "and 3D HRTF cache) and stop any active or stuck playback?\n\n"
+                        "Your buttons, profiles, hotkeys, settings, presets, theme, "
+                        "and YouTube account will NOT be deleted."),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (choice != QMessageBox::Yes) return;
+
+        // 1) Abort any hung network reads & stop all active playback slots cleanly.
+        if (sampler) {
+            InputFileNet::setShutdownAbort(true);
+            sampler->stopPlayback(-1);
+            InputFileNet::setShutdownAbort(false);
+        }
+
+        // 2) Cancel pending stream resolves, close open playlist panels, clear wiring state.
+        for (auto it = s_slotResolveCtx.begin(); it != s_slotResolveCtx.end(); ++it)
+            if (it.value()) it.value()->deleteLater();
+        s_slotResolveCtx.clear();
+        for (auto it = s_slotPlaylistPanel.begin(); it != s_slotPlaylistPanel.end(); ++it)
+            if (it.value()) it.value()->close();
+        s_slotPlaylistPanel.clear();
+        s_slotPlaylistUrl.clear();
+        s_slotPlaylistTitle.clear();
+        s_slotPendingUrl.clear();
+        s_slotStreamLoading.clear();
+        s_slotStreamUrl.clear();
+        s_slotStreamTitle.clear();
+        s_slotStreamLive.clear();
+        s_slotLoadWantedPlay.clear();
+        s_slotOpenRetryDone.clear();
+        s_slotNetRetryMs.clear();
+        s_streamLastSavedFile.clear();
+        s_pendingAssignFile.clear();
+        s_pendingAssignTitle.clear();
+        s_pendingHardClear.clear();
+        s_lastPlayedCtx.clear();
+        s_slotToBtnIdx.clear();
+
+        // 3) Reset every channel's stream loading state + waveform visualizer cache.
+        for (int i = 0; i < page->channels().size(); ++i) {
+            auto *ch = page->channels().at(i);
+            ch->setStreamLoading(false);
+            ch->setPlaylistAvailable(false);
+            ch->setExportIsDownload(false);
+            ch->restoreName();
+            if (ch->waveform()) ch->waveform()->resetCache();
+        }
+
+        // 4) Reset StreamResolver (kills stuck yt-dlp, wipes URL cache, disk cache, temp dir, update throttle).
+        const StreamResolver::CacheResetStats streamStats = StreamResolver::instance().resetAllCaches();
+
+        // 5) Reset audio probe & file metadata tooltip caches.
+        const int probeCleared = AudioProbe::clearCache();
+        const int metaCleared  = FileMetadata::clearCache();
+
+        // 6) Reset DSP caches (ConvolutionReverb IR cache, Leia SOFA cache, Sampler & MicFx instances).
+        const int irCleared   = ConvolutionReverb::clearIrCache();
+        const bool leiaCleared = SpatialLeia::clearCache();
+        if (sampler) sampler->resetDspCaches();
+        MicFx::instance().resetDspCaches();
+
+        // 7) Clean stray soundboard temporary files in OS temp dir (config_io / updater leftovers).
+        int tempCleaned = 0;
+        {
+            QString tmpBase = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+            if (tmpBase.isEmpty()) tmpBase = QDir::tempPath();
+            QDir td(tmpBase);
+            const QStringList filters = {
+                QStringLiteral("rpsb_io_*.ini"),
+                QStringLiteral("rpsb_update_helper.*"),
+                QStringLiteral("rp_soundboard_fx_*.ts3_plugin")
+            };
+            const QFileInfoList files = td.entryInfoList(filters, QDir::Files);
+            for (const QFileInfo &fi : files) {
+                if (QFile::remove(fi.absoluteFilePath()))
+                    ++tempCleaned;
+            }
+        }
+
+        logInfo("[cache] Full cache reset complete: yt-dlp(proc=%d url=%d disk=%d), "
+                "probe=%d, metadata=%d, convIR=%d, leia=%d, temp=%d",
+                streamStats.killedProcesses, streamStats.urlEntriesCleared,
+                streamStats.diskItemsRemoved, probeCleared, metaCleared,
+                irCleared, leiaCleared ? 1 : 0, tempCleaned);
+
+        QMessageBox::information(w,
+            QObject::tr("Caches reset"),
+            QObject::tr("All soundboard caches have been cleared:\n"
+                        "- Stream / yt-dlp: %1 process(es) stopped, %2 URL(s) cleared, %3 disk item(s) removed\n"
+                        "- Waveforms, audio probes (%4) & metadata (%5) cleared\n"
+                        "- DSP reverb IR (%6) & 3D HRTF caches reset\n"
+                        "- Temporary files removed: %7\n\n"
+                        "Your buttons, profiles, hotkeys and settings were kept.")
+                .arg(streamStats.killedProcesses)
+                .arg(streamStats.urlEntriesCleared)
+                .arg(streamStats.diskItemsRemoved)
+                .arg(probeCleared)
+                .arg(metaCleared)
+                .arg(irCleared)
+                .arg(tempCleaned));
     });
     QObject::connect(w, &SettingsWindow::activeProfileChanged, [model, page, sampler](int idx){
         // Flush every channel's sandbox state to persistence BEFORE the

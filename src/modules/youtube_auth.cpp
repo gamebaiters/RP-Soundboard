@@ -436,7 +436,7 @@ QString YouTubeAuth::storeDir()
 {
 	QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
 	if (base.isEmpty()) base = QDir::homePath();
-	const QString dir = base + "/GameBaiters/" + GbSettings::app();
+	const QString dir = base + QLatin1Char('/') + GbSettings::org() + QLatin1Char('/') + GbSettings::app();
 	QDir().mkpath(dir);
 	return dir;
 }

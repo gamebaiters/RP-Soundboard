@@ -261,6 +261,47 @@ void ChannelSandboxDialog::showEvent(QShowEvent *e)
     QDialog::showEvent(e);
 }
 
+void ChannelSandboxDialog::setEmbedded(bool on)
+{
+    if (m_closeBtn) m_closeBtn->setVisible(!on);
+    if (on) {
+        setMinimumSize(0, 0);
+        if (layout()) layout()->setContentsMargins(8, 6, 8, 6);
+        if (m_spatialScroll) {
+            m_spatialScroll->setMinimumWidth(220);
+            m_spatialScroll->setFixedHeight(370);
+        }
+        // Keep pipeline stage labels readable at narrow window widths (e.g.
+        // 900x600) by wrapping PipelineWidget in a thin horizontal scroll area.
+        if (m_pipeline && m_dspGroup && !m_pipeline->property("embeddedWrapped").toBool()) {
+            if (auto *lay = qobject_cast<QVBoxLayout *>(m_dspGroup->layout())) {
+                const int idx = lay->indexOf(m_pipeline);
+                if (idx >= 0) {
+                    lay->removeWidget(m_pipeline);
+                    auto *pipeScroll = new QScrollArea(m_dspGroup);
+                    pipeScroll->setObjectName(QStringLiteral("sandboxPipeScroll"));
+                    pipeScroll->setWidgetResizable(true);
+                    pipeScroll->setFrameShape(QFrame::NoFrame);
+                    pipeScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+                    pipeScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+                    pipeScroll->setFixedHeight(m_pipeline->maximumHeight() + 14);
+                    pipeScroll->setStyleSheet(QStringLiteral("QScrollArea { background: transparent; border: none; }"));
+                    m_pipeline->setMinimumWidth(1480);
+                    m_pipeline->setProperty("embeddedWrapped", true);
+                    pipeScroll->setWidget(m_pipeline);
+                    lay->insertWidget(idx, pipeScroll);
+                }
+            }
+        }
+    } else {
+        setMinimumSize(640, 460);
+        if (m_spatialScroll) {
+            m_spatialScroll->setMinimumWidth(320);
+            m_spatialScroll->setFixedHeight(480);
+        }
+    }
+}
+
 void ChannelSandboxDialog::syncModulesMenu()
 {
     const quint32 m = SandboxModules::mask();

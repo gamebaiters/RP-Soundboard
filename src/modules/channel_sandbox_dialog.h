@@ -63,6 +63,11 @@ public:
 
     void setAllControlsEnabled(bool on);
 
+    // Embedded-page mode (used by standalone LIVE's left-sidebar Audio Sandbox
+    // category): hides the modal Close button and relaxes the dialog minimum size
+    // so the whole editor lives natively inside a tab/stack without a popup.
+    void setEmbedded(bool on);
+
     // Re-sync accordion panels + pipeline blocks with the global
     // per-stage kill switch (SlotDsp::globalStageMask) and the micMode
     // curated subset. Called on every show so Settings changes apply

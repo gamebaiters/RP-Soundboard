@@ -16,6 +16,9 @@
 
 #include <QString>
 
+#ifndef GB_SETTINGS_ORG
+#define GB_SETTINGS_ORG GameBaiters
+#endif
 #ifndef GB_SETTINGS_APP
 #define GB_SETTINGS_APP Soundboard
 #endif
@@ -25,7 +28,7 @@
 
 namespace GbSettings {
 
-inline QString org() { return QStringLiteral("GameBaiters"); }
+inline QString org() { return QString::fromLatin1(GB_SETTINGS_STR(GB_SETTINGS_ORG)); }
 inline QString app() { return QString::fromLatin1(GB_SETTINGS_STR(GB_SETTINGS_APP)); }
 
 } // namespace GbSettings

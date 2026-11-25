@@ -425,6 +425,15 @@ void StreamResolver::invalidate(const QString &pageUrl)
 }
 
 //----------------------------------------------------------------
+// Keys (videoKey) whose next resolve must use the strict YouTube client set.
+static QSet<QString> s_strictClientKeys;
+
+void StreamResolver::requestStrictClient(const QString &pageUrl)
+{
+	s_strictClientKeys.insert(videoKey(pageUrl));
+}
+
+//----------------------------------------------------------------
 void StreamResolver::resolve(const QString &pageUrl)
 {
 	const QString url = pageUrl.trimmed();
@@ -490,6 +499,15 @@ void StreamResolver::startProcess(const QString &pageUrl, bool withAuth)
 	     << "--no-write-playlist-metafiles"
 	     // One line of JSON with exactly the fields we need; url respects -f.
 	     << "--print" << "%(.{title,duration,is_live,url,http_headers})j";
+	// YouTube client choice (ignored by every other extractor). yt-dlp's default
+	// prefers tv_samsung (TVHTML5) URLs, which googlevideo answers with 403 to
+	// libavformat (they need a browser-grade TLS stack). VISIONOS URLs open fine.
+	// After a 403 on open, the retry asks for visionos only.
+	const bool strict = s_strictClientKeys.contains(videoKey(pageUrl));
+	args << "--extractor-args"
+	     << (strict ? "youtube:player_client=visionos"
+	                : "youtube:player_client=default,-tv_samsung");
+	if (strict) logInfo("[stream] strict YouTube client (visionos) for the retry");
 	// With the account, KEEP warnings: "cookies are no longer valid" is how
 	// yt-dlp tells us the saved session died (see noteAuthOutcome).
 	const bool authed = withAuth && applyAuth(proc, args);
@@ -549,6 +567,7 @@ void StreamResolver::startProcess(const QString &pageUrl, bool withAuth)
 			        s.isLive ? ", LIVE" : "",
 			        pageUrl.toUtf8().constData());
 			extremeLog("[stream] direct url: %s", s.directUrl.toUtf8().constData());
+			s_strictClientKeys.remove(videoKey(pageUrl));
 			emit resolved(pageUrl, s);
 		});
 
@@ -671,6 +690,7 @@ void StreamResolver::finishProcess(QProcess *proc, const QString &pageUrl)
 		        s.isLive ? ", LIVE" : "",
 		        pageUrl.toUtf8().constData());
 		extremeLog("[stream] direct url: %s", s.directUrl.toUtf8().constData());
+		s_strictClientKeys.remove(videoKey(pageUrl));
 		emit resolved(pageUrl, s);
 		return;
 	}
@@ -693,6 +713,7 @@ void StreamResolver::finishProcess(QProcess *proc, const QString &pageUrl)
 		return;
 	}
 	if (withAuth) noteAuthOutcome(errText, authErr);
+	s_strictClientKeys.remove(videoKey(pageUrl));
 
 	// Surface the extractor's own reason (private / deleted video, age gate,
 	// geo block, ...) instead of a blind "couldn't load" - or, for a sign-in

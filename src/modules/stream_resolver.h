@@ -70,6 +70,12 @@ public:
 	// through the stale cache would just fail again.
 	void invalidate(const QString &pageUrl);
 
+	// Next resolve of pageUrl (and its sign-in retry) asks yt-dlp for the
+	// restrictive YouTube client set (player_client=visionos only). Used once
+	// after FFmpeg got 403 Forbidden on the direct URL. Cleared when that
+	// resolve succeeds or fails.
+	void requestStrictClient(const QString &pageUrl);
+
 	// Stable cache key: the YouTube video id (watch?v=, youtu.be/, /shorts/,
 	// /embed/) or, for anything else, the whole URL.
 	static QString videoKey(const QString &pageUrl);

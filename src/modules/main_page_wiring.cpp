@@ -3238,6 +3238,11 @@ void connectChannels(MainPage *page, ConfigModel *model, Sampler *sampler) {
                 // A slot that fails its retry too falls through to the toast.
                 if (!pageUrl.isEmpty() && !s_slotOpenRetryDone.contains(slot)) {
                     s_slotOpenRetryDone.insert(slot);
+                    // Opening the direct URL failed (typically 403 Forbidden
+                    // from a client whose URLs need browser TLS): the single
+                    // retry re-resolves with the strict YouTube client set.
+                    logInfo("[stream] open failed, retrying once with a fresh resolve (strict client)");
+                    StreamResolver::instance().requestStrictClient(pageUrl);
                     const bool wantPlay = s_slotLoadWantedPlay.value(slot, false);
                     QTimer::singleShot(0, page,
                         [page, sampler, model, slot, pageUrl, wantPlay]{

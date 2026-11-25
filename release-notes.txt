@@ -1,3 +1,20 @@
+GameBaiters Soundboard v2.5.1
+==============================================================
+
+Fixes YouTube streaming failing with "Cannot open file. FFmpeg Error: Server
+returned 403 Forbidden (access denied)".
+
+Fixes & Reliability
+--------------------
+* FIX - YouTube links resolved to a TV-client (TVHTML5) stream URL, which
+  YouTube's servers reject with 403 when opened by FFmpeg. The stream engine
+  now skips that client and uses one whose URLs open correctly.
+* FIX - If opening a resolved stream still fails, the single automatic retry
+  now re-resolves the link with the strictest YouTube client setting instead
+  of repeating the same request.
+* NOTE - Version 2.5.1 replaces the withdrawn 2.5.0 build.
+
+
 GameBaiters Soundboard v2.4.6
 ==============================================================
 
